@@ -21,7 +21,7 @@ from risk import RiskController
 
 # ML增强信号引擎
 try:
-    from ml_signal_v4 import MLSignalEngineV4
+    from ml_signal_v4 import MLSignalEngineV4, SubSignalBuilder
     ML_AVAILABLE = True
 except ImportError:
     ML_AVAILABLE = False
@@ -498,8 +498,25 @@ with tab6:
         > 不靠人拍脑袋判断"这个指标有道理" — **让数据说话**。
         """)
 
+        # LightGBM toggle
+        lgbm_col1, lgbm_col2 = st.columns([1, 3])
+        with lgbm_col1:
+            use_lgbm = st.checkbox("🧠 LightGBM增强", value=True,
+                                   help="启用6个独立LightGBM模型预测各主题收益")
+        with lgbm_col2:
+            if use_lgbm:
+                model_dir = Path(__file__).parent / "data" / "models"
+                lgbm_models = list(model_dir.glob("lgbm_*.pkl")) if model_dir.exists() else []
+                if lgbm_models:
+                    st.caption(f"✅ {len(lgbm_models)}个模型已加载 — 非线性条件概率替代线性IC加权")
+                else:
+                    st.caption("⚠️ 模型未训练 — 运行 `python3 ml_lightgbm_trainer.py` 生成")
+
         if st.button("🧠 生成ML信号", type="primary", key="ml_generate"):
-            with st.spinner("正在计算279个特征 + 构建6个子信号..."):
+            spinner_text = "正在计算279个特征 + 构建6个子信号"
+            if use_lgbm:
+                spinner_text += " + LightGBM预测..."
+            with st.spinner(spinner_text):
                 try:
                     import ccxt
                     exchange = ccxt.binance({"enableRateLimit": True, "timeout": 15000})
@@ -509,7 +526,7 @@ with tab6:
                     df_btc = pd.DataFrame(ohlcv_btc, columns=["date","open","high","low","close","volume"])
 
                     engine = MLSignalEngineV4()
-                    signal = engine.generate_signal(df_btc, "BTC/USDT")
+                    signal = engine.generate_signal(df_btc, "BTC/USDT", use_lgbm=use_lgbm)
 
                     # ── 信号总览卡 ──
                     action_color = {
@@ -528,7 +545,9 @@ with tab6:
                         </div>
                         """, unsafe_allow_html=True)
                     with col2:
-                        st.metric("IC加权信号", f"{signal.signal_ic:+.2f}",
+                        primary_label = "LGBM信号" if (use_lgbm and signal.lgbm_available) else "IC加权信号"
+                        primary_val = signal.signal_lgbm if (use_lgbm and signal.lgbm_available) else signal.signal_ic
+                        st.metric(primary_label, f"{primary_val:+.2f}",
                                  delta=f"等权:{signal.signal_equal:+.2f} / 波动:{signal.signal_vol:+.2f}")
                     with col3:
                         st.metric("共识度", f"{signal.consensus:.0%}",
@@ -536,6 +555,23 @@ with tab6:
                     with col4:
                         st.metric("建议仓位", f"{signal.suggested_size_pct:.0f}%",
                                  delta=f"风险调整:{signal.risk_adjusted:+.2f}")
+
+                    # ── LGBM vs 线性对比 ──
+                    if use_lgbm and signal.lgbm_available:
+                        st.divider()
+                        st.subheader("🧠 LightGBM vs 线性IC加权 对比")
+                        compare_col1, compare_col2, compare_col3, compare_col4 = st.columns(4)
+                        with compare_col1:
+                            st.metric("线性IC加权", f"{signal.signal_ic:+.3f}")
+                        with compare_col2:
+                            st.metric("LightGBM", f"{signal.signal_lgbm:+.3f}",
+                                     delta=f"{(signal.signal_lgbm - signal.signal_ic):+.3f}")
+                        with compare_col3:
+                            agreement = "✅ 一致" if np.sign(signal.signal_ic) == np.sign(signal.signal_lgbm) else "⚠️ 分歧"
+                            st.metric("一致性", agreement)
+                        with compare_col4:
+                            lgbm_action = "BUY" if signal.signal_lgbm > 0.5 else "SELL" if signal.signal_lgbm < -0.5 else "HOLD"
+                            st.metric("LGBM操作", lgbm_action)
 
                     st.divider()
 
@@ -609,19 +645,35 @@ with tab6:
                                     continue
 
                             df_m = pd.DataFrame(data, columns=["date","open","high","low","close","volume"])
-                            sig_m = engine.generate_signal(df_m, sym)
+                            sig_m = engine.generate_signal(df_m, sym, use_lgbm=use_lgbm)
 
                             action_icon = {"BUY": "🟢", "SELL": "🔴", "HOLD": "⚪"}.get(sig_m.action, "⚪")
+                            primary_sig = sig_m.signal_lgbm if (use_lgbm and sig_m.lgbm_available) else sig_m.signal_ic
                             st.markdown(f"""
                             <div style="background:#1a1d24; border-radius:10px; padding:10px; margin:4px 0;">
                                 <strong>{action_icon} {sym}</strong> —
-                                IC信号: {sig_m.signal_ic:+.2f} |
+                                信号: {primary_sig:+.2f} |
                                 共识: {sig_m.consensus:.0%} |
                                 操作: <span style="color:{action_color}; font-weight:bold;">{sig_m.action}</span>
+                                {" 🧠" if sig_m.lgbm_available else ""}
                             </div>
                             """, unsafe_allow_html=True)
 
                     st.success(f"✅ 已计算 {signal.feature_count} 个特征 | {signal.n_sub_signals_active}/6 子信号活跃")
+
+                    # ── LightGBM 特征重要性 ──
+                    if signal.lgbm_available and hasattr(engine, '_lgbm_feature_importance'):
+                        with st.expander("🔬 LightGBM 特征重要性 Top-5 (各主题)", expanded=False):
+                            imp_data = engine._lgbm_feature_importance
+                            for theme_id, feats in imp_data.items():
+                                if not feats:
+                                    continue
+                                theme_name = SubSignalBuilder.THEME_CONFIG.get(theme_id, {}).get("name", theme_id)
+                                st.caption(f"**{theme_name}**")
+                                feat_df = pd.DataFrame(feats[:5])
+                                feat_df.columns = ["特征", "重要性"]
+                                feat_df["特征"] = feat_df["特征"].apply(lambda x: f"`{x}`")
+                                st.dataframe(feat_df, hide_index=True, use_container_width=True)
 
                 except ImportError:
                     st.error("❌ ccxt 未安装 — 无法获取实时数据")
@@ -650,14 +702,16 @@ with tab6:
 
             ### 与旧版区别
 
-            | 维度 | 旧版 (signals.py) | 新版 (ml_signal_v4.py) |
-            |------|:---:|:---:|
-            | 特征数 | 15个人工指标 | 279个数据驱动特征 |
-            | 筛选方式 | 人类判断 | FDR + ICIR 统计检验 |
-            | 信号构建 | 固定阈值打分 | 子信号×IC加权组合 |
-            | 子信号 | 无 | 6个独立主题 |
-            | 可解释性 | 黑盒总分 | 每个子信号独立可查 |
-            | 非线性 | 无 | LightGBM-ready |
+            | 维度 | 旧版 (signals.py) | 新版 v4.0 (IC加权) | v4.0 + LightGBM |
+            |------|:---:|:---:|:---:|
+            | 特征数 | 15个人工指标 | 279个数据驱动特征 | 279个数据驱动特征 |
+            | 筛选方式 | 人类判断 | FDR + ICIR 统计检验 | FDR + ICIR 统计检验 |
+            | 信号构建 | 固定阈值打分 | 子信号×IC加权组合 | **LightGBM非线性预测** |
+            | 子信号 | 无 | 6个独立主题 | 6个独立LightGBM模型 |
+            | 可解释性 | 黑盒总分 | 每个子信号独立可查 | 特征重要性 + 预测收益 |
+            | 非线性 | 无 | LightGBM-ready | ✅ 已实现 |
+            | ICIR | 未测量 | 0.3-4.77 | OOS 0.11-0.71 |
+            | 过拟合防护 | 无 | PurgedKFold | PurgedKFold + EarlyStopping |
             """)
 
 # ═══════════════════════════════════════════

@@ -1,0 +1,206 @@
+{
+  "trend": [
+    {
+      "feature": "mom_20d",
+      "importance": 131.0
+    },
+    {
+      "feature": "mom_5d",
+      "importance": 110.0
+    },
+    {
+      "feature": "mom_10d",
+      "importance": 109.0
+    },
+    {
+      "feature": "mom_2d",
+      "importance": 92.0
+    },
+    {
+      "feature": "mom_14d",
+      "importance": 69.0
+    },
+    {
+      "feature": "mom_7d",
+      "importance": 66.0
+    },
+    {
+      "feature": "mom_1d",
+      "importance": 59.0
+    },
+    {
+      "feature": "mom_3d",
+      "importance": 39.0
+    }
+  ],
+  "reversal": [
+    {
+      "feature": "ma_dist_100_200",
+      "importance": 138.0
+    },
+    {
+      "feature": "ma_dist_50_100",
+      "importance": 108.0
+    },
+    {
+      "feature": "ma_dist_5_20",
+      "importance": 92.0
+    },
+    {
+      "feature": "ma_dist_10_20",
+      "importance": 79.0
+    },
+    {
+      "feature": "ma_dist_20_100",
+      "importance": 71.0
+    },
+    {
+      "feature": "ma_dist_20_60",
+      "importance": 69.0
+    },
+    {
+      "feature": "ma_dist_5_60",
+      "importance": 50.0
+    },
+    {
+      "feature": "ma_dist_10_50",
+      "importance": 38.0
+    }
+  ],
+  "volume": [
+    {
+      "feature": "vol_ratio_20_100",
+      "importance": 121.0
+    },
+    {
+      "feature": "obv_mom_20d",
+      "importance": 103.0
+    },
+    {
+      "feature": "obv_mom_10d",
+      "importance": 100.0
+    },
+    {
+      "feature": "vol_ratio_10_50",
+      "importance": 98.0
+    },
+    {
+      "feature": "vol_trend_10d",
+      "importance": 88.0
+    },
+    {
+      "feature": "obv_mom_5d",
+      "importance": 88.0
+    },
+    {
+      "feature": "vol_ratio_5_20",
+      "importance": 85.0
+    },
+    {
+      "feature": "vol_ratio_5_50",
+      "importance": 48.0
+    }
+  ],
+  "vol_breakout": [
+    {
+      "feature": "vol_60d",
+      "importance": 131.0
+    },
+    {
+      "feature": "vol_120d",
+      "importance": 118.0
+    },
+    {
+      "feature": "vol_30d",
+      "importance": 102.0
+    },
+    {
+      "feature": "vol_90d",
+      "importance": 77.0
+    },
+    {
+      "feature": "vol_10d",
+      "importance": 77.0
+    },
+    {
+      "feature": "vol_14d",
+      "importance": 75.0
+    },
+    {
+      "feature": "vol_20d",
+      "importance": 74.0
+    },
+    {
+      "feature": "vol_5d",
+      "importance": 60.0
+    }
+  ],
+  "tail_risk": [
+    {
+      "feature": "skew_120d",
+      "importance": 141.0
+    },
+    {
+      "feature": "kurt_60d",
+      "importance": 117.0
+    },
+    {
+      "feature": "skew_60d",
+      "importance": 95.0
+    },
+    {
+      "feature": "kurt_120d",
+      "importance": 90.0
+    },
+    {
+      "feature": "kurt_20d",
+      "importance": 82.0
+    },
+    {
+      "feature": "skew_20d",
+      "importance": 64.0
+    },
+    {
+      "feature": "tail_events_60d_2s",
+      "importance": 27.0
+    },
+    {
+      "feature": "tail_events_20d_2s",
+      "importance": 12.0
+    }
+  ],
+  "momentum_enhanced": [
+    {
+      "feature": "autocorr_3d",
+      "importance": 91.0
+    },
+    {
+      "feature": "autocorr_1d",
+      "importance": 83.0
+    },
+    {
+      "feature": "autocorr_10d",
+      "importance": 76.0
+    },
+    {
+      "feature": "autocorr_20d",
+      "importance": 69.0
+    },
+    {
+      "feature": "hurst_120d",
+      "importance": 69.0
+    },
+    {
+      "feature": "hurst_60d",
+      "importance": 69.0
+    },
+    {
+      "feature": "hurst_20d",
+      "importance": 66.0
+    },
+    {
+      "feature": "autocorr_5d",
+      "importance": 56.0
+    }
+  ]
+}

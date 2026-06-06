@@ -66,6 +66,10 @@ class EnsembleSignal:
     feature_count: int
     n_sub_signals_active: int
 
+    # LightGBM (Phase 5, 有默认值)
+    signal_lgbm: float = 0.0
+    lgbm_available: bool = False
+
 
 class SubSignalBuilder:
     """按主题分组特征 → 构建独立子信号"""
@@ -222,7 +226,7 @@ class SubSignalBuilder:
 
 
 class MLSignalEngineV4:
-    """ML增强信号引擎 v4.0 — Streamlit集成版"""
+    """ML增强信号引擎 v4.0 — Streamlit集成版 + LightGBM增强 (Phase 5)"""
 
     def __init__(self):
         self.factory = FeatureFactoryV4()
@@ -236,6 +240,12 @@ class MLSignalEngineV4:
             "trend": [], "reversal": [], "volume": [],
             "vol_breakout": [], "tail_risk": [], "momentum_enhanced": [],
         }
+
+        # LightGBM 预测器 (Phase 5)
+        self._lgbm_predictor = None
+        self._lgbm_loaded = False
+        self._lgbm_feature_importance: Dict[str, list] = {}
+        self._try_load_lgbm()
 
     def _load_results(self) -> List[FeatureTestResultV4]:
         """加载回测结果"""
@@ -276,15 +286,43 @@ class MLSignalEngineV4:
                 continue
         return results
 
-    def generate_signal(self, df: pd.DataFrame, symbol: str = "BTC/USDT") -> EnsembleSignal:
-        """端到端信号生成"""
+    def _try_load_lgbm(self):
+        """尝试加载LightGBM模型"""
+        try:
+            from ml_lightgbm_trainer import LightGBMSignalPredictor
+            self._lgbm_predictor = LightGBMSignalPredictor()
+            self._lgbm_loaded = self._lgbm_predictor.load_models()
+
+            # 加载特征重要性
+            imp_path = Path(__file__).parent / "data" / "lgbm_feature_importance.json"
+            if imp_path.exists():
+                import json
+                with open(imp_path) as f:
+                    self._lgbm_feature_importance = json.load(f)
+        except Exception:
+            self._lgbm_loaded = False
+
+    def generate_signal(self, df: pd.DataFrame, symbol: str = "BTC/USDT",
+                        use_lgbm: bool = False) -> EnsembleSignal:
+        """端到端信号生成
+
+        Args:
+            df: OHLCV DataFrame
+            symbol: 交易对
+            use_lgbm: 启用LightGBM增强 (Phase 5)
+        """
         price = float(df["close"].values[-1])
 
         # Step 1: 计算最新特征值
         latest_features = self.factory.compute_latest(df)
 
-        # Step 2: 构建子信号
+        # Step 2: 构建子信号 (线性IC加权)
         sub_signals = self.builder.build(latest_features)
+
+        # Step 2b: LightGBM预测 (Phase 5)
+        lgbm_preds = {}
+        if use_lgbm and self._lgbm_loaded and self._lgbm_predictor:
+            lgbm_preds = self._lgbm_predictor.predict(latest_features)
 
         # Step 3: 三种组合
         active_sigs = [s for s in sub_signals if s.confidence > 0.1]
@@ -334,6 +372,27 @@ class MLSignalEngineV4:
         else:
             signal_vol = 0.0
 
+        # LightGBM 组合 (Phase 5)
+        signal_lgbm = 0.0
+        if use_lgbm and lgbm_preds:
+            # 将LGBM预测收益转为信号: 用tanh归一化到[-1, 1]
+            lgbm_values = []
+            lgbm_weights = []
+            for s in sub_signals:
+                pred = lgbm_preds.get(s.id, 0.0)
+                # 预测收益 → 信号值 (用tanh做非线性映射, 0.05=5%收益→≈+1)
+                sig_val = float(np.tanh(pred * 20))  # scale factor 20
+                ic_w = ic_weights.get(s.id, 0.5)
+                lgbm_values.append(sig_val)
+                lgbm_weights.append(ic_w)
+
+                # 更新子信号reasoning
+                icon = "📈" if pred > 0.005 else "📉" if pred < -0.005 else "➡️"
+                s.reasoning += f" [LGBM: {pred:+.4f} {icon}]"
+
+            if lgbm_weights and sum(lgbm_weights) > 0:
+                signal_lgbm = sum(v * w for v, w in zip(lgbm_values, lgbm_weights)) / sum(lgbm_weights)
+
         # Step 4: 共识度
         long_count = sum(1 for s in sub_signals if s.direction == "LONG")
         short_count = sum(1 for s in sub_signals if s.direction == "SHORT")
@@ -341,8 +400,8 @@ class MLSignalEngineV4:
         consensus = max(long_count, short_count) / max(1, len(sub_signals))
         confidence = consensus * (active_count / max(1, len(sub_signals)))
 
-        # Step 5: 确定操作
-        final_signal = signal_ic  # 主力用IC加权
+        # Step 5: 确定操作 (LGBM模式优先使用LGBM信号)
+        final_signal = signal_lgbm if (use_lgbm and self._lgbm_loaded) else signal_ic
         if final_signal > 0.5 and active_count >= 2:
             action = "BUY"
             size_pct = min(20, 5 + abs(final_signal) * 5)
@@ -366,6 +425,7 @@ class MLSignalEngineV4:
             signal_equal=round(signal_equal, 3),
             signal_ic=round(signal_ic, 3),
             signal_vol=round(signal_vol, 3),
+            signal_lgbm=round(signal_lgbm, 3),
             consensus=round(consensus, 2),
             confidence=round(confidence, 2),
             action=action,
@@ -373,6 +433,7 @@ class MLSignalEngineV4:
             risk_adjusted=round(risk_adj, 3),
             feature_count=len(latest_features),
             n_sub_signals_active=active_count,
+            lgbm_available=self._lgbm_loaded,
         )
 
     def explain(self, signal: EnsembleSignal) -> str:
@@ -382,6 +443,14 @@ class MLSignalEngineV4:
             f"",
             f"**价格**: ¥{signal.price:,.2f} | **操作**: **{signal.action}**",
             f"**特征数**: {signal.feature_count} | **活跃子信号**: {signal.n_sub_signals_active}/6",
+        ]
+
+        if signal.lgbm_available:
+            lines.append(f"**LightGBM**: ✅ 已加载6个模型 | LGBM信号: {signal.signal_lgbm:+.3f}")
+        else:
+            lines.append(f"**LightGBM**: ⚠️ 模型未加载 (运行 ml_lightgbm_trainer.py 训练)")
+
+        lines += [
             f"",
             f"### 📊 组合信号",
             f"",
@@ -394,6 +463,10 @@ class MLSignalEngineV4:
                           ("波动率加权", signal.signal_vol)]:
             icon = "🟢" if val > 0.3 else "🔴" if val < -0.3 else "⚪"
             lines.append(f"| {name} | {val:+.3f} | {icon} |")
+
+        if signal.lgbm_available:
+            icon = "🟢" if signal.signal_lgbm > 0.3 else "🔴" if signal.signal_lgbm < -0.3 else "⚪"
+            lines.append(f"| 🧠 LightGBM | {signal.signal_lgbm:+.3f} | {icon} |")
 
         lines.append(f"")
         lines.append(f"**共识度**: {signal.confidence:.0%} | **置信度**: {signal.confidence:.0%}")
@@ -417,7 +490,7 @@ class MLSignalEngineV4:
 # ── CLI ──
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 ML Signal Engine v4.0")
+    print("🤖 ML Signal Engine v4.0 + LightGBM")
     print("=" * 60)
 
     try:
@@ -427,8 +500,29 @@ if __name__ == "__main__":
         df = pd.DataFrame(ohlcv, columns=["date", "open", "high", "low", "close", "volume"])
 
         engine = MLSignalEngineV4()
-        signal = engine.generate_signal(df)
-        print(engine.explain(signal))
+
+        # 线性模式
+        signal_linear = engine.generate_signal(df, use_lgbm=False)
+        print(engine.explain(signal_linear))
+
+        # LGBM模式
+        if engine._lgbm_loaded:
+            signal_lgbm = engine.generate_signal(df, use_lgbm=True)
+            print(f"\n🧠 LightGBM增强信号: {signal_lgbm.signal_lgbm:+.3f} → {signal_lgbm.action}")
+
+            print(f"\n📊 线性 vs LightGBM 对比:")
+            print(f"  线性IC加权: {signal_linear.signal_ic:+.3f} → {signal_linear.action}")
+            print(f"  LightGBM:   {signal_lgbm.signal_lgbm:+.3f} → {signal_lgbm.action}")
+
+            # LGBM预测值详情
+            from ml_lightgbm_trainer import LightGBMSignalPredictor
+            latest = engine.factory.compute_latest(df)
+            preds = engine._lgbm_predictor.predict(latest)
+            print(f"\n🔮 LGBM各主题预测收益:")
+            for theme_id, pred in sorted(preds.items(), key=lambda x: abs(x[1]), reverse=True):
+                name = SubSignalBuilder.THEME_CONFIG.get(theme_id, {}).get("name", theme_id)
+                icon = "🟢" if pred > 0.005 else "🔴" if pred < -0.005 else "⚪"
+                print(f"  {icon} {name:10s}: {pred:+.4f}")
 
         if engine.backtest_results:
             passed = sum(1 for r in engine.backtest_results if r.passed)
