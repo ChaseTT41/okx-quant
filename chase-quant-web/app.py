@@ -493,7 +493,7 @@ with tab6:
         st.warning("⚠️ ML信号引擎暂不可用 — 请先运行 feature_backtest_v4.py 生成回测结果")
     else:
         st.markdown("""
-        > 🧬 **西蒙斯风格**: 279个特征 → FDR筛选28个 → 6个独立子信号 → 组合决策
+        > 🧬 **西蒙斯风格**: 286个特征 → FDR筛选28+ → 7个独立子信号 → 组合决策
         >
         > 不靠人拍脑袋判断"这个指标有道理" — **让数据说话**。
         """)
@@ -585,7 +585,7 @@ with tab6:
                     st.divider()
 
                     # ── 子信号雷达图 ──
-                    st.subheader("🎯 6个子信号")
+                    st.subheader("🎯 7个子信号")
                     sig_data = []
                     for s in signal.sub_signals:
                         sig_data.append({
@@ -723,6 +723,71 @@ with tab6:
             | ICIR | 未测量 | 0.3-4.77 | OOS 0.11-0.71 |
             | 过拟合防护 | 无 | PurgedKFold | PurgedKFold + EarlyStopping |
             """)
+
+        # ── Phase 7: 策略回测结果 ──
+        bt_results_path = Path(__file__).parent / "data" / "backtest_results" / "latest.json"
+        if bt_results_path.exists():
+            with st.expander("📈 策略回测 — ML策略历史表现", expanded=True):
+                try:
+                    import json
+                    with open(bt_results_path) as f:
+                        bt = json.load(f)
+
+                    # 关键指标卡
+                    bt_col1, bt_col2, bt_col3, bt_col4, bt_col5 = st.columns(5)
+                    with bt_col1:
+                        bt_total = bt.get("total_return_pct", 0)
+                        st.metric("总收益", f"{bt_total:+.1f}%",
+                                 delta=f"vs 买入持有 {bt.get('benchmark_return_pct', 0):+.1f}%")
+                    with bt_col2:
+                        st.metric("Sharpe比率", f"{bt.get('sharpe_ratio', 0):.2f}")
+                    with bt_col3:
+                        st.metric("最大回撤", f"-{bt.get('max_drawdown_pct', 0):.2f}%")
+                    with bt_col4:
+                        st.metric("胜率", f"{bt.get('win_rate_pct', 0):.0f}%")
+                    with bt_col5:
+                        st.metric("盈亏比", f"{bt.get('profit_factor', 0):.1f}")
+
+                    bt_col6, bt_col7, bt_col8 = st.columns(3)
+                    with bt_col6:
+                        st.metric("交易笔数", bt.get("n_trades", 0))
+                    with bt_col7:
+                        st.metric("超额收益 α", f"{bt.get('alpha_pct', 0):+.1f}%")
+                    with bt_col8:
+                        st.metric("信号准确率", f"{bt.get('signal_accuracy', 0):.0%}")
+
+                    # 权益曲线
+                    equity_html = Path(__file__).parent / "data" / "backtest_results" / "equity_curve.html"
+                    if equity_html.exists():
+                        with open(equity_html) as f:
+                            st.components.v1.html(f.read(), height=520)
+
+                    # 交易明细
+                    trades = bt.get("trades", [])
+                    if trades:
+                        st.caption(f"📜 最近交易明细 ({len(trades)}笔)")
+                        trade_rows = []
+                        for t in trades[-8:]:
+                            trade_rows.append({
+                                "入场": t.get("entry_time", "")[:10],
+                                "出场": t.get("exit_time", "")[:10],
+                                "持有时长": f"{t.get('holding_days', 0)}天",
+                                "盈亏": f"{t.get('pnl_pct', 0):+.2f}%",
+                                "出场原因": t.get("exit_reason", ""),
+                            })
+                        st.dataframe(
+                            pd.DataFrame(trade_rows),
+                            hide_index=True, use_container_width=True,
+                            column_config={
+                                "盈亏": st.column_config.NumberColumn(format="%.2f%%"),
+                            }
+                        )
+
+                except Exception as e:
+                    st.caption(f"⚠️ 回测结果加载失败: {e}")
+        else:
+            with st.expander("📈 策略回测 — ML策略历史表现", expanded=False):
+                st.caption("💡 运行 `python3 strategy_backtest.py` 生成回测结果")
 
 # ═══════════════════════════════════════════
 # 底部
