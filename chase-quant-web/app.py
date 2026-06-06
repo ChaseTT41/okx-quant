@@ -498,22 +498,31 @@ with tab6:
         > 不靠人拍脑袋判断"这个指标有道理" — **让数据说话**。
         """)
 
-        # LightGBM toggle
+        # LightGBM toggle + Phase 6 cross-market status
         lgbm_col1, lgbm_col2 = st.columns([1, 3])
         with lgbm_col1:
             use_lgbm = st.checkbox("🧠 LightGBM增强", value=True,
-                                   help="启用6个独立LightGBM模型预测各主题收益")
+                                   help="启用独立LightGBM模型预测各主题收益")
         with lgbm_col2:
+            status_lines = []
             if use_lgbm:
                 model_dir = Path(__file__).parent / "data" / "models"
                 lgbm_models = list(model_dir.glob("lgbm_*.pkl")) if model_dir.exists() else []
                 if lgbm_models:
-                    st.caption(f"✅ {len(lgbm_models)}个模型已加载 — 非线性条件概率替代线性IC加权")
+                    status_lines.append(f"✅ {len(lgbm_models)}个模型已加载")
                 else:
-                    st.caption("⚠️ 模型未训练 — 运行 `python3 ml_lightgbm_trainer.py` 生成")
+                    status_lines.append("⚠️ 模型未训练 — 运行 `python3 ml_lightgbm_trainer.py` 生成")
+            # Phase 6: 跨市场状态
+            from ml_cross_market import CrossMarketFetcher
+            cm = CrossMarketFetcher(cache_ttl_hours=4)
+            if cm.available_count() > 0:
+                status_lines.append(f"🌐 跨市场数据: {cm.available_count()}/9源可用")
+            else:
+                status_lines.append("🌐 跨市场: 缓存未建立, 首次信号生成时拉取")
+            st.caption(" | ".join(status_lines))
 
         if st.button("🧠 生成ML信号", type="primary", key="ml_generate"):
-            spinner_text = "正在计算279个特征 + 构建6个子信号"
+            spinner_text = "正在计算286个特征 + 构建7个子信号 + 跨市场数据"
             if use_lgbm:
                 spinner_text += " + LightGBM预测..."
             with st.spinner(spinner_text):
@@ -659,7 +668,7 @@ with tab6:
                             </div>
                             """, unsafe_allow_html=True)
 
-                    st.success(f"✅ 已计算 {signal.feature_count} 个特征 | {signal.n_sub_signals_active}/6 子信号活跃")
+                    st.success(f"✅ 已计算 {signal.feature_count} 个特征 | {signal.n_sub_signals_active}/7 子信号活跃")
 
                     # ── LightGBM 特征重要性 ──
                     if signal.lgbm_available and hasattr(engine, '_lgbm_feature_importance'):
@@ -683,16 +692,16 @@ with tab6:
         # 架构说明
         with st.expander("📐 架构说明"):
             st.markdown("""
-            ### 🧬 ML信号引擎 v4.0 架构
+            ### 🧬 ML信号引擎 v4.0 + 🌐跨市场 架构
 
             ```
-            279个特征 (16个类别)
+            286个特征 (17个类别 A-T)
               ↓ FDR校正 + ICIR筛选
             28个存活特征 (p_fdr < 0.1 & |ICIR| > 0.3)
               ↓ 按主题分配 (每个特征只属于一个子信号)
-            ┌──────────┬──────────┬──────────┬──────────┬──────────┬──────────┐
-            │ 趋势跟踪  │ 均值回归  │ 量价确认  │ 波动突破  │ 尾部风险  │ 动量增强  │
-            │ (动量+均线)│(振荡+形态)│(量+OBV) │(波动率)  │(偏度峰度)│(排名+Hurst)│
+            ┌──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┐
+            │ 趋势跟踪  │ 均值回归  │ 量价确认  │ 波动突破  │ 尾部风险  │ 动量增强  │ 跨市场联动│
+            │ (动量+均线)│(振荡+形态)│(量+OBV) │(波动率)  │(偏度峰度)│(排名+Hurst)│(T类+资金费率)│
             └──────────┴──────────┴──────────┴──────────┴──────────┴──────────┘
               ↓ IC加权平均
             最终信号 [-3, +3]
@@ -702,12 +711,13 @@ with tab6:
 
             ### 与旧版区别
 
-            | 维度 | 旧版 (signals.py) | 新版 v4.0 (IC加权) | v4.0 + LightGBM |
+            | 维度 | 旧版 (signals.py) | 新版 v4.0 (IC加权) | v4.0 + LightGBM + 🌐 |
             |------|:---:|:---:|:---:|
-            | 特征数 | 15个人工指标 | 279个数据驱动特征 | 279个数据驱动特征 |
+            | 特征数 | 15个人工指标 | 279个数据驱动特征 | 286个 (含46跨市场) |
             | 筛选方式 | 人类判断 | FDR + ICIR 统计检验 | FDR + ICIR 统计检验 |
             | 信号构建 | 固定阈值打分 | 子信号×IC加权组合 | **LightGBM非线性预测** |
-            | 子信号 | 无 | 6个独立主题 | 6个独立LightGBM模型 |
+            | 子信号 | 无 | 6个独立主题 | 7个独立LightGBM模型 |
+            | 跨市场 | ❌ | ❌ | ✅ ETH/SPY/DXY/VIX/F&G |
             | 可解释性 | 黑盒总分 | 每个子信号独立可查 | 特征重要性 + 预测收益 |
             | 非线性 | 无 | LightGBM-ready | ✅ 已实现 |
             | ICIR | 未测量 | 0.3-4.77 | OOS 0.11-0.71 |

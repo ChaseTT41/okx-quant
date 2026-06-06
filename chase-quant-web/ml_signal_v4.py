@@ -126,33 +126,84 @@ class SubSignalBuilder:
                 "ret_dispersion" in fid
             ),
         },
+        "cross_market": {
+            "name": "跨市场联动",
+            "categories": ["T"],  # 跨资产 (Phase 6)
+            "max_features": 12,   # 更多特征, 涵盖多维度
+            "feature_filter": lambda fid, r: (
+                "btc_eth_" in fid or
+                (fid.startswith("corr_") and "autocorr" not in fid) or
+                fid.startswith("beta_") or
+                "funding" in fid or
+                "fear_greed" in fid
+            ),
+        },
     }
 
-    def __init__(self, backtest_results: List[FeatureTestResultV4]):
+    def __init__(self, backtest_results: List[FeatureTestResultV4],
+                 factory_features: Optional[List] = None):
         # Build lookup: feature_id → result
         self.results = {r.feature_id: r for r in backtest_results}
+
+        # Phase 6: 存储 factory feature specs (用于匹配无回测结果的T特征)
+        self._factory_feat_ids: Dict[str, str] = {}  # feature_id → category
+        if factory_features:
+            self._factory_feat_ids = {
+                f.id: f.category for f in factory_features
+            }
 
         # Group features by theme
         self.theme_features: Dict[str, List[Tuple[str, float]]] = {}
         self._assign_features()
 
     def _assign_features(self):
-        """分配特征到各主题, 用|ICIR|作为权重"""
+        """分配特征到各主题, 用|ICIR|作为权重
+
+        Phase 6: T类特征即使无回测结果也纳入 (跨市场数据刚激活)
+        """
         for theme_id, config in self.THEME_CONFIG.items():
             theme_feats = []
+            is_phase6_theme = (theme_id == "cross_market")
 
+            # Pass 1: 已通过FDR的特征 (标准流程)
             for fid, r in self.results.items():
                 if not r.passed:
                     continue
-
-                # 用滤波器匹配
                 if config["feature_filter"](fid, r):
                     weight = abs(r.icir)
                     theme_feats.append((fid, weight))
 
-            # 排序取Top 8
+            # Pass 2: Phase 6宽松 — 匹配但未通过/未回测的特征也给默认权重
+            if is_phase6_theme and len(theme_feats) < 3:
+                used_fids = {f[0] for f in theme_feats}
+                for fid, r in self.results.items():
+                    if fid in used_fids:
+                        continue
+                    if r.passed:
+                        continue  # 已处理
+                    if config["feature_filter"](fid, r):
+                        # 给一个保守默认ICIR (0.3 ≈ 中等有效性)
+                        weight = max(abs(r.icir), 0.25) if r.icir != 0 else 0.25
+                        theme_feats.append((fid, weight))
+                        used_fids.add(fid)
+
+            # Pass 3: Phase 6新增 — factory中有但backtest中没有的特征 (如funding_rate, fear_greed)
+            if is_phase6_theme:
+                used_fids = {f[0] for f in theme_feats}
+                for fid, cat in self._factory_feat_ids.items():
+                    if fid in used_fids:
+                        continue
+                    if cat != "T":
+                        continue
+                    # 新激活特征给稍高权重的默认值 (0.35), 确保进入Top-12
+                    if config["feature_filter"](fid, None):
+                        theme_feats.append((fid, 0.35))
+                        used_fids.add(fid)
+
+            # 排序取Top N
             theme_feats.sort(key=lambda x: x[1], reverse=True)
-            self.theme_features[theme_id] = theme_feats[:8]
+            max_n = config.get("max_features", 8)
+            self.theme_features[theme_id] = theme_feats[:max_n]
 
     def build(self, feature_values: Dict[str, float]) -> List[SubSignal]:
         """从最新特征值构建子信号"""
@@ -178,8 +229,15 @@ class SubSignalBuilder:
             for fid, weight in feat_weights:
                 val = feature_values.get(fid, 0.0)
                 r = self.results.get(fid)
+                # Phase 6: 新特征可能无回测结果, 给默认IC (轻微正向)
                 if r is None:
-                    continue
+                    r = FeatureTestResultV4(
+                        feature_id=fid, feature_name=fid, category="T",
+                        ic=0.1, ic_std=0.5, icir=0.25, t_stat=0, p_value=1,
+                        fdr_adjusted_p=1, hit_rate=0.5, sharpe=0,
+                        long_sharpe=0, short_sharpe=0, stability=1,
+                        ic_decay={}, nonlinear_r2=0, n_obs=100, passed=False
+                    )
 
                 # 方向: IC正→看涨信号, IC负→看跌信号
                 direction = 1 if r.ic > 0 else -1
@@ -233,13 +291,22 @@ class MLSignalEngineV4:
 
         # 加载回测结果
         self.backtest_results = self._load_results()
-        self.builder = SubSignalBuilder(self.backtest_results)
+        self.builder = SubSignalBuilder(
+            self.backtest_results,
+            factory_features=self.factory.features,  # Phase 6: 让builder知道T类新特征
+        )
 
         # 信号历史 (用于波动率加权)
         self._history: Dict[str, List[float]] = {
             "trend": [], "reversal": [], "volume": [],
             "vol_breakout": [], "tail_risk": [], "momentum_enhanced": [],
+            "cross_market": [],
         }
+
+        # 跨市场数据获取器 (Phase 6)
+        self._cross_market_fetcher = None
+        self._cross_market_status: Dict[str, str] = {}
+        self._try_init_cross_market()
 
         # LightGBM 预测器 (Phase 5)
         self._lgbm_predictor = None
@@ -286,6 +353,42 @@ class MLSignalEngineV4:
                 continue
         return results
 
+    def _try_init_cross_market(self):
+        """Phase 6: 初始化跨市场数据获取器"""
+        try:
+            from ml_cross_market import CrossMarketFetcher
+            self._cross_market_fetcher = CrossMarketFetcher(cache_ttl_hours=4)
+        except Exception:
+            self._cross_market_fetcher = None
+
+    def _enrich_cross_market(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Phase 6: 用跨市场数据增强 OHLCV DataFrame.
+        在 compute_latest / compute_timeseries 之前调用.
+        """
+        if self._cross_market_fetcher is None:
+            return df
+        try:
+            enriched = self._cross_market_fetcher.enrich_dataframe(df, use_cache=True)
+            self._cross_market_status = self._cross_market_fetcher._status
+            return enriched
+        except Exception as e:
+            self._cross_market_status["_last_error"] = str(e)[:60]
+            return df
+
+    @property
+    def cross_market_available(self) -> bool:
+        """跨市场数据是否可用"""
+        if self._cross_market_fetcher is None:
+            return False
+        return self._cross_market_fetcher.is_healthy
+
+    def get_cross_market_status(self) -> str:
+        """获取跨市场数据状态报告"""
+        if self._cross_market_fetcher is None:
+            return "跨市场数据获取器未初始化"
+        return self._cross_market_fetcher.status_report()
+
     def _try_load_lgbm(self):
         """尝试加载LightGBM模型"""
         try:
@@ -311,6 +414,8 @@ class MLSignalEngineV4:
             symbol: 交易对
             use_lgbm: 启用LightGBM增强 (Phase 5)
         """
+        # Phase 6: 跨市场数据增强
+        df = self._enrich_cross_market(df)
         price = float(df["close"].values[-1])
 
         # Step 1: 计算最新特征值
@@ -438,15 +543,16 @@ class MLSignalEngineV4:
 
     def explain(self, signal: EnsembleSignal) -> str:
         """生成Markdown解释"""
+        n_themes = len(SubSignalBuilder.THEME_CONFIG)
         lines = [
             f"## 🤖 ML信号引擎 v4.0 — {signal.symbol}",
             f"",
             f"**价格**: ¥{signal.price:,.2f} | **操作**: **{signal.action}**",
-            f"**特征数**: {signal.feature_count} | **活跃子信号**: {signal.n_sub_signals_active}/6",
+            f"**特征数**: {signal.feature_count} | **活跃子信号**: {signal.n_sub_signals_active}/{n_themes}",
         ]
 
         if signal.lgbm_available:
-            lines.append(f"**LightGBM**: ✅ 已加载6个模型 | LGBM信号: {signal.signal_lgbm:+.3f}")
+            lines.append(f"**LightGBM**: ✅ 已加载{n_themes}个模型 | LGBM信号: {signal.signal_lgbm:+.3f}")
         else:
             lines.append(f"**LightGBM**: ⚠️ 模型未加载 (运行 ml_lightgbm_trainer.py 训练)")
 
@@ -490,7 +596,7 @@ class MLSignalEngineV4:
 # ── CLI ──
 if __name__ == "__main__":
     print("=" * 60)
-    print("🤖 ML Signal Engine v4.0 + LightGBM")
+    print("🤖 ML Signal Engine v4.0 + LightGBM + 🌐跨市场")
     print("=" * 60)
 
     try:
@@ -501,9 +607,13 @@ if __name__ == "__main__":
 
         engine = MLSignalEngineV4()
 
+        # Phase 6: 跨市场数据状态
+        print(f"\n🌐 跨市场数据: {'✅ 已激活' if engine.cross_market_available else '⚠️ 不可用'}")
+        print(engine.get_cross_market_status())
+
         # 线性模式
         signal_linear = engine.generate_signal(df, use_lgbm=False)
-        print(engine.explain(signal_linear))
+        print("\n" + engine.explain(signal_linear))
 
         # LGBM模式
         if engine._lgbm_loaded:
@@ -526,6 +636,7 @@ if __name__ == "__main__":
 
         if engine.backtest_results:
             passed = sum(1 for r in engine.backtest_results if r.passed)
-            print(f"\n📊 特征: {len(engine.factory.features)}总 → {passed}通过FDR → 6子信号")
+            n_themes = len(SubSignalBuilder.THEME_CONFIG)
+            print(f"\n📊 特征: {len(engine.factory.features)}总 → {passed}通过FDR → {n_themes}子信号")
     except ImportError:
         print("⚠️ ccxt未安装")

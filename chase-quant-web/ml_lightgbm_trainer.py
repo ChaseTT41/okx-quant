@@ -35,6 +35,7 @@ from sklearn.model_selection import KFold
 
 from feature_ts import FeatureFactoryV4
 from ml_signal_v4 import SubSignalBuilder
+from ml_cross_market import CrossMarketFetcher  # Phase 6
 
 
 @dataclass
@@ -89,10 +90,26 @@ class LightGBMTrainer:
 
     # ── 主流程 ──
     def train_all(self, df: pd.DataFrame, verbose: bool = True) -> Dict[str, ThemeTrainResult]:
-        """端到端训练6个主题模型"""
+        """端到端训练7个主题模型 (含跨市场)"""
+        # Phase 6: 跨市场数据增强
+        if verbose:
+            print("🌐 Phase 6: 拉取跨市场数据...")
+        try:
+            fetcher = CrossMarketFetcher(cache_ttl_hours=4)
+            df = fetcher.enrich_dataframe(df, use_cache=True)
+            if verbose:
+                print(f"   数据源: {fetcher.available_count()}/9 可用")
+                if not fetcher.is_healthy:
+                    print("   ⚠️ 核心数据不可用, 跨市场特征可能为占位值")
+        except Exception as e:
+            if verbose:
+                print(f"   ⚠️ 跨市场数据获取失败: {e}")
+
         # Step 1: 计算特征时序
         if verbose:
-            print("🧬 Step 1: 计算279个特征时序...")
+            n_themes = len(SubSignalBuilder.THEME_CONFIG)
+            n_feats = len(self.factory.features)
+            print(f"🧬 Step 1: 计算{n_feats}个特征时序...")
         ts_df = self.factory.compute_timeseries(df, verbose=verbose)
 
         # Step 2: 计算前向收益
@@ -109,7 +126,7 @@ class LightGBMTrainer:
 
         # Step 3: 按主题分组特征
         if verbose:
-            print("\n📂 Step 3: 按6个主题分组特征...")
+            print(f"\n📂 Step 3: 按{n_themes}个主题分组特征...")
         theme_features = self._get_theme_feature_cols(ts_df)
 
         # Step 4: 逐主题训练

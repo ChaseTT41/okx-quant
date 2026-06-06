@@ -674,6 +674,59 @@ def build_cross_asset_real_features() -> List[FeatureSpec]:
                     if cn in df.columns else np.full(len(df), 1.0),
             ))
 
+    # ── 资金费率特征 (Phase 6) ──
+    # 资金费率反映市场情绪: 正值=多付空(过热), 极端负值=空付多(恐慌)
+    for prefix, label in [("btc", "BTC"), ("eth", "ETH")]:
+        col_name = f"{prefix}_funding_rate"
+        feats.append(FeatureSpec(
+            id=f"{prefix}_funding_rate",
+            name=f"{label}资金费率",
+            category="T",
+            description=f"{label}永续合约日均资金费率",
+            compute_ts=lambda df, cn=col_name:
+                df[cn].values if cn in df.columns else np.full(len(df), 0.0),
+        ))
+        # 资金费率变化 (一阶差分)
+        feats.append(FeatureSpec(
+            id=f"{prefix}_funding_chg_3d",
+            name=f"{label}资金费变动 3日",
+            category="T",
+            description=f"{label}资金费率3日变动",
+            compute_ts=lambda df, cn=col_name:
+                pd.Series(df[cn].values).diff(3).fillna(0).values
+                if cn in df.columns else np.full(len(df), 0.0),
+        ))
+
+    # ── 恐慌贪婪指数特征 (Phase 6) ──
+    feats.append(FeatureSpec(
+        id="fear_greed",
+        name="恐慌贪婪指数",
+        category="T",
+        description="Crypto Fear & Greed Index (0=恐慌, 100=贪婪)",
+        compute_ts=lambda df:
+            df["fear_greed"].values if "fear_greed" in df.columns
+            else np.full(len(df), 50.0),
+    ))
+    feats.append(FeatureSpec(
+        id="fear_greed_chg_5d",
+        name="恐慌贪婪变动 5日",
+        category="T",
+        description="Fear & Greed Index 5日变动",
+        compute_ts=lambda df:
+            pd.Series(df["fear_greed"].values).diff(5).fillna(0).values
+            if "fear_greed" in df.columns else np.full(len(df), 0.0),
+    ))
+    feats.append(FeatureSpec(
+        id="fear_greed_extreme",
+        name="极度恐慌信号",
+        category="T",
+        description="F&G ≤ 25 → 1 (恐慌), F&G ≥ 75 → -1 (贪婪)",
+        compute_ts=lambda df:
+            np.where(df["fear_greed"].values <= 25, 1.0,
+                     np.where(df["fear_greed"].values >= 75, -1.0, 0.0))
+            if "fear_greed" in df.columns else np.full(len(df), 0.0),
+    ))
+
     return feats
 
 def _cross_corr_from_dual(df: pd.DataFrame, window: int) -> np.ndarray:
