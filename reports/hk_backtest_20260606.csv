@@ -1,0 +1,4 @@
+strategy,start_value,end_value,total_return_pct,sharpe,max_drawdown_pct,total_trades,won_trades,lost_trades,win_rate_pct
+MomentumRotationLong,1000000,1369201.9953506785,36.92,1.26,23.6,44,21,20,51.2
+MomentumRotationLongShort,1000000,787726.8078339342,-21.23,-0.92,43.68,176,63,103,38.0
+🏛️ 盈富基金(持有),1000000,1483798.8826815642,48.38,0.86,-20.1,1,1,0,100.0

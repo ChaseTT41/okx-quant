@@ -1,0 +1,167 @@
+[
+  {
+    "symbol": "LUNA",
+    "name": "Terra Luna",
+    "peak_price": 119.18,
+    "peak_date": "2022-04-05",
+    "demise_date": "2022-05-13",
+    "demise_reason": "UST脱锚死亡螺旋",
+    "loss_from_peak": 99.99,
+    "market_cap_peak": 40.0,
+    "category": "l1"
+  },
+  {
+    "symbol": "UST",
+    "name": "Terra USD",
+    "peak_price": 1.0,
+    "peak_date": "2022-04-01",
+    "demise_date": "2022-05-13",
+    "demise_reason": "算法稳定币脱锚归零",
+    "loss_from_peak": 99.99,
+    "market_cap_peak": 18.0,
+    "category": "stablecoin"
+  },
+  {
+    "symbol": "FTT",
+    "name": "FTX Token",
+    "peak_price": 84.18,
+    "peak_date": "2021-09-09",
+    "demise_date": "2022-11-11",
+    "demise_reason": "FTX交易所破产",
+    "loss_from_peak": 98.5,
+    "market_cap_peak": 9.5,
+    "category": "exchange"
+  },
+  {
+    "symbol": "CEL",
+    "name": "Celsius",
+    "peak_price": 8.05,
+    "peak_date": "2021-06-03",
+    "demise_date": "2022-07-13",
+    "demise_reason": "Celsius借贷平台破产",
+    "loss_from_peak": 97.0,
+    "market_cap_peak": 3.5,
+    "category": "defi"
+  },
+  {
+    "symbol": "VGX",
+    "name": "Voyager Token",
+    "peak_price": 12.48,
+    "peak_date": "2021-01-01",
+    "demise_date": "2022-07-06",
+    "demise_reason": "Voyager破产",
+    "loss_from_peak": 98.0,
+    "market_cap_peak": 1.5,
+    "category": "defi"
+  },
+  {
+    "symbol": "THETA",
+    "name": "Terra Virtua",
+    "peak_price": 0.0,
+    "peak_date": "2021-01-01",
+    "demise_date": "2022-05-13",
+    "demise_reason": "Terra生态连带崩盘",
+    "loss_from_peak": 99.99,
+    "market_cap_peak": 2.0,
+    "category": "defi"
+  },
+  {
+    "symbol": "ANC",
+    "name": "Anchor Protocol",
+    "peak_price": 5.8,
+    "peak_date": "2022-03-01",
+    "demise_date": "2022-05-13",
+    "demise_reason": "Anchor 20% APY崩塌",
+    "loss_from_peak": 99.99,
+    "market_cap_peak": 3.0,
+    "category": "defi"
+  },
+  {
+    "symbol": "MIR",
+    "name": "Mirror Protocol",
+    "peak_price": 12.58,
+    "peak_date": "2021-04-10",
+    "demise_date": "2022-05-13",
+    "demise_reason": "Terra生态崩盘",
+    "loss_from_peak": 99.5,
+    "market_cap_peak": 2.0,
+    "category": "defi"
+  },
+  {
+    "symbol": "SRM",
+    "name": "Serum",
+    "peak_price": 12.5,
+    "peak_date": "2021-09-11",
+    "demise_date": "2022-11-11",
+    "demise_reason": "FTX/SBF关联崩盘",
+    "loss_from_peak": 99.0,
+    "market_cap_peak": 1.5,
+    "category": "defi"
+  },
+  {
+    "symbol": "3AC",
+    "name": "Three Arrows Capital",
+    "peak_price": 0.0,
+    "peak_date": "2021-01-01",
+    "demise_date": "2022-07-01",
+    "demise_reason": "三箭资本爆仓",
+    "loss_from_peak": 100.0,
+    "market_cap_peak": 10.0,
+    "category": "other"
+  },
+  {
+    "symbol": "ICP",
+    "name": "Internet Computer",
+    "peak_price": 750.73,
+    "peak_date": "2021-05-10",
+    "demise_date": "2021-12-31",
+    "demise_reason": "天亡级项目, 上线即巅峰",
+    "loss_from_peak": 99.0,
+    "market_cap_peak": 15.0,
+    "category": "l1"
+  },
+  {
+    "symbol": "FIL",
+    "name": "Filecoin",
+    "peak_price": 236.36,
+    "peak_date": "2021-04-01",
+    "demise_date": "2022-12-31",
+    "demise_reason": "存储叙事崩塌",
+    "loss_from_peak": 98.0,
+    "market_cap_peak": 12.0,
+    "category": "other"
+  },
+  {
+    "symbol": "EOS",
+    "name": "EOS",
+    "peak_price": 22.89,
+    "peak_date": "2018-04-29",
+    "demise_date": "2022-12-31",
+    "demise_reason": "Block.one套现跑路",
+    "loss_from_peak": 96.0,
+    "market_cap_peak": 17.0,
+    "category": "l1"
+  },
+  {
+    "symbol": "ZEC",
+    "name": "Zcash",
+    "peak_price": 876.31,
+    "peak_date": "2018-01-07",
+    "demise_date": "2022-12-31",
+    "demise_reason": "隐私币叙事消亡",
+    "loss_from_peak": 97.0,
+    "market_cap_peak": 3.0,
+    "category": "other"
+  },
+  {
+    "symbol": "DASH",
+    "name": "Dash",
+    "peak_price": 1493.59,
+    "peak_date": "2017-12-20",
+    "demise_date": "2022-12-31",
+    "demise_reason": "支付币叙事消亡",
+    "loss_from_peak": 98.0,
+    "market_cap_peak": 4.0,
+    "category": "other"
+  }
+]

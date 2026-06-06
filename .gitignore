@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual env
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data files (too large)
+*.h5
+*.hdf5
+*.parquet
+
+# Secrets
+.env
+*.key
+*.pem
+credentials.json
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Test outputs
+.pytest_cache/
+hk-stock-quant/

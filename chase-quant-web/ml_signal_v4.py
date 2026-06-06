@@ -1,0 +1,437 @@
+"""
+ML Signal Engine v4.0 — 特征→子信号→组合→Streamlit集成
+========================================================
+Chase量化策略 Phase 3-4:
+  N个独立子信号 × (等权/波动率加权/IC加权) → 最终交易信号
+
+子信号架构 (西蒙斯风格 — 每个独立, 可单独debug):
+  1. 趋势跟踪    — 正动量 + 趋势强度 + 均线方向
+  2. 均值回归    — 超买超卖 + 波动率极端 + 反转形态
+  3. 量价确认    — 放量 + 量价同向 + OBV确认
+  4. 波动率突破  — 波动率锥 + 收敛 + 波动率回归
+  5. 尾部风险    — 偏度/峰度 + 极端事件 + 下行风险
+  6. 动量增强    — 排名分位 + 路径质量 + 动量比
+
+组合方式:
+  - 等权: signal = mean(s1..s6)
+  - IC加权: signal = Σ(s_i × |ICIR_i|) / Σ|ICIR_i|
+  - 波动率加权: signal = Σ(s_i / σ_i) / Σ(1/σ_i)
+"""
+from __future__ import annotations
+import numpy as np
+import pandas as pd
+from typing import List, Dict, Optional, Tuple
+from dataclasses import dataclass, field
+from pathlib import Path
+from datetime import datetime
+
+from feature_ts import FeatureFactoryV4
+from feature_backtest_v4 import FeatureBacktesterV4, FeatureTestResultV4
+
+
+@dataclass
+class SubSignal:
+    """独立子信号"""
+    id: str
+    name: str
+    value: float              # [-3, +3]
+    confidence: float         # 0-1
+    contributing_features: List[str]
+    direction: str            # LONG/SHORT/NEUTRAL
+    reasoning: str
+
+
+@dataclass
+class EnsembleSignal:
+    """组合信号 — 最终输出"""
+    timestamp: str
+    symbol: str
+    price: float
+
+    sub_signals: List[SubSignal]
+
+    # 三种组合
+    signal_equal: float       # 等权
+    signal_ic: float          # IC加权
+    signal_vol: float         # 波动率加权
+
+    consensus: float          # 子信号一致性
+    confidence: float
+
+    action: str               # BUY/SELL/HOLD
+    suggested_size_pct: float
+    risk_adjusted: float
+
+    # 诊断
+    feature_count: int
+    n_sub_signals_active: int
+
+
+class SubSignalBuilder:
+    """按主题分组特征 → 构建独立子信号"""
+
+    THEME_CONFIG = {
+        "trend": {
+            "name": "趋势跟踪",
+            "categories": ["A"],  # 动量
+            "feature_filter": lambda fid, r: (
+                "mom" in fid and "accel" not in fid and "rank" not in fid
+            ) or "sharpe" in fid or "ma_slope" in fid or "trend_strength" in fid,
+        },
+        "reversal": {
+            "name": "均值回归",
+            "categories": ["D", "E", "M", "N"],
+            "feature_filter": lambda fid, r: (
+                "rsi" in fid or "bb_" in fid or "cci" in fid or
+                "ma_dist" in fid or "body_ratio" in fid or
+                "wick" in fid or "near_" in fid or "co_ratio" in fid
+            ),
+        },
+        "volume": {
+            "name": "量价确认",
+            "categories": ["F", "Q", "R"],
+            "feature_filter": lambda fid, r: (
+                "vol_ratio" in fid or "vol_trend" in fid or
+                "obv" in fid or "vol_direction" in fid or
+                "vol_concentration" in fid
+            ),
+        },
+        "vol_breakout": {
+            "name": "波动率突破",
+            "categories": ["B", "O"],
+            "feature_filter": lambda fid, r: (
+                "vol_" in fid or "parkinson" in fid or "gk_vol" in fid or
+                "yz_vol" in fid or "squeeze" in fid or "vol_cone" in fid
+            ),
+        },
+        "tail_risk": {
+            "name": "尾部风险",
+            "categories": ["C"],
+            "feature_filter": lambda fid, r: (
+                "skew" in fid or "kurt" in fid or "tail" in fid or
+                "asymmetry" in fid
+            ),
+        },
+        "momentum_enhanced": {
+            "name": "动量增强",
+            "categories": ["S", "L"],
+            "feature_filter": lambda fid, r: (
+                "mom_rank" in fid or "path_smoothness" in fid or
+                "mom_ratio" in fid or "fractal" in fid or
+                "autocorr" in fid or "hurst" in fid or
+                "ret_dispersion" in fid
+            ),
+        },
+    }
+
+    def __init__(self, backtest_results: List[FeatureTestResultV4]):
+        # Build lookup: feature_id → result
+        self.results = {r.feature_id: r for r in backtest_results}
+
+        # Group features by theme
+        self.theme_features: Dict[str, List[Tuple[str, float]]] = {}
+        self._assign_features()
+
+    def _assign_features(self):
+        """分配特征到各主题, 用|ICIR|作为权重"""
+        for theme_id, config in self.THEME_CONFIG.items():
+            theme_feats = []
+
+            for fid, r in self.results.items():
+                if not r.passed:
+                    continue
+
+                # 用滤波器匹配
+                if config["feature_filter"](fid, r):
+                    weight = abs(r.icir)
+                    theme_feats.append((fid, weight))
+
+            # 排序取Top 8
+            theme_feats.sort(key=lambda x: x[1], reverse=True)
+            self.theme_features[theme_id] = theme_feats[:8]
+
+    def build(self, feature_values: Dict[str, float]) -> List[SubSignal]:
+        """从最新特征值构建子信号"""
+        signals = []
+
+        for theme_id, config in self.THEME_CONFIG.items():
+            feat_weights = self.theme_features.get(theme_id, [])
+
+            if not feat_weights:
+                signals.append(SubSignal(
+                    id=theme_id, name=config["name"],
+                    value=0.0, confidence=0.0,
+                    contributing_features=[],
+                    direction="NEUTRAL",
+                    reasoning=f"{config['name']}: 无有效特征",
+                ))
+                continue
+
+            total_signal = 0.0
+            total_weight = 0.0
+            contributing = []
+
+            for fid, weight in feat_weights:
+                val = feature_values.get(fid, 0.0)
+                r = self.results.get(fid)
+                if r is None:
+                    continue
+
+                # 方向: IC正→看涨信号, IC负→看跌信号
+                direction = 1 if r.ic > 0 else -1
+                weighted_val = val * direction * weight
+
+                total_signal += weighted_val
+                total_weight += weight
+                contributing.append(fid)
+
+            if total_weight > 0:
+                raw_signal = total_signal / total_weight
+                norm_signal = float(np.clip(raw_signal, -3, 3))
+
+                confidence = min(0.9, len(contributing) / 8 * 0.85)
+
+                if norm_signal > 0.3:
+                    direction = "LONG"
+                elif norm_signal < -0.3:
+                    direction = "SHORT"
+                else:
+                    direction = "NEUTRAL"
+
+                top3 = contributing[:3]
+                reasoning = f"{config['name']}: {' | '.join(top3)} → {direction}"
+
+                signals.append(SubSignal(
+                    id=theme_id, name=config["name"],
+                    value=round(norm_signal, 3),
+                    confidence=round(confidence, 3),
+                    contributing_features=contributing,
+                    direction=direction,
+                    reasoning=reasoning,
+                ))
+            else:
+                signals.append(SubSignal(
+                    id=theme_id, name=config["name"],
+                    value=0.0, confidence=0.0,
+                    contributing_features=[],
+                    direction="NEUTRAL",
+                    reasoning=f"{config['name']}: 权重不足",
+                ))
+
+        return signals
+
+
+class MLSignalEngineV4:
+    """ML增强信号引擎 v4.0 — Streamlit集成版"""
+
+    def __init__(self):
+        self.factory = FeatureFactoryV4()
+
+        # 加载回测结果
+        self.backtest_results = self._load_results()
+        self.builder = SubSignalBuilder(self.backtest_results)
+
+        # 信号历史 (用于波动率加权)
+        self._history: Dict[str, List[float]] = {
+            "trend": [], "reversal": [], "volume": [],
+            "vol_breakout": [], "tail_risk": [], "momentum_enhanced": [],
+        }
+
+    def _load_results(self) -> List[FeatureTestResultV4]:
+        """加载回测结果"""
+        cache = Path(__file__).parent / "data" / "feature_backtest_v4.csv"
+        if not cache.exists():
+            # 尝试旧版
+            cache = Path(__file__).parent / "data" / "feature_backtest_results.csv"
+
+        if not cache.exists():
+            return []
+
+        results = []
+        df = pd.read_csv(cache)
+        for _, row in df.iterrows():
+            try:
+                results.append(FeatureTestResultV4(
+                    feature_id=row.get("feature_id", ""),
+                    feature_name=row.get("name", ""),
+                    category=row.get("category", ""),
+                    ic=row.get("ic", 0),
+                    ic_std=0,
+                    icir=row.get("icir", 0),
+                    t_stat=row.get("t_stat", 0),
+                    p_value=row.get("p_value", 1),
+                    fdr_adjusted_p=row.get("fdr_p", 1),
+                    hit_rate=row.get("hit_rate", 0.5),
+                    sharpe=row.get("sharpe", 0),
+                    long_sharpe=0,
+                    short_sharpe=0,
+                    stability=row.get("stability", 1),
+                    ic_decay={5: row.get("ic", 0)},
+                    nonlinear_r2=row.get("nonlinear_r2", 0),
+                    n_obs=row.get("n_obs", 0),
+                    fwd_window=5,
+                    passed=row.get("passed", False),
+                ))
+            except Exception:
+                continue
+        return results
+
+    def generate_signal(self, df: pd.DataFrame, symbol: str = "BTC/USDT") -> EnsembleSignal:
+        """端到端信号生成"""
+        price = float(df["close"].values[-1])
+
+        # Step 1: 计算最新特征值
+        latest_features = self.factory.compute_latest(df)
+
+        # Step 2: 构建子信号
+        sub_signals = self.builder.build(latest_features)
+
+        # Step 3: 三种组合
+        active_sigs = [s for s in sub_signals if s.confidence > 0.1]
+
+        # 等权
+        signal_equal = np.mean([s.value for s in active_sigs]) if active_sigs else 0.0
+
+        # IC加权 (用子信号平均|ICIR|)
+        ic_weights = {}
+        for s in sub_signals:
+            feat_icirs = [
+                abs(self.builder.results.get(fid, FeatureTestResultV4(
+                    feature_id=fid, feature_name="", category="",
+                    ic=0, ic_std=0.1, icir=0.5, t_stat=0, p_value=1,
+                    fdr_adjusted_p=1, hit_rate=0.5, sharpe=0,
+                    long_sharpe=0, short_sharpe=0, stability=1,
+                    ic_decay={}, nonlinear_r2=0, n_obs=0, passed=False
+                )).icir)
+                for fid in s.contributing_features
+            ]
+            ic_weights[s.id] = np.mean(feat_icirs) if feat_icirs else 0.5
+
+        if active_sigs:
+            ic_w_sum = sum(ic_weights.get(s.id, 0.5) * s.value for s in active_sigs)
+            ic_w_total = sum(ic_weights.get(s.id, 0.5) for s in active_sigs)
+            signal_ic = ic_w_sum / (ic_w_total + 1e-9)
+        else:
+            signal_ic = 0.0
+
+        # 波动率加权
+        for s in sub_signals:
+            if s.id in self._history:
+                self._history[s.id].append(s.value)
+                if len(self._history[s.id]) > 100:
+                    self._history[s.id] = self._history[s.id][-100:]
+
+        if active_sigs:
+            vol_w_sum = 0.0
+            vol_w_total = 0.0
+            for s in active_sigs:
+                hist = self._history.get(s.id, [0])
+                vol = np.std(hist[-20:]) + 0.1 if len(hist) > 3 else 0.5
+                w = 1.0 / vol
+                vol_w_sum += s.value * w
+                vol_w_total += w
+            signal_vol = vol_w_sum / (vol_w_total + 1e-9)
+        else:
+            signal_vol = 0.0
+
+        # Step 4: 共识度
+        long_count = sum(1 for s in sub_signals if s.direction == "LONG")
+        short_count = sum(1 for s in sub_signals if s.direction == "SHORT")
+        active_count = long_count + short_count
+        consensus = max(long_count, short_count) / max(1, len(sub_signals))
+        confidence = consensus * (active_count / max(1, len(sub_signals)))
+
+        # Step 5: 确定操作
+        final_signal = signal_ic  # 主力用IC加权
+        if final_signal > 0.5 and active_count >= 2:
+            action = "BUY"
+            size_pct = min(20, 5 + abs(final_signal) * 5)
+        elif final_signal < -0.5 and active_count >= 2:
+            action = "SELL"
+            size_pct = min(20, 5 + abs(final_signal) * 5)
+        else:
+            action = "HOLD"
+            size_pct = 0
+
+        # Step 6: 风险调整
+        from feature_ts import _ret
+        vol_20d = float(np.std(_ret(df["close"].values, 1)[-20:]) * np.sqrt(365))
+        risk_adj = final_signal / (vol_20d + 0.05)
+
+        return EnsembleSignal(
+            timestamp=pd.Timestamp.now().isoformat(),
+            symbol=symbol,
+            price=price,
+            sub_signals=sub_signals,
+            signal_equal=round(signal_equal, 3),
+            signal_ic=round(signal_ic, 3),
+            signal_vol=round(signal_vol, 3),
+            consensus=round(consensus, 2),
+            confidence=round(confidence, 2),
+            action=action,
+            suggested_size_pct=round(size_pct, 1),
+            risk_adjusted=round(risk_adj, 3),
+            feature_count=len(latest_features),
+            n_sub_signals_active=active_count,
+        )
+
+    def explain(self, signal: EnsembleSignal) -> str:
+        """生成Markdown解释"""
+        lines = [
+            f"## 🤖 ML信号引擎 v4.0 — {signal.symbol}",
+            f"",
+            f"**价格**: ¥{signal.price:,.2f} | **操作**: **{signal.action}**",
+            f"**特征数**: {signal.feature_count} | **活跃子信号**: {signal.n_sub_signals_active}/6",
+            f"",
+            f"### 📊 组合信号",
+            f"",
+            f"| 组合方式 | 信号值 | 方向 |",
+            f"|---------|:---:|:---:|",
+        ]
+
+        for name, val in [("等权", signal.signal_equal),
+                          ("IC加权", signal.signal_ic),
+                          ("波动率加权", signal.signal_vol)]:
+            icon = "🟢" if val > 0.3 else "🔴" if val < -0.3 else "⚪"
+            lines.append(f"| {name} | {val:+.3f} | {icon} |")
+
+        lines.append(f"")
+        lines.append(f"**共识度**: {signal.confidence:.0%} | **置信度**: {signal.confidence:.0%}")
+        lines.append(f"**建议仓位**: {signal.suggested_size_pct:.0f}% | **风险调整**: {signal.risk_adjusted:+.3f}")
+        lines.append(f"")
+        lines.append(f"### 🧠 子信号明细")
+        lines.append(f"")
+
+        for s in signal.sub_signals:
+            icon = "🟢" if s.direction == "LONG" else "🔴" if s.direction == "SHORT" else "⚪"
+            lines.append(
+                f"| {icon} **{s.name}** | {s.value:+.2f} | "
+                f"置信:{s.confidence:.0%} | {len(s.contributing_features)}特征 |"
+            )
+            lines.append(f"| > {s.reasoning} |")
+            lines.append("")
+
+        return "\n".join(lines)
+
+
+# ── CLI ──
+if __name__ == "__main__":
+    print("=" * 60)
+    print("🤖 ML Signal Engine v4.0")
+    print("=" * 60)
+
+    try:
+        import ccxt
+        exchange = ccxt.binance({"enableRateLimit": True, "timeout": 15000})
+        ohlcv = exchange.fetch_ohlcv("BTC/USDT", "1d", limit=400)
+        df = pd.DataFrame(ohlcv, columns=["date", "open", "high", "low", "close", "volume"])
+
+        engine = MLSignalEngineV4()
+        signal = engine.generate_signal(df)
+        print(engine.explain(signal))
+
+        if engine.backtest_results:
+            passed = sum(1 for r in engine.backtest_results if r.passed)
+            print(f"\n📊 特征: {len(engine.factory.features)}总 → {passed}通过FDR → 6子信号")
+    except ImportError:
+        print("⚠️ ccxt未安装")
