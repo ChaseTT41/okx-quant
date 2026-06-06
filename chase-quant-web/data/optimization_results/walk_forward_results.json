@@ -1,0 +1,87 @@
+{
+  "timestamp": "2026-06-07T01:26:48.437284",
+  "config": {
+    "train_days": 200,
+    "val_days": 30,
+    "test_days": 30,
+    "n_windows": 3
+  },
+  "stability_score": 99.99999999999999,
+  "summary": {
+    "avg_sharpe": 3.0708,
+    "avg_maxdd": 0.05,
+    "avg_return": 0.33,
+    "all_positive": false
+  },
+  "windows": [
+    {
+      "window_id": 1,
+      "train_start": "0",
+      "train_end": "199",
+      "test_start": "230",
+      "test_end": "259",
+      "best_params": {
+        "entry_threshold": 0.3,
+        "stop_loss": -0.05,
+        "take_profit": 0.1,
+        "max_position": 0.2,
+        "warmup_days": 150
+      },
+      "test_sharpe": 4.0385,
+      "test_maxdd": 0.02,
+      "test_winrate": 100.0,
+      "test_return": 0.33,
+      "test_annual_return": 4.13,
+      "benchmark_return": 7.95,
+      "n_trades": 1,
+      "train_days": 200,
+      "test_days": 30
+    },
+    {
+      "window_id": 2,
+      "train_start": "30",
+      "train_end": "229",
+      "test_start": "260",
+      "test_end": "289",
+      "best_params": {
+        "entry_threshold": 0.3,
+        "stop_loss": -0.05,
+        "take_profit": 0.1,
+        "max_position": 0.2,
+        "warmup_days": 150
+      },
+      "test_sharpe": 0.0,
+      "test_maxdd": 0.0,
+      "test_winrate": 0.0,
+      "test_return": 0.0,
+      "test_annual_return": 0.0,
+      "benchmark_return": -26.45,
+      "n_trades": 0,
+      "train_days": 200,
+      "test_days": 30
+    },
+    {
+      "window_id": 3,
+      "train_start": "60",
+      "train_end": "259",
+      "test_start": "290",
+      "test_end": "319",
+      "best_params": {
+        "entry_threshold": 0.3,
+        "stop_loss": -0.05,
+        "take_profit": 0.1,
+        "max_position": 0.2,
+        "warmup_days": 150
+      },
+      "test_sharpe": 5.1739,
+      "test_maxdd": 0.13,
+      "test_winrate": 100.0,
+      "test_return": 0.66,
+      "test_annual_return": 8.39,
+      "benchmark_return": 5.54,
+      "n_trades": 2,
+      "train_days": 200,
+      "test_days": 30
+    }
+  ]
+}

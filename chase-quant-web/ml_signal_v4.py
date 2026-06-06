@@ -390,10 +390,10 @@ class MLSignalEngineV4:
         return self._cross_market_fetcher.status_report()
 
     def _try_load_lgbm(self):
-        """尝试加载LightGBM模型"""
+        """尝试加载LightGBM模型 (Phase 8: 加载每个主题ICIR最高的版本)"""
         try:
             from ml_lightgbm_trainer import LightGBMSignalPredictor
-            self._lgbm_predictor = LightGBMSignalPredictor()
+            self._lgbm_predictor = LightGBMSignalPredictor(use_best=True)
             self._lgbm_loaded = self._lgbm_predictor.load_models()
 
             # 加载特征重要性

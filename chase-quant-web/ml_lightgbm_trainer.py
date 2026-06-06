@@ -37,6 +37,257 @@ from feature_ts import FeatureFactoryV4
 from ml_signal_v4 import SubSignalBuilder
 from ml_cross_market import CrossMarketFetcher  # Phase 6
 
+# ── 模型注册表 (Phase 8) ──
+MODEL_DIR = Path(__file__).parent / "data" / "models"
+
+
+@dataclass
+class ModelVersion:
+    """单个模型版本"""
+    theme_id: str
+    theme_name: str
+    trained_at: str             # ISO timestamp
+    data_start: str             # 训练数据起始日期
+    data_end: str               # 训练数据结束日期
+    oos_ic: float
+    oos_icir: float
+    oos_r2: float
+    oos_hit_rate: float
+    n_features: int
+    n_samples: int
+    fwd_window: int
+    file_path: str
+    feature_cols: List[str] = field(default_factory=list)
+
+    @property
+    def age_days(self) -> int:
+        """模型年龄 (天)"""
+        try:
+            trained_date = datetime.fromisoformat(self.trained_at)
+            return (datetime.now() - trained_date).days
+        except Exception:
+            return 99
+
+    @property
+    def age_label(self) -> str:
+        d = self.age_days
+        if d > 60:
+            return f"🔴 {d}天 (过期)"
+        elif d > 30:
+            return f"🟡 {d}天 (偏旧)"
+        else:
+            return f"🟢 {d}天"
+
+    def to_dict(self) -> dict:
+        return {
+            "theme_id": self.theme_id,
+            "theme_name": self.theme_name,
+            "trained_at": self.trained_at,
+            "data_start": self.data_start,
+            "data_end": self.data_end,
+            "oos_ic": round(self.oos_ic, 4),
+            "oos_icir": round(self.oos_icir, 3),
+            "oos_r2": round(self.oos_r2, 4),
+            "oos_hit_rate": round(self.oos_hit_rate, 4),
+            "n_features": self.n_features,
+            "n_samples": self.n_samples,
+            "fwd_window": self.fwd_window,
+            "file_path": self.file_path,
+            "age_days": self.age_days,
+        }
+
+
+class ModelRegistry:
+    """
+    模型版本注册表 (Phase 8)
+
+    管理 LightGBM 模型的版本化存储:
+    - 保存到 data/models/lgbm_<theme>_<timestamp>.pkl
+    - 按 OOS IC 排序获取最佳版本
+    - 自动清理旧版本
+    """
+
+    def __init__(self, model_dir: str = None):
+        if model_dir is None:
+            model_dir = MODEL_DIR
+        self.model_dir = Path(model_dir)
+        self.model_dir.mkdir(parents=True, exist_ok=True)
+        self._cache: Optional[List[ModelVersion]] = None
+
+    def save_version(self, theme_id: str, theme_name: str,
+                     model, feature_cols: List[str],
+                     oos_ic: float, oos_icir: float, oos_r2: float,
+                     oos_hit_rate: float, n_samples: int,
+                     fwd_window: int, data_start: str = "",
+                     data_end: str = "") -> Path:
+        """
+        保存新版模型 (带时间戳)
+
+        Returns:
+            Path: 保存路径
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        filename = f"lgbm_{theme_id}_{timestamp}.pkl"
+        path = self.model_dir / filename
+
+        metadata = {
+            "model": model,
+            "theme_id": theme_id,
+            "theme_name": theme_name,
+            "feature_cols": feature_cols,
+            "fwd_window": fwd_window,
+            "trained_at": datetime.now().isoformat(),
+            "data_start": data_start,
+            "data_end": data_end,
+            "oos_ic": oos_ic,
+            "oos_icir": oos_icir,
+            "oos_r2": oos_r2,
+            "oos_hit_rate": oos_hit_rate,
+            "n_features": len(feature_cols),
+            "n_samples": n_samples,
+        }
+
+        with open(path, "wb") as f:
+            pickle.dump(metadata, f)
+
+        # 同时保存为默认路径 (向后兼容)
+        default_path = self.model_dir / f"lgbm_{theme_id}.pkl"
+        with open(default_path, "wb") as f:
+            pickle.dump(metadata, f)
+
+        # 清除缓存
+        self._cache = None
+        return path
+
+    def list_versions(self, theme_id: str = None) -> List[ModelVersion]:
+        """列出模型版本 (可选按theme_id过滤)"""
+        if self._cache is not None:
+            versions = self._cache
+        else:
+            versions = []
+            for path in sorted(self.model_dir.glob("lgbm_*_*.pkl"), reverse=True):
+                # 只匹配时间戳版本 (lgbm_<theme>_<YYYYMMDD_HHMM>.pkl)
+                stem = path.stem
+                if stem.count("_") < 2:
+                    continue
+                try:
+                    with open(path, "rb") as f:
+                        data = pickle.load(f)
+                    versions.append(ModelVersion(
+                        theme_id=data.get("theme_id", ""),
+                        theme_name=data.get("theme_name", ""),
+                        trained_at=data.get("trained_at", ""),
+                        data_start=data.get("data_start", ""),
+                        data_end=data.get("data_end", ""),
+                        oos_ic=data.get("oos_ic", 0),
+                        oos_icir=data.get("oos_icir", 0),
+                        oos_r2=data.get("oos_r2", 0),
+                        oos_hit_rate=data.get("oos_hit_rate", 0),
+                        n_features=data.get("n_features", 0),
+                        n_samples=data.get("n_samples", 0),
+                        fwd_window=data.get("fwd_window", 5),
+                        file_path=str(path),
+                        feature_cols=data.get("feature_cols", []),
+                    ))
+                except Exception:
+                    continue
+            self._cache = versions
+
+        if theme_id:
+            return [v for v in versions if v.theme_id == theme_id]
+        return versions
+
+    def get_best(self, theme_id: str) -> Optional[ModelVersion]:
+        """获取指定主题OOS IC最高的模型版本"""
+        versions = self.list_versions(theme_id)
+        if not versions:
+            return None
+        best = max(versions, key=lambda v: v.oos_icir)
+        return best
+
+    def get_latest(self, theme_id: str) -> Optional[ModelVersion]:
+        """获取指定主题最新训练的模型版本"""
+        versions = self.list_versions(theme_id)
+        if not versions:
+            return None
+        return versions[0]  # 已按时间倒序
+
+    def cleanup_old(self, keep_n: int = 3):
+        """每个主题只保留最近N个版本 (按OOS ICIR, 保留最好的)"""
+        all_versions = self.list_versions()
+        themes = set(v.theme_id for v in all_versions)
+        removed = 0
+        for theme_id in themes:
+            theme_versions = sorted(
+                [v for v in all_versions if v.theme_id == theme_id],
+                key=lambda v: v.oos_icir, reverse=True
+            )
+            for v in theme_versions[keep_n:]:
+                try:
+                    Path(v.file_path).unlink()
+                    removed += 1
+                except Exception:
+                    pass
+        self._cache = None
+        return removed
+
+    def get_summary(self) -> List[dict]:
+        """获取所有主题的模型摘要 (最新版本)"""
+        all_versions = self.list_versions()
+        themes = set(v.theme_id for v in all_versions)
+        summary = []
+        for theme_id in sorted(themes):
+            best = self.get_best(theme_id)
+            latest = self.get_latest(theme_id)
+            if latest:
+                summary.append({
+                    "theme_id": theme_id,
+                    "theme_name": latest.theme_name,
+                    "latest_trained_at": latest.trained_at[:10],
+                    "latest_oos_icir": latest.oos_icir,
+                    "best_oos_icir": best.oos_icir if best else latest.oos_icir,
+                    "age_days": latest.age_days,
+                    "age_label": latest.age_label,
+                    "n_versions": len([v for v in all_versions if v.theme_id == theme_id]),
+                })
+        return summary
+
+
+def compare_models(model_dir: str = None) -> str:
+    """
+    对比各主题最佳vs最新模型。
+
+    Returns:
+        Markdown格式对比报告
+    """
+    registry = ModelRegistry(model_dir)
+    summary = registry.get_summary()
+
+    if not summary:
+        return "⚠️ 未找到模型版本"
+
+    lines = [
+        "## 🔄 模型对比报告",
+        "",
+        f"**检查时间**: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        "",
+        "| 主题 | 最新日期 | 最新ICIR | 最佳ICIR | 差距 | 年龄 | 版本数 |",
+        "|------|:---:|:---:|:---:|:---:|:---:|:---:|",
+    ]
+
+    for s in summary:
+        gap = s["best_oos_icir"] - s["latest_oos_icir"]
+        gap_str = f"🔴 {gap:+.3f}" if gap > 0.05 else f"🟢 {gap:+.3f}"
+        lines.append(
+            f"| {s['theme_name']} | {s['latest_trained_at']} | "
+            f"{s['latest_oos_icir']:.3f} | {s['best_oos_icir']:.3f} | "
+            f"{gap_str} | {s['age_label']} | {s['n_versions']} |"
+        )
+
+    lines.append("")
+    lines.append("> 🔴 差距>0.05: 最新模型明显不如历史最佳 → 建议回滚或调查原因")
+    return "\n".join(lines)
+
 
 @dataclass
 class ThemeTrainResult:
@@ -335,11 +586,13 @@ class LightGBMTrainer:
     def _train_final_models(self, ts_df: pd.DataFrame,
                             theme_features: Dict[str, List[str]],
                             fwd_rets: np.ndarray,
-                            verbose: bool):
-        """全量训练最终模型并保存"""
+                            verbose: bool,
+                            data_start: str = "", data_end: str = ""):
+        """全量训练最终模型并保存 (Phase 8: 版本化存储)"""
         model_dir = Path(__file__).parent / "data" / "models"
         model_dir.mkdir(parents=True, exist_ok=True)
 
+        registry = ModelRegistry(model_dir)
         imp_data = {}
 
         for theme_id, feat_cols in theme_features.items():
@@ -378,21 +631,39 @@ class LightGBMTrainer:
                 for name, imp_val in top_features
             ]
 
-            # 保存
-            path = model_dir / f"lgbm_{theme_id}.pkl"
-            with open(path, "wb") as f:
-                pickle.dump({
-                    "model": model,
-                    "theme_id": theme_id,
-                    "feature_cols": feat_cols,
-                    "feature_importance": top_features,
-                    "fwd_window": self.fwd_window,
-                    "trained_at": datetime.now().isoformat(),
-                }, f)
+            # 获取该主题的OOS指标
+            theme_result = self.results.get(theme_id)
+            oos_ic = theme_result.oos_ic if theme_result else 0
+            oos_icir = theme_result.oos_icir if theme_result else 0
+            oos_r2 = theme_result.oos_r2 if theme_result else 0
+            oos_hit = theme_result.oos_hit_rate if theme_result else 0
+            theme_name = SubSignalBuilder.THEME_CONFIG.get(theme_id, {}).get("name", theme_id)
+            n_samples = len(X)
+
+            # Phase 8: 版本化保存 (带时间戳)
+            path = registry.save_version(
+                theme_id=theme_id,
+                theme_name=theme_name,
+                model=model,
+                feature_cols=feat_cols,
+                oos_ic=oos_ic,
+                oos_icir=oos_icir,
+                oos_r2=oos_r2,
+                oos_hit_rate=oos_hit,
+                n_samples=n_samples,
+                fwd_window=self.fwd_window,
+                data_start=data_start,
+                data_end=data_end,
+            )
 
             if verbose:
                 top3_str = ", ".join([f"{n}({v:.3f})" for n, v in top_features[:3]])
-                print(f"  💾 保存: {path} ({len(feat_cols)} 特征) | Top3: {top3_str}")
+                print(f"  💾 保存: {path.name} ({len(feat_cols)} 特征) | Top3: {top3_str}")
+
+        # 清理旧版本 (每主题保留最佳5个)
+        removed = registry.cleanup_old(keep_n=5)
+        if verbose and removed > 0:
+            print(f"  🧹 清理 {removed} 个旧版本")
 
         # 保存特征重要性JSON
         imp_path = Path(__file__).parent / "data" / "lgbm_feature_importance.json"
@@ -400,6 +671,67 @@ class LightGBMTrainer:
             json.dump(imp_data, f, indent=2, ensure_ascii=False)
         if verbose:
             print(f"  💾 特征重要性: {imp_path}")
+
+    def retrain_if_needed(self, max_age_days: int = 30,
+                          df: pd.DataFrame = None,
+                          verbose: bool = True) -> bool:
+        """
+        检查模型年龄，超龄自动重训 (Phase 8)
+
+        Args:
+            max_age_days: 最大允许年龄 (默认30天)
+            df: OHLCV数据 (若为None则自动拉取)
+            verbose: 打印详细信息
+
+        Returns:
+            True if retrained, False if skipped
+        """
+        registry = ModelRegistry()
+        summary = registry.get_summary()
+
+        if not summary:
+            if verbose:
+                print("📦 无现有模型, 开始初始训练...")
+            if df is not None:
+                self.train_all(df, verbose=verbose)
+                return True
+            return False
+
+        # 检查年龄
+        max_age = max(s["age_days"] for s in summary) if summary else 0
+        stale_themes = [s for s in summary if s["age_days"] > max_age_days]
+
+        if not stale_themes:
+            if verbose:
+                print(f"✅ 所有模型年龄 < {max_age_days}天, 无需重训")
+            return False
+
+        if verbose:
+            stale_names = ", ".join(s["theme_id"] for s in stale_themes)
+            print(f"⚠️ {len(stale_themes)}/{len(summary)} 模型超龄 (> {max_age_days}天): {stale_names}")
+            print(f"🔄 触发自动重训...")
+
+        if df is None:
+            if verbose:
+                print("📊 拉取最新数据...")
+            try:
+                import ccxt
+                exchange = ccxt.binance({"enableRateLimit": True, "timeout": 15000})
+                ohlcv = exchange.fetch_ohlcv("BTC/USDT", "1d", limit=400)
+                df = pd.DataFrame(ohlcv, columns=["date", "open", "high", "low", "close", "volume"])
+                df["date"] = pd.to_datetime(df["date"], unit="ms")
+            except Exception as e:
+                if verbose:
+                    print(f"❌ 数据拉取失败: {e}")
+                return False
+
+        self.train_all(df, verbose=verbose)
+
+        if verbose:
+            print("✅ 自动重训完成!")
+            print(compare_models())
+
+        return True
 
     def report(self) -> str:
         """生成Markdown训练报告"""
@@ -457,29 +789,59 @@ class LightGBMTrainer:
 
 
 class LightGBMSignalPredictor:
-    """加载6个LightGBM模型 → 对最新数据预测子信号收益"""
+    """加载LightGBM模型 → 对最新数据预测子信号收益 (Phase 8: 支持ModelRegistry)"""
 
-    def __init__(self, model_dir: str = None):
+    def __init__(self, model_dir: str = None, use_best: bool = True):
+        """
+        Args:
+            model_dir: 模型目录
+            use_best: True=加载每个主题ICIR最高的版本, False=加载默认路径版本
+        """
         if model_dir is None:
             model_dir = Path(__file__).parent / "data" / "models"
         self.model_dir = Path(model_dir)
         self.models: Dict[str, dict] = {}  # theme_id → {model, feature_cols, ...}
         self.is_loaded = False
+        self.use_best = use_best
+        self._registry = ModelRegistry(model_dir)
 
     def load_models(self) -> bool:
-        """加载所有已保存的模型"""
+        """加载所有模型 (优先从Registry加载最佳版本)"""
         if not self.model_dir.exists():
             return False
 
         loaded = 0
-        for path in self.model_dir.glob("lgbm_*.pkl"):
-            theme_id = path.stem.replace("lgbm_", "")
-            try:
-                with open(path, "rb") as f:
-                    self.models[theme_id] = pickle.load(f)
-                loaded += 1
-            except Exception:
-                continue
+
+        if self.use_best:
+            # Phase 8: 从Registry加载每个主题的最佳版本
+            all_versions = self._registry.list_versions()
+            themes = set(v.theme_id for v in all_versions)
+            for theme_id in themes:
+                best = self._registry.get_best(theme_id)
+                if best and Path(best.file_path).exists():
+                    try:
+                        with open(best.file_path, "rb") as f:
+                            self.models[theme_id] = pickle.load(f)
+                        loaded += 1
+                    except Exception:
+                        continue
+
+        # 回退: 加载默认路径模型 (兼容旧版)
+        if loaded == 0:
+            for path in self.model_dir.glob("lgbm_*.pkl"):
+                # 跳过时间戳版本 (由上面处理)
+                stem = path.stem
+                if stem.count("_") >= 2 and len(stem.split("_")[-1]) == 13:
+                    continue
+                theme_id = stem.replace("lgbm_", "")
+                if theme_id in self.models:
+                    continue
+                try:
+                    with open(path, "rb") as f:
+                        self.models[theme_id] = pickle.load(f)
+                    loaded += 1
+                except Exception:
+                    continue
 
         self.is_loaded = loaded > 0
         return self.is_loaded
@@ -518,18 +880,50 @@ class LightGBMSignalPredictor:
 
 # ── CLI ──
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Chase量化策略 · LightGBM训练器")
+    parser.add_argument("--retrain", action="store_true",
+                       help="自动重训 (检查模型年龄)")
+    parser.add_argument("--compare", action="store_true",
+                       help="对比最佳vs最新模型")
+    parser.add_argument("--max-age", type=int, default=30,
+                       help="最大模型年龄/天 (默认30)")
+    parser.add_argument("--n-splits", type=int, default=5,
+                       help="CV折数 (默认5)")
+    parser.add_argument("--fwd-window", type=int, default=5,
+                       help="前向窗口 (默认5)")
+    args = parser.parse_args()
+
     print("=" * 60)
-    print("🤖 LightGBM Trainer v1.0 — 非线性子信号建模")
+    print("🤖 LightGBM Trainer v2.0 — 非线性子信号建模 + 版本管理")
     print("=" * 60)
 
+    if args.compare:
+        # 仅对比模式
+        print(compare_models())
+        import sys
+        sys.exit(0)
+
+    if args.retrain:
+        # 自动重训模式
+        print(f"🔄 自动重训模式 (最大年龄: {args.max_age}天)")
+        trainer = LightGBMTrainer(fwd_window=args.fwd_window, n_splits=args.n_splits)
+        did_retrain = trainer.retrain_if_needed(max_age_days=args.max_age, verbose=True)
+        if not did_retrain:
+            print("💤 无需重训, 模型年龄正常")
+        import sys
+        sys.exit(0)
+
+    # 默认: 全量训练
     try:
         import ccxt
         exchange = ccxt.binance({"enableRateLimit": True, "timeout": 15000})
         ohlcv = exchange.fetch_ohlcv("BTC/USDT", "1d", limit=400)
         df = pd.DataFrame(ohlcv, columns=["date", "open", "high", "low", "close", "volume"])
+        df["date"] = pd.to_datetime(df["date"], unit="ms")
         print(f"📊 BTC/USDT | {len(df)}天\n")
 
-        trainer = LightGBMTrainer(fwd_window=5, n_splits=5)
+        trainer = LightGBMTrainer(fwd_window=args.fwd_window, n_splits=args.n_splits)
         results = trainer.train_all(df, verbose=True)
 
         print()
@@ -546,6 +940,14 @@ if __name__ == "__main__":
                 name = SubSignalBuilder.THEME_CONFIG.get(theme_id, {}).get("name", theme_id)
                 icon = "🟢" if pred > 0 else "🔴" if pred < 0 else "⚪"
                 print(f"  {icon} {name}: 预测收益={pred:+.4f}")
+
+        # Phase 8: 显示模型版本摘要
+        print("\n📦 模型版本摘要:")
+        summary = ModelRegistry().get_summary()
+        for s in summary:
+            print(f"  {s['theme_name']:20s} | 最新: {s['latest_trained_at']} | "
+                  f"ICIR: {s['latest_oos_icir']:.3f} | {s['age_label']} | "
+                  f"{s['n_versions']}版本")
 
     except ImportError as e:
         print(f"⚠️ 缺少依赖: {e}")

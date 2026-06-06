@@ -789,6 +789,173 @@ with tab6:
             with st.expander("📈 策略回测 — ML策略历史表现", expanded=False):
                 st.caption("💡 运行 `python3 strategy_backtest.py` 生成回测结果")
 
+        # ── Phase 8: 参数优化结果 ──
+        opt_results_path = Path(__file__).parent / "data" / "optimization_results" / "latest_optimize.json"
+        if opt_results_path.exists():
+            with st.expander("🎯 参数优化 — 最优参数 vs 默认参数", expanded=False):
+                try:
+                    import json
+                    with open(opt_results_path) as f:
+                        opt = json.load(f)
+
+                    best = opt.get("best_params", {})
+                    best_score = opt.get("best_score", 0)
+                    baseline = opt.get("baseline_score", 0)
+                    improvement = (best_score - baseline) / max(0.001, abs(baseline)) * 100
+
+                    st.caption(f"🏆 最优复合得分: **{best_score:.4f}** | "
+                              f"默认: {baseline:.4f} | "
+                              f"提升: {improvement:+.1f}%")
+
+                    # 最优vs默认对比
+                    default_params = {
+                        "entry_threshold": 0.5, "stop_loss": -0.08,
+                        "take_profit": 0.15, "max_position": 0.40, "warmup_days": 200,
+                    }
+                    comp_rows = []
+                    for k, dv in default_params.items():
+                        bv = best.get(k, dv)
+                        if isinstance(dv, float):
+                            change = f"{(bv/dv - 1)*100:+.0f}%"
+                        else:
+                            change = "—"
+                        comp_rows.append({
+                            "参数": k,
+                            "默认值": f"{dv:.3f}" if isinstance(dv, float) else str(dv),
+                            "最优值": f"{bv:.3f}" if isinstance(bv, float) else str(int(bv)),
+                            "变化": change,
+                        })
+                    st.dataframe(pd.DataFrame(comp_rows), hide_index=True, use_container_width=True)
+
+                    # 参数重要性
+                    imp = opt.get("param_importance", {})
+                    if imp:
+                        st.caption("📊 参数重要性 (得分方差贡献)")
+                        imp_sorted = sorted(imp.items(), key=lambda x: abs(x[1]), reverse=True)
+                        imp_df = pd.DataFrame(imp_sorted, columns=["参数", "重要性"])
+                        st.bar_chart(imp_df.set_index("参数"), use_container_width=True)
+
+                    # 敏感性热力图
+                    sens_html = Path(__file__).parent / "data" / "optimization_results" / "sensitivity_heatmap.html"
+                    if sens_html.exists():
+                        with open(sens_html) as f:
+                            st.components.v1.html(f.read(), height=420)
+
+                    # Top-5 参数组合
+                    trials = opt.get("trials", [])
+                    if trials:
+                        st.caption("🔝 Top-5 参数组合")
+                        top5 = sorted(trials, key=lambda t: t.get("score", -99), reverse=True)[:5]
+                        top_rows = []
+                        for t in top5:
+                            top_rows.append({
+                                "Score": f"{t.get('score', 0):.3f}",
+                                "Sharpe": f"{t.get('sharpe', 0):.3f}",
+                                "MaxDD": f"{t.get('max_dd', 0):.1f}%",
+                                "Entry": f"{t.get('entry_threshold', 0):.2f}",
+                                "Stop": f"{t.get('stop_loss', 0):.2f}",
+                                "TP": f"{t.get('take_profit', 0):.2f}",
+                                "Pos%": f"{t.get('max_position', 0):.0%}",
+                                "Warm": int(t.get('warmup_days', 0)),
+                                "#Tr": int(t.get('n_trades', 0)),
+                            })
+                        st.dataframe(pd.DataFrame(top_rows), hide_index=True, use_container_width=True)
+
+                except Exception as e:
+                    st.caption(f"⚠️ 优化结果加载失败: {e}")
+        else:
+            with st.expander("🎯 参数优化 — 最优参数 vs 默认参数", expanded=False):
+                st.caption("💡 运行 `python3 hyperparam_optimizer.py` 生成优化结果")
+
+        # ── Phase 8: Walk-Forward验证结果 ──
+        wf_results_path = Path(__file__).parent / "data" / "optimization_results" / "walk_forward_results.json"
+        if wf_results_path.exists():
+            with st.expander("📊 Walk-Forward验证 — 滚动OOS表现", expanded=False):
+                try:
+                    import json
+                    with open(wf_results_path) as f:
+                        wf = json.load(f)
+
+                    summary = wf.get("summary", {})
+                    stability = wf.get("stability_score", 0)
+
+                    wf_col1, wf_col2, wf_col3, wf_col4 = st.columns(4)
+                    with wf_col1:
+                        st.metric("OOS Sharpe均值", f"{summary.get('avg_sharpe', 0):.3f}")
+                    with wf_col2:
+                        st.metric("OOS MaxDD均值", f"-{summary.get('avg_maxdd', 0):.1f}%")
+                    with wf_col3:
+                        st.metric("OOS 收益均值", f"{summary.get('avg_return', 0):+.1f}%")
+                    with wf_col4:
+                        all_pos = "✅ 全部为正" if summary.get("all_positive") else "⚠️ 有负值"
+                        st.metric("OOS全正?", all_pos)
+
+                    st.metric("参数稳定性", f"{stability:.0f}/100",
+                             delta="高" if stability > 80 else ("中" if stability > 50 else "低"))
+
+                    # W-F热力图
+                    wf_html = Path(__file__).parent / "data" / "optimization_results" / "walk_forward_heatmap.html"
+                    if wf_html.exists():
+                        with open(wf_html) as fh:
+                            st.components.v1.html(fh.read(), height=380)
+
+                    # 各窗口详情
+                    windows = wf.get("windows", [])
+                    if windows:
+                        st.caption("🪟 各窗口OOS详情")
+                        wf_rows = []
+                        for w in windows:
+                            wf_rows.append({
+                                "#": w.get("window_id", ""),
+                                "Test区间": f"{w.get('test_start', '')}→{w.get('test_end', '')}",
+                                "Sharpe": f"{w.get('test_sharpe', 0):.3f}",
+                                "MaxDD": f"-{w.get('test_maxdd', 0):.1f}%",
+                                "策略收益": f"{w.get('test_return', 0):+.1f}%",
+                                "基准收益": f"{w.get('benchmark_return', 0):+.1f}%",
+                                "交易数": w.get("n_trades", 0),
+                            })
+                        st.dataframe(pd.DataFrame(wf_rows), hide_index=True, use_container_width=True)
+
+                except Exception as e:
+                    st.caption(f"⚠️ W-F结果加载失败: {e}")
+        else:
+            with st.expander("📊 Walk-Forward验证 — 滚动OOS表现", expanded=False):
+                st.caption("💡 运行 `python3 walk_forward_validator.py` 生成W-F结果")
+
+        # ── Phase 8: 模型版本管理 ──
+        try:
+            from ml_lightgbm_trainer import ModelRegistry
+            registry = ModelRegistry()
+            model_summary = registry.get_summary()
+            if model_summary:
+                with st.expander("🔄 模型管理 — LightGBM模型版本", expanded=False):
+                    st.caption(f"📦 {len(model_summary)}个主题模型")
+
+                    model_rows = []
+                    for s in sorted(model_summary, key=lambda x: x["age_days"], reverse=True):
+                        model_rows.append({
+                            "主题": s["theme_name"],
+                            "训练日期": s["latest_trained_at"],
+                            "最新ICIR": f"{s['latest_oos_icir']:.3f}",
+                            "最佳ICIR": f"{s['best_oos_icir']:.3f}",
+                            "年龄": s["age_label"],
+                            "版本数": s["n_versions"],
+                        })
+                    st.dataframe(pd.DataFrame(model_rows), hide_index=True, use_container_width=True)
+
+                    # 老化提醒
+                    stale = [s for s in model_summary if s["age_days"] > 30]
+                    if stale:
+                        stale_names = ", ".join(s["theme_name"] for s in stale)
+                        st.warning(f"⚠️ {len(stale)}个模型超30天: {stale_names} — 建议运行 `python3 ml_lightgbm_trainer.py --retrain`")
+                    else:
+                        st.success("✅ 所有模型年龄正常 (< 30天)")
+            else:
+                with st.expander("🔄 模型管理 — LightGBM模型版本", expanded=False):
+                    st.caption("💡 运行 `python3 ml_lightgbm_trainer.py` 训练模型后查看版本")
+        except Exception:
+            pass
+
 # ═══════════════════════════════════════════
 # 底部
 # ═══════════════════════════════════════════
