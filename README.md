@@ -24,6 +24,7 @@
 | **模型融合 v5.0** | ✅ **NEW** | LightGBM + Qlib模型 ICIR加权融合 + 共识投票 |
 | **🔄 滚动在线学习** | ✅ **NEW** | 自适应模型更新 · 特征漂移检测 · 自动重训调度 |
 | **🔗 资产关系图** | ✅ **NEW** | 6维关系矩阵 · CrossAssetGAT · 图漂移检测 · 多资产联合预测 |
+| **🔬 自动Alpha挖掘** | ✅ **NEW** | 表达式引擎 · 46模板 · Grid/Genetic/Random · FDR筛选 |
 | **自动交易** | ✅ | auto_trade.py · ML驱动 · 多币种扫描 |
 | **五层风控** | ✅ | 事前→订单→持仓→组合→异常 · 硬止损-8% |
 | **Walk-Forward** | ✅ | 滚动窗口OOS验证 · 参数稳定性评分 |
@@ -40,7 +41,7 @@
 |------|:---:|:---:|
 | 市场覆盖 | **4市场** | A股为主 |
 | 深度学习模型 | ALSTM/Transformer/TabNet/GATs | **20+模型** |
-| 自动Alpha挖掘 | ❌ | ✅ |
+| 自动Alpha挖掘 | ✅ **NEW! 表达式引擎** | ✅ |
 | 实盘交易 | ✅ | ❌ |
 | 风控体系 | **五层铁律** | 薄弱 |
 | 在线学习 | ✅ **滚动在线学习** | ✅ |
@@ -69,6 +70,7 @@ yina-app/
 │   ├── qlib_trainer.py          # 🆕 Qlib模型训练器 + PurgedKFold
 │   ├── rolling_trainer.py       # 🆕 滚动在线学习引擎 (Phase 10)
 │   ├── asset_graph.py           # 🆕 资产关系图引擎 (Phase 11)
+│   ├── alpha_miner.py           # 🆕 自动Alpha挖掘引擎 (Phase 12)
 │   │
 │   ├── ml_cross_market.py       # 跨市场数据 (ETH/SPY/DXY/VIX/F&G)
 │   ├── strategy_backtest.py     # 策略回测引擎
@@ -147,6 +149,13 @@ python3 asset_graph.py --rolling        # 滚动窗口动态图
 python3 asset_graph.py --train --epochs 100  # 训练 CrossAssetGAT
 python3 rolling_trainer.py --check-graph  # 检查图漂移
 python3 rolling_trainer.py --build-graph  # 重建资产关系图
+
+# 🔬 自动Alpha挖掘 (NEW! Phase 12)
+python3 alpha_miner.py --evaluate "ts_delta(close,5)/ts_std(close,20)"  # 评估表达式
+python3 alpha_miner.py --mine --n 500        # Grid Search挖掘500个Alpha
+python3 alpha_miner.py --evolve --generations 30  # 遗传进化
+python3 alpha_miner.py --list               # 查看已入库Alpha
+python3 alpha_miner.py --list-templates     # 查看模板库
 
 # 策略回测
 python3 strategy_backtest.py
@@ -244,6 +253,32 @@ python3 walk_forward_validator.py
 └──────────────────────────────────────────────────────────────┘
 ```
 
+### 自动Alpha挖掘 (Phase 12) 🆕
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                   Alpha Mining Engine                         │
+│                                                              │
+│  表达式语言                    3大挖掘策略                     │
+│  ┌────────────────┐         ┌──────────────────────┐         │
+│  │ 变量: OHLCV    │         │ 1. Grid Search       │         │
+│  │ 函数: 20+ TS   │  驱动   │    46模板 × 参数网格  │         │
+│  │ 运算符: +-*/^  │ ────→  │ 2. Genetic Evolve    │         │
+│  │ 单目: abs/log.. │        │    锦标赛+交叉+变异   │         │
+│  │ 截面: cs_rank  │         │ 3. Random Explore    │         │
+│  └────────────────┘         │    语法随机生成       │         │
+│                              └──────────────────────┘         │
+│                                         │                    │
+│                              批量IC评估 + FDR校正              │
+│                              Rank IC / ICIR / Decay          │
+│                              Long-Short Sharpe / Turnover     │
+│                                         │                    │
+│                              Top-N入库 (JSON)                  │
+│                              → ML信号引擎特征增强              │
+│                              → 纯Alpha信号 (无ML)             │
+└──────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## 🛡️ 风控铁律 (5层防御)
@@ -296,7 +331,7 @@ python3 hk_momentum_rotation.py
 - [x] 模型版本管理 (自动老化监控)
 - [x] **🔄 滚动在线学习 (Rolling Training)** — 自适应模型更新
 - [x] **🔗 GATs 真实资产关系图 + 多资产联合预测** — 6维关系矩阵 + CrossAssetGAT
-- [ ] 自动Alpha挖掘 (表达式引擎)
+- [x] **🔬 自动Alpha挖掘 (表达式引擎)** — Grid/Genetic/Random + 46模板 + FDR筛选
 - [ ] 企业微信日报自动推送
 - [ ] 订单执行优化 (拆单算法)
 
@@ -309,7 +344,7 @@ MIT License — 欢迎 Star ⭐ & Fork
 ---
 
 <p align="center">
-  <b>🐾 Chase的量化策略 v2.2 — Qlib增强 + 滚动在线学习 + 资产关系图</b><br>
+  <b>🐾 Chase的量化策略 v2.3 — Qlib增强 + 在线学习 + 资产关系图 + Alpha挖掘</b><br>
   <i>Built with ❤️ by Yina for Chase哥</i><br>
-  <sub>用Qlib的AI大脑 + 我们的实盘肌肉 + 资产之间的关系网 = 无敌组合 🚀</sub>
+  <sub>用Qlib的AI大脑 + 我们的实盘肌肉 + 资产关系网 + 自动Alpha挖掘 = 🚀</sub>
 </p>

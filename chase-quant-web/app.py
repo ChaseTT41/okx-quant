@@ -1629,6 +1629,208 @@ with tab7:
                     drift_action = "🔴 显著漂移" if drift.get("drifted") else "✅ 结构稳定"
                     st.metric("判断", drift_action)
 
+        # Phase 12: Alpha Mining (自动Alpha挖掘)
+        st.divider()
+        st.subheader("🔬 自动Alpha挖掘 — Phase 12 🆕")
+
+        # Import check
+        try:
+            from alpha_miner import (AlphaExpressionParser, AlphaEvaluator,
+                                      AlphaTemplateLibrary, AlphaStore, ALPHA_DIR)
+            ALPHA_UI_AVAILABLE = True
+        except ImportError:
+            ALPHA_UI_AVAILABLE = False
+            st.warning("⚠️ Alpha挖掘引擎未安装")
+
+        if ALPHA_UI_AVAILABLE:
+            st.markdown("""
+            > 🔬 **自动Alpha挖掘**: 表达式驱动的因子自动发现 — 3大策略 (Grid/Genetic/Random) → 批量IC评估 → FDR校正 → 入库排名
+            """)
+
+            # ── Row 1: Expression Playground ──
+            col_expr, col_tmpl = st.columns([3, 2])
+            with col_expr:
+                expr_input = st.text_input(
+                    "🧪 Alpha表达式",
+                    value="ts_delta(close, 5) / ts_std(close, 20)",
+                    key="alpha_expr_input",
+                    help="支持变量: open/high/low/close/volume/returns/log_returns/vwap\n"
+                         "函数: ts_sum/ts_mean/ts_std/ts_delta/ts_roc/ts_zscore/ts_corr/ts_rank/ts_ema/..."
+                )
+            with col_tmpl:
+                library = AlphaTemplateLibrary()
+                cat_choice = st.selectbox("📚 模板分类", ["all"] + library.get_categories(), key="alpha_cat")
+                if cat_choice != "all":
+                    templates = library.get_by_category(cat_choice)
+                else:
+                    templates = library.get_all()
+                tmpl_names = ["(手动输入)"] + [t.name for t in templates]
+                tmpl_choice = st.selectbox("📝 选择模板", tmpl_names, key="alpha_tmpl")
+                if tmpl_choice != "(手动输入)":
+                    tmpl = next(t for t in templates if t.name == tmpl_choice)
+                    st.caption(f"`{tmpl.expression}` — {tmpl.description}")
+
+            # ── Row 2: Action Buttons ──
+            c_eval, c_mine_grid, c_mine_gen, c_mine_rand = st.columns(4)
+            with c_eval:
+                eval_clicked = st.button("🔬 评估表达式", type="primary", key="eval_alpha_btn")
+            with c_mine_grid:
+                mine_grid_clicked = st.button("🔍 Grid Search", key="mine_grid_btn")
+            with c_mine_gen:
+                mine_gen_clicked = st.button("🧬 Genetic Evolve", key="mine_gen_btn")
+            with c_mine_rand:
+                mine_rand_clicked = st.button("🎲 Random Explore", key="mine_rand_btn")
+
+            # ── Evaluate Expression ──
+            if eval_clicked:
+                expr = expr_input
+                if tmpl_choice != "(手动输入)":
+                    tmpl = next(t for t in templates if t.name == tmpl_choice)
+                    expr = tmpl.expression
+                # Fetch some data
+                try:
+                    import ccxt
+                    exchange = ccxt.binance()
+                    ohlcv = exchange.fetch_ohlcv("BTC/USDT", '1d', limit=500)
+                    edf = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                    edf['timestamp'] = pd.to_datetime(edf['timestamp'], unit='ms')
+                    edf.set_index('timestamp', inplace=True)
+                except Exception:
+                    edf = None
+
+                if edf is not None and len(edf) > 100:
+                    evaluator = AlphaEvaluator()
+                    result = evaluator.evaluate(expr, edf, name="playground", category="custom")
+                    st.session_state.alpha_eval_result = result
+                    st.success(f"✅ 评估完成: IC={result.rank_ic:+.4f} | ICIR={result.icir:+.3f} | Sharpe={result.sharpe:+.3f}")
+                else:
+                    st.error("❌ 无法获取数据")
+
+            # Show evaluation result
+            if "alpha_eval_result" in st.session_state:
+                r = st.session_state.alpha_eval_result
+                with st.expander("📊 表达式评估详情", expanded=True):
+                    m1, m2, m3, m4, m5 = st.columns(5)
+                    m1.metric("Rank IC", f"{r.rank_ic:+.4f}")
+                    m2.metric("ICIR", f"{r.icir:+.3f}")
+                    m3.metric("Sharpe", f"{r.sharpe:+.3f}")
+                    m4.metric("Turnover", f"{r.turnover:.3f}")
+                    m5.metric("Hit Rate", f"{r.hit_rate:.1%}")
+                    st.caption(f"N={r.n_obs} | FDR p={r.fdr_p_value:.4f} | Corr={r.correlation_with_existing:.3f}")
+
+                    # IC Decay
+                    if r.ic_decay:
+                        import plotly.graph_objects as go
+                        decays = r.ic_decay
+                        days = sorted(decays.keys())
+                        vals = [decays[d] for d in days]
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(x=days, y=vals, mode='lines+markers',
+                                                 line=dict(color='#4488ff', width=2)))
+                        fig.add_hline(y=0, line_dash="dash", line_color="gray")
+                        fig.update_layout(title="IC Decay", xaxis_title="Forward Days",
+                                          yaxis_title="Rank IC", height=300,
+                                          template="plotly_dark", margin=dict(l=0, r=0, t=30, b=0))
+                        st.plotly_chart(fig, use_container_width=True)
+
+            # ── Mine Alphas ──
+            mining_clicked = mine_grid_clicked or mine_gen_clicked or mine_rand_clicked
+            if mining_clicked:
+                try:
+                    import ccxt
+                    exchange = ccxt.binance()
+                    ohlcv = exchange.fetch_ohlcv("BTC/USDT", '1d', limit=500)
+                    mdf = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                    mdf['timestamp'] = pd.to_datetime(mdf['timestamp'], unit='ms')
+                    mdf.set_index('timestamp', inplace=True)
+                except Exception:
+                    mdf = None
+                    st.error("❌ 无法获取数据")
+
+                if mdf is not None and len(mdf) > 100:
+                    evaluator = AlphaEvaluator()
+                    miner = None  # AlphaMiner will be instantiated per strategy
+                    from alpha_miner import AlphaMiner
+
+                    with st.spinner("⛏️ 挖掘Alpha中..."):
+                        if mine_grid_clicked:
+                            miner = AlphaMiner(evaluator=evaluator, df=mdf)
+                            results = miner.mine_grid(df=mdf, n_per_template=10, max_total=150, verbose=False)
+                            gen_type = "Grid Search"
+                        elif mine_gen_clicked:
+                            miner = AlphaMiner(evaluator=evaluator, df=mdf)
+                            results = miner.mine_genetic(df=mdf, population_size=100, generations=10, verbose=False)
+                            gen_type = "Genetic Evolution"
+                        else:
+                            miner = AlphaMiner(evaluator=evaluator, df=mdf)
+                            results = miner.mine_random(df=mdf, n=200, verbose=False)
+                            gen_type = "Random Exploration"
+
+                    if results:
+                        # Save
+                        store = AlphaStore()
+                        store.save(results)
+                        st.session_state.mined_alphas = results
+                        st.session_state.mine_type = gen_type
+                        st.success(f"✅ {gen_type} 完成! 发现 {len(results)} 个Alpha, "
+                                   f"{sum(1 for r in results if r.passed)} 通过筛选")
+                    else:
+                        st.warning("⚠️ 未发现有效Alpha")
+
+            # Show mined results
+            if "mined_alphas" in st.session_state:
+                results = st.session_state.mined_alphas
+                gen_type = st.session_state.get("mine_type", "Mining")
+                with st.expander(f"🏆 {gen_type} — Top {min(20, len(results))} Alphas", expanded=True):
+                    # Build table
+                    rows = []
+                    for i, a in enumerate(results[:20]):
+                        rows.append({
+                            "#": i+1,
+                            "✅": "✅" if a.passed else "❌",
+                            "Expression": a.expression[:55],
+                            "IC": f"{a.rank_ic:+.3f}",
+                            "ICIR": f"{a.icir:+.2f}",
+                            "Sharpe": f"{a.sharpe:+.2f}",
+                            "Turnover": f"{a.turnover:.3f}",
+                            "Category": a.category,
+                        })
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True,
+                                 hide_index=True, height=400)
+
+                    # Best alpha detail
+                    if results:
+                        best = results[0]
+                        st.caption(f"🏅 Best: `{best.expression}` — "
+                                   f"IC={best.rank_ic:+.4f} ICIR={best.icir:+.3f} "
+                                   f"IC Decay: {best.ic_decay}")
+
+            # ── Active Alphas (from store) ──
+            with st.expander("📦 已入库Alpha", expanded=False):
+                store = AlphaStore()
+                saved = store.list_saved()
+                if saved:
+                    st.caption(f"共 {len(saved)} 个存档, 最新: {saved[0]['saved_at'][:19]}")
+                    alphas = store.get_top(20)
+                    if alphas:
+                        rows2 = []
+                        for i, a in enumerate(alphas):
+                            rows2.append({
+                                "#": i+1,
+                                "✅": "✅" if a.passed else "❌",
+                                "Name": a.name[:30],
+                                "IC": f"{a.rank_ic:+.3f}",
+                                "ICIR": f"{a.icir:+.2f}",
+                                "Sh": f"{a.sharpe:+.2f}",
+                                "Cat": a.category,
+                                "Gen": a.generation,
+                            })
+                        st.dataframe(pd.DataFrame(rows2), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("📭 暂无入库Alpha, 运行挖掘后自动保存")
+                else:
+                    st.info("📭 暂无存档, 点击挖掘按钮开始")
+
         # 架构对比
         st.divider()
         with st.expander("📐 与 Qlib 原框架对比", expanded=False):
@@ -1642,7 +1844,7 @@ with tab7:
             | **特征选择** | TabNet (自实现) | TabNet + 表达式引擎 |
             | **图模型** | GATs (自实现) + **真实资产关系图 🆕** | GATs + RGCN + RSRL |
             | **集成方法** | DoubleEnsemble (自实现) | DoubleEnsemble + 更多变体 |
-            | **自动因子挖掘** | ❌ | ✅ Alpha Mining Pipeline |
+            | **自动因子挖掘** | ✅ **NEW! 表达式引擎+遗传算法** | ✅ Alpha Mining Pipeline |
             | **在线学习** | ✅ **滚动在线学习** | ✅ Rolling Training |
             | **资产关系图** | ✅ **NEW! 6维关系+图漂移检测** | ⚠️ 研究为主 |
             | **市场覆盖** | ✅ 4市场 (Crypto+A股+美股+港股) | ❌ A股为主 |
@@ -1657,7 +1859,7 @@ with tab7:
 # 底部
 # ═══════════════════════════════════════════
 st.divider()
-st.caption("🐾 Chase的量化策略 v2.2 | 由 Yina 为 Chase哥 打造 | Qlib增强 + 滚动在线学习 + 资产关系图 · 虚拟盘 · 风险自负")
+st.caption("🐾 Chase的量化策略 v2.3 | 由 Yina 为 Chase哥 打造 | Qlib增强 + 在线学习 + 资产关系图 + Alpha挖掘 · 虚拟盘 · 风险自负")
 
 # 自动快照 (每60秒)
 if "last_snapshot" not in st.session_state:

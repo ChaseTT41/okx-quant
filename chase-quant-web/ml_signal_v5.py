@@ -41,6 +41,14 @@ try:
 except ImportError:
     GRAPH_AVAILABLE = False
 
+# Alpha Mining (Phase 12)
+try:
+    from alpha_miner import (AlphaStore, AlphaExpressionParser, AlphaEvaluator,
+                              evaluate_expression)
+    ALPHA_AVAILABLE = True
+except ImportError:
+    ALPHA_AVAILABLE = False
+
 DATA_DIR = Path(__file__).parent / "data"
 
 
@@ -113,7 +121,8 @@ class MLSignalEngineV5:
     def __init__(self, use_qlib: bool = True, use_lgbm: bool = True,
                  qlib_models: Optional[List[str]] = None,
                  min_models_for_consensus: int = 2,
-                 use_graph: bool = True):
+                 use_graph: bool = True,
+                 use_alphas: bool = False):
         """
         Args:
             use_qlib: 是否加载 Qlib 深度学习模型
@@ -121,11 +130,13 @@ class MLSignalEngineV5:
             qlib_models: Qlib 模型列表 (None = all available)
             min_models_for_consensus: 最少模型数才计算共识
             use_graph: 是否使用资产关系图增强 (Phase 11)
+            use_alphas: 是否使用自动Alpha挖掘增强 (Phase 12)
         """
         self.use_qlib = use_qlib
         self.use_lgbm = use_lgbm
         self.min_models = min_models_for_consensus
         self.use_graph = use_graph and GRAPH_AVAILABLE
+        self.use_alphas = use_alphas and ALPHA_AVAILABLE
 
         # 基础引擎 (v4)
         self.v4_engine = MLSignalEngineV4()
@@ -153,8 +164,181 @@ class MLSignalEngineV5:
                 print(f"⚠️ 图引擎加载失败: {e}")
                 self.use_graph = False
 
+        # Alpha挖掘 (Phase 12)
+        self.alpha_store = None
+        self.alpha_parser = None
+        if self.use_alphas:
+            try:
+                self.alpha_store = AlphaStore()
+                self.alpha_parser = AlphaExpressionParser()
+                n_alphas = len(self.alpha_store.load("latest"))
+                print(f"🔬 Alpha挖掘引擎已加载 (已发现 {n_alphas} 个Alpha)")
+            except Exception as e:
+                print(f"⚠️ Alpha引擎加载失败: {e}")
+                self.use_alphas = False
+
         # 加载模型权重 (基于 OOS ICIR)
         self._model_weights = self._load_model_weights()
+
+    # ── Alpha Mining (Phase 12) ──
+
+    def compute_alpha_features(self, df: pd.DataFrame,
+                                n_top: int = 20) -> Optional[np.ndarray]:
+        """
+        计算top-N已发现Alpha的特征值矩阵。
+
+        Args:
+            df: OHLCV DataFrame
+            n_top: 使用前N个Alpha
+
+        Returns:
+            (n_timesteps, n_alphas) feature matrix, or None
+        """
+        if not self.use_alphas or not self.alpha_store:
+            return None
+
+        alphas = self.alpha_store.get_top(n_top, min_icir=0.1)
+        if not alphas:
+            return None
+
+        # Build data dictionary
+        data = {}
+        for col in ["open", "high", "low", "close", "volume"]:
+            if col in df.columns:
+                data[col] = df[col].values.astype(float)
+
+        features = []
+        for a in alphas:
+            try:
+                ts = evaluate_expression(a.expression, data=data)
+                features.append(ts)
+            except Exception:
+                features.append(np.full(len(df), np.nan))
+
+        if not features:
+            return None
+
+        return np.column_stack(features)
+
+    def generate_alpha_signal(self, df: pd.DataFrame, symbol: str,
+                               n_top: int = 20) -> Optional[FusionSignal]:
+        """
+        纯Alpha驱动的信号生成 (不使用ML模型)。
+
+        使用top-N已发现Alpha的加权组合产生交易信号。
+
+        Args:
+            df: OHLCV DataFrame
+            symbol: 交易对名称
+            n_top: 使用前N个Alpha
+
+        Returns:
+            FusionSignal or None
+        """
+        if not self.use_alphas or not self.alpha_store:
+            return None
+
+        alphas = self.alpha_store.get_top(n_top, min_icir=0.1)
+        if not alphas:
+            return None
+
+        # Build data dictionary
+        data = {}
+        for col in ["open", "high", "low", "close", "volume"]:
+            if col in df.columns:
+                data[col] = df[col].values.astype(float)
+
+        # Compute each alpha's latest value and z-score
+        alpha_values = []
+        for a in alphas:
+            try:
+                ts = evaluate_expression(a.expression, data=data)
+                valid = ts[~np.isnan(ts)]
+                if len(valid) < 30:
+                    continue
+                # Z-score of latest value relative to history
+                latest = valid[-1]
+                mu = np.mean(valid)
+                sigma = np.std(valid)
+                z = (latest - mu) / (sigma + 1e-9)
+                alpha_values.append((a, z, latest))
+            except Exception:
+                continue
+
+        if not alpha_values:
+            return None
+
+        # Weight by |ICIR|, normalize
+        total_weight = sum(abs(a.icir) for (a, _, _) in alpha_values)
+        if total_weight <= 0:
+            return None
+
+        weighted_signal = sum(z * abs(a.icir) for (a, z, _) in alpha_values) / total_weight
+
+        # Determine action
+        if weighted_signal > 1.0:
+            action = "BUY"
+        elif weighted_signal < -1.0:
+            action = "SELL"
+        else:
+            action = "HOLD"
+
+        confidence = min(1.0, abs(weighted_signal) / 2.0)
+        price = float(df["close"].iloc[-1])
+
+        # Build simple model predictions list
+        model_preds = []
+        for a, z, raw in alpha_values[:5]:
+            model_preds.append(ModelPrediction(
+                model_name=f"alpha",
+                theme_id=a.category,
+                theme_name=a.name[:40],
+                prediction=z / 3.0,
+                direction="LONG" if z > 0 else "SHORT",
+                confidence=min(1.0, abs(z) / 2.0),
+                oos_icir=abs(a.icir),
+                weight=abs(a.icir),
+            ))
+
+        return FusionSignal(
+            timestamp=datetime.now().isoformat(),
+            symbol=symbol,
+            price=price,
+            model_predictions=model_preds,
+            signal_weighted=weighted_signal / 3.0,  # scale to [-1, 1]
+            signal_equal=weighted_signal / 3.0,
+            signal_consensus=weighted_signal / 3.0,
+            divergence=np.std([z for _, z, _ in alpha_values[:10]]) if len(alpha_values) > 1 else 0.0,
+            consensus_ratio=1.0,
+            action=action,
+            confidence=confidence,
+            suggested_size_pct=min(0.4, abs(weighted_signal) / 10.0),
+            n_models_active=len(alpha_values),
+            n_themes_active=len(set(a.category for a, _, _ in alpha_values)),
+            models_available=[f"alpha_{a.name[:20]}" for a, _, _ in alpha_values[:5]],
+            signal_lgbm=0.0,
+            lgbm_available=False,
+            feature_count=len(alpha_values),
+        )
+
+    def get_alpha_status(self) -> dict:
+        """获取Alpha挖掘状态"""
+        if not self.use_alphas or not self.alpha_store:
+            return {"available": False, "reason": "Alpha mining not enabled"}
+        alphas = self.alpha_store.get_top(50)
+        passed = [a for a in alphas if a.passed]
+        by_cat = {}
+        for a in alphas:
+            by_cat[a.category] = by_cat.get(a.category, 0) + 1
+        return {
+            "available": True,
+            "n_total": len(self.alpha_store.load("latest")),
+            "n_top": len(alphas),
+            "n_passed": len(passed),
+            "best_icir": max(abs(a.icir) for a in alphas) if alphas else 0.0,
+            "best_expr": alphas[0].expression[:60] if alphas else "",
+            "by_category": by_cat,
+        }
 
     def generate_signal(self, df_btc: pd.DataFrame, symbol: str,
                         use_lgbm: bool = True) -> FusionSignal:

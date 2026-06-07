@@ -57,6 +57,13 @@ try:
 except ImportError:
     GRAPH_AVAILABLE = False
 
+# Alpha挖掘 (Phase 12)
+try:
+    from alpha_miner import AlphaStore, evaluate_expression
+    ALPHA_AVAILABLE = True
+except ImportError:
+    ALPHA_AVAILABLE = False
+
 
 def is_market_open(market: str) -> bool:
     """判断市场是否交易时段"""
@@ -204,23 +211,33 @@ class RollingAwareAutoTrader:
     ]
 
     def __init__(self, use_v5: bool = True, use_rolling: bool = True,
-                 auto_retrain: bool = False, use_graph: bool = True):
+                 auto_retrain: bool = False, use_graph: bool = True,
+                 use_alphas: bool = False):
         """
         Args:
             use_v5: 是否使用 MLSignalEngineV5 (Qlib融合)
             use_rolling: 是否检查模型新鲜度
             auto_retrain: 模型过期时是否自动重训 (true=全自动, false=仅警告)
             use_graph: 是否使用资产关系图增强 (Phase 11)
+            use_alphas: 是否使用Alpha挖掘增强 (Phase 12)
         """
         self.use_v5 = use_v5 and ML_V5_AVAILABLE
         self.use_rolling = use_rolling and ROLLING_AVAILABLE
         self.auto_retrain = auto_retrain
         self.use_graph = use_graph and GRAPH_AVAILABLE
+        self.use_alphas = use_alphas and ALPHA_AVAILABLE
 
         # 初始化引擎
         if self.use_v5:
-            self.engine = MLSignalEngineV5(use_qlib=True, use_lgbm=True, use_graph=self.use_graph)
-            self.engine_label = "v5 (Qlib融合" + (" + 图增强)" if self.use_graph else ")")
+            self.engine = MLSignalEngineV5(use_qlib=True, use_lgbm=True, use_graph=self.use_graph,
+                                            use_alphas=self.use_alphas)
+            label_parts = ["v5 (Qlib融合"]
+            if self.use_graph:
+                label_parts.append(" + 图增强")
+            if self.use_alphas:
+                label_parts.append(" + Alpha增强")
+            label_parts.append(")")
+            self.engine_label = "".join(label_parts)
         elif ML_SIGNAL_AVAILABLE:
             self.engine = MLSignalEngineV4()
             self.engine_label = "v4 (LightGBM)"
@@ -243,6 +260,17 @@ class RollingAwareAutoTrader:
             except Exception as e:
                 print(f"⚠️ 图引擎初始化失败: {e}")
                 self.use_graph = False
+
+        # Alpha挖掘
+        self.alpha_store = None
+        if self.use_alphas:
+            try:
+                self.alpha_store = AlphaStore()
+                n = len(self.alpha_store.load("latest"))
+                print(f"🔬 Alpha挖掘引擎已加载 ({n} 个Alpha)")
+            except Exception as e:
+                print(f"⚠️ Alpha引擎加载失败: {e}")
+                self.use_alphas = False
 
         self._exchange = None
 
@@ -639,7 +667,7 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
             return auto_scan_and_trade(markets, use_ml=True, use_rolling=False)
         else:
             print("🔄 Rolling-Aware 自动交易模式 (Phase 10)")
-            trader = RollingAwareAutoTrader(use_v5=True, use_rolling=True, auto_retrain=False)
+            trader = RollingAwareAutoTrader(use_v5=True, use_rolling=True, auto_retrain=False, use_alphas=args.alphas)
             print(trader.get_status_summary())
 
             results, pf = trader.run()
@@ -865,6 +893,8 @@ if __name__ == "__main__":
                        help="使用ML信号引擎 (Phase 7)")
     parser.add_argument("--rolling", action="store_true",
                        help="使用滚动训练感知模式 (Phase 10, Qlib融合+模型新鲜度检查)")
+    parser.add_argument("--alphas", action="store_true",
+                       help="使用Alpha挖掘增强 (Phase 12)")
     parser.add_argument("--ml-scan", action="store_true",
                        help="仅ML扫描, 不执行交易 (调试用)")
     args = parser.parse_args()
@@ -877,7 +907,7 @@ if __name__ == "__main__":
     if args.ml_scan:
         if ROLLING_AVAILABLE:
             print("🔄 Rolling-Aware 扫描模式\n")
-            trader = RollingAwareAutoTrader(use_v5=True, use_rolling=True, auto_retrain=False)
+            trader = RollingAwareAutoTrader(use_v5=True, use_rolling=True, auto_retrain=False, use_alphas=args.alphas)
             print(trader.get_status_summary())
             print()
             signals = trader.scan()
