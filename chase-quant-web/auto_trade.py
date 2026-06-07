@@ -36,6 +36,20 @@ try:
 except ImportError:
     ML_SIGNAL_AVAILABLE = False
 
+# Qlib融合信号引擎 (Phase 9)
+try:
+    from ml_signal_v5 import MLSignalEngineV5, FusionSignal
+    ML_V5_AVAILABLE = True
+except ImportError:
+    ML_V5_AVAILABLE = False
+
+# 滚动在线学习 (Phase 10)
+try:
+    from rolling_trainer import RollingTrainer, RollingModelRegistry
+    ROLLING_AVAILABLE = True
+except ImportError:
+    ROLLING_AVAILABLE = False
+
 
 def is_market_open(market: str) -> bool:
     """判断市场是否交易时段"""
@@ -164,13 +178,325 @@ class MLAutoTrader:
         return "\n".join(lines)
 
 
-def auto_scan_and_trade(markets: list = None, use_ml: bool = False):
+class RollingAwareAutoTrader:
+    """
+    滚动训练感知的自动交易器 (Phase 10)
+
+    在 MLAutoTrader 基础上增加:
+      1. 交易前检查模型新鲜度
+      2. 模型过期 → 自动触发滚动重训
+      3. 使用 MLSignalEngineV5 (Qlib融合) 获取更稳健的信号
+
+    使用:
+      trader = RollingAwareAutoTrader()
+      results, pf = trader.run()
+    """
+
+    CRYPTO_WATCHLIST = [
+        "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
+    ]
+
+    def __init__(self, use_v5: bool = True, use_rolling: bool = True,
+                 auto_retrain: bool = False):
+        """
+        Args:
+            use_v5: 是否使用 MLSignalEngineV5 (Qlib融合)
+            use_rolling: 是否检查模型新鲜度
+            auto_retrain: 模型过期时是否自动重训 (true=全自动, false=仅警告)
+        """
+        self.use_v5 = use_v5 and ML_V5_AVAILABLE
+        self.use_rolling = use_rolling and ROLLING_AVAILABLE
+        self.auto_retrain = auto_retrain
+
+        # 初始化引擎
+        if self.use_v5:
+            self.engine = MLSignalEngineV5(use_qlib=True, use_lgbm=True)
+            self.engine_label = "v5 (Qlib融合)"
+        elif ML_SIGNAL_AVAILABLE:
+            self.engine = MLSignalEngineV4()
+            self.engine_label = "v4 (LightGBM)"
+
+        # 滚动训练器
+        if self.use_rolling:
+            self.rolling_trainer = RollingTrainer()
+            self.rolling_registry = RollingModelRegistry()
+        else:
+            self.rolling_trainer = None
+
+        self._exchange = None
+
+    @property
+    def exchange(self):
+        if self._exchange is None:
+            try:
+                import ccxt
+                self._exchange = ccxt.binance({"enableRateLimit": True, "timeout": 15000})
+            except Exception:
+                self._exchange = None
+        return self._exchange
+
+    def fetch_ohlcv(self, symbol: str, limit: int = 400) -> pd.DataFrame | None:
+        """拉取OHLCV数据"""
+        try:
+            ex = self.exchange
+            if ex is None:
+                return None
+            ohlcv = ex.fetch_ohlcv(symbol, "1d", limit=limit)
+            df = pd.DataFrame(ohlcv, columns=["date", "open", "high", "low", "close", "volume"])
+            df["date"] = pd.to_datetime(df["date"], unit="ms")
+            return df
+        except Exception as e:
+            print(f"  ⚠️ {symbol} 数据拉取失败: {e}")
+            return None
+
+    def pre_trade_check(self) -> dict:
+        """
+        交易前检查 — 模型健康度 + 新鲜度
+
+        Returns:
+            {"ok": bool, "warnings": [...], "model_age_days": int}
+        """
+        warnings_list = []
+
+        # 检查 Qlib 模型
+        if self.use_v5 and self.engine.qlib_predictor:
+            n_models = len(self.engine.qlib_predictor._loaded_models)
+            if n_models == 0:
+                warnings_list.append("⚠️ 未加载任何 Qlib 模型 — 请先训练")
+        elif self.use_v5:
+            warnings_list.append("⚠️ Qlib 推理器未初始化")
+
+        # 检查滚动模型新鲜度
+        if self.use_rolling and self.rolling_trainer:
+            status = self.rolling_trainer.status()
+            max_age = status["max_age_days"]
+
+            if status["should_retrain"]:
+                reason = status["retrain_reason"]
+                warnings_list.append(f"🔴 建议重训: {reason}")
+
+                if self.auto_retrain:
+                    print(f"🔄 自动触发滚动重训: {reason}")
+                    # 拉取数据并重训
+                    df_btc = self.fetch_ohlcv("BTC/USDT", limit=800)
+                    if df_btc is not None and len(df_btc) >= 200:
+                        result = self.rolling_trainer.run(df_btc, force=False, mode="update")
+                        if result["action"] == "trained":
+                            print(f"  ✅ 自动重训完成: {result['report']['summary']['n_models_trained']} 个模型")
+                        else:
+                            print(f"  ℹ️ {result['action']}: {result.get('reason', '')}")
+                    else:
+                        warnings_list.append("⚠️ 自动重训失败: 数据不足")
+            elif max_age <= 7:
+                print(f"✅ 模型新鲜 ({max_age}天) — 可以交易")
+        else:
+            max_age = 0
+
+        return {
+            "ok": len([w for w in warnings_list if w.startswith("🔴")]) == 0,
+            "warnings": warnings_list,
+            "model_age_days": max_age,
+        }
+
+    def scan(self, symbols: list = None) -> list[dict]:
+        """
+        扫描多币种 (支持 v4 和 v5 引擎)
+
+        Returns:
+            [{"symbol": "BTC/USDT", "signal": ..., "price": ..., "action": ...}, ...]
+        """
+        if symbols is None:
+            symbols = self.CRYPTO_WATCHLIST
+
+        results = []
+        n = len(symbols)
+
+        for i, symbol in enumerate(symbols):
+            print(f"  🔍 [{i+1}/{n}] {symbol}...", end=" ")
+
+            df = self.fetch_ohlcv(symbol)
+            if df is None or len(df) < 200:
+                print("数据不足")
+                continue
+
+            try:
+                if self.use_v5:
+                    # v5: Qlib融合信号
+                    fusion_signal = self.engine.generate_signal(df, symbol)
+                    price = fusion_signal.price
+                    action = fusion_signal.action
+                    signal_val = fusion_signal.signal_consensus
+                    confidence = fusion_signal.confidence
+                    consensus = fusion_signal.consensus_ratio
+                    n_active = fusion_signal.n_models_active
+                    suggested_size = fusion_signal.suggested_size_pct
+                else:
+                    # v4: LightGBM信号
+                    signal = self.engine.generate_signal(df, symbol, use_lgbm=True)
+                    price = float(df["close"].values[-1])
+                    action = signal.action
+                    signal_val = signal.signal_lgbm if signal.lgbm_available else signal.signal_ic
+                    confidence = signal.confidence
+                    consensus = signal.consensus
+                    n_active = signal.n_sub_signals_active
+                    suggested_size = signal.suggested_size_pct / 100
+
+                results.append({
+                    "symbol": symbol,
+                    "name": symbol.replace("/USDT", ""),
+                    "price": price,
+                    "action": action,
+                    "signal_val": signal_val,
+                    "confidence": confidence,
+                    "consensus": consensus,
+                    "n_active": n_active,
+                    "suggested_size_pct": suggested_size,
+                    "engine": self.engine_label,
+                })
+
+                icon = "🟢" if action == "BUY" else "🔴" if action == "SELL" else "⚪"
+                print(f"{icon} {action} | sig={signal_val:+.3f} | "
+                      f"置信={confidence:.0%} | {n_active}活跃")
+
+            except Exception as e:
+                print(f"信号生成失败: {e}")
+
+        results.sort(key=lambda r: abs(r["signal_val"]), reverse=True)
+        return results
+
+    def run(self, symbols: list = None) -> tuple:
+        """
+        完整交易流程: 检查→扫描→决策→执行
+
+        Returns:
+            (results: list, pf: PortfolioManager)
+        """
+        print(f"🔄 Rolling-Aware 自动交易 [{self.engine_label}]")
+
+        # 1. 交易前检查
+        health = self.pre_trade_check()
+        if health["warnings"]:
+            for w in health["warnings"]:
+                print(f"  {w}")
+
+        if not health["ok"] and not self.auto_retrain:
+            print("⚠️ 模型不健康且未启用自动重训 — 使用降级模式 (仅 LightGBM)")
+
+        # 2. 初始化风控
+        pf = PortfolioManager()
+        rc = RiskController(pf)
+        total_value = pf.total_value
+        results = []
+
+        # 3. 扫描信号
+        ml_signals = self.scan(symbols)
+        buy_sigs = [s for s in ml_signals if s["action"] == "BUY"]
+        sell_sigs = [s for s in ml_signals if s["action"] == "SELL"]
+
+        print(f"\n📊 扫描结果: {len(buy_sigs)} BUY, {len(sell_sigs)} SELL, "
+              f"{len(ml_signals) - len(buy_sigs) - len(sell_sigs)} HOLD")
+
+        # 4. 持仓管理 (止损/止盈)
+        for pos in pf.open_positions:
+            if pos.market != "crypto":
+                continue
+
+            # 更新价格
+            for sig in ml_signals:
+                if sig["symbol"] == pos.symbol:
+                    pf.update_price(pos.id, sig["price"])
+                    break
+
+            # 止损
+            if pos.pnl_pct <= -8.0:
+                pf.sell(pos.id, pos.current_price, f"硬止损: {pos.pnl_pct:.1f}%")
+                results.append(f"🔴 止损 {pos.symbol}: {pos.pnl_pct:.1f}%")
+            # 止盈
+            elif pos.pnl_pct >= 15.0:
+                pf.sell(pos.id, pos.current_price, f"止盈: +{pos.pnl_pct:.1f}%")
+                results.append(f"🟢 止盈 {pos.symbol}: +{pos.pnl_pct:.1f}%")
+            # ML 出场信号
+            else:
+                for sig in sell_sigs:
+                    if sig["symbol"] == pos.symbol:
+                        pf.sell(pos.id, pos.current_price,
+                               f"ML卖出: {sig['signal_val']:+.3f}")
+                        results.append(f"🔴 ML卖出 {pos.symbol}: {pos.pnl_pct:+.1f}%")
+                        break
+
+        # 5. 入场信号
+        held_symbols = [p.symbol for p in pf.open_positions if p.market == "crypto"]
+        for sig in buy_sigs[:3]:
+            if sig["symbol"] in held_symbols:
+                continue
+
+            cash = pf.cash.get("crypto", 0)
+            size_pct = sig.get("suggested_size_pct", 0.05)
+            if isinstance(size_pct, float) and size_pct < 1:
+                pass  # already decimal
+            elif isinstance(size_pct, float):
+                size_pct = size_pct / 100
+            max_size = min(cash * size_pct, cash * 0.5)
+
+            if max_size < 200:
+                continue
+
+            ml_score = abs(sig["signal_val"]) * 30 + sig["confidence"] * 20 + sig["consensus"] * 30
+            ml_score = min(100, ml_score)
+
+            check = rc.pre_trade_check("crypto", max_size, ml_score, total_value)
+            if not check.passed:
+                print(f"  ⚠️ {sig['symbol']} 风控拦截: {check.reason}")
+                continue
+
+            quantity = max_size / sig["price"]
+            reasoning = (
+                f"[{self.engine_label}] 信号={sig['signal_val']:+.3f} | "
+                f"置信={sig['confidence']:.0%} | "
+                f"活跃={sig['n_active']}"
+            )
+            trade = pf.buy(
+                market="crypto", symbol=sig["symbol"],
+                name=sig["name"],
+                price=sig["price"], quantity=quantity,
+                reason=reasoning,
+            )
+            if trade:
+                results.append(f"🧠 买入 {sig['symbol']} ¥{max_size:.0f} | {reasoning}")
+
+        pf.take_snapshot()
+        return results, pf
+
+    def get_status_summary(self) -> str:
+        """引擎状态摘要"""
+        lines = [
+            f"🔄 Rolling-Aware 自动交易 [{self.engine_label}]",
+            f"  Qlib融合: {'✅' if self.use_v5 else '❌'}",
+            f"  滚动检查: {'✅' if self.use_rolling else '❌'}",
+            f"  自动重训: {'✅' if self.auto_retrain else '❌ (仅警告)'}",
+        ]
+
+        if self.use_rolling and self.rolling_trainer:
+            status = self.rolling_trainer.status()
+            lines.append(f"  模型快照: {status['n_snapshots']} 个")
+            lines.append(f"  最新训练: {status['latest_training'][:19] if status['latest_training'] != 'never' else '从未'}")
+            lines.append(f"  最大年龄: {status['max_age_days']} 天")
+            if status["should_retrain"]:
+                lines.append(f"  ⚠️ 建议重训: {status['retrain_reason']}")
+
+        lines.append(f"  扫描列表: {', '.join(self.CRYPTO_WATCHLIST)}")
+        return "\n".join(lines)
+
+
+def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
+                       use_rolling: bool = False):
     """
     自动扫描 → 决策 → 执行
 
     Args:
         markets: 市场列表 (默认["crypto"])
         use_ml: True=ML信号引擎, False=传统RSI/MACD引擎
+        use_rolling: True=滚动训练感知模式 (Phase 10), 自动检查模型新鲜度
     Returns:
         (results, pf)
     """
@@ -181,6 +507,19 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False):
     rc = RiskController(pf)
     total_value = pf.total_value
     results = []
+
+    # ── Rolling-Aware ML模式 (Phase 10) ──
+    if use_rolling and "crypto" in markets:
+        if not ROLLING_AVAILABLE:
+            print("⚠️ 滚动训练引擎不可用, 回退到 v4 模式")
+            return auto_scan_and_trade(markets, use_ml=True, use_rolling=False)
+        else:
+            print("🔄 Rolling-Aware 自动交易模式 (Phase 10)")
+            trader = RollingAwareAutoTrader(use_v5=True, use_rolling=True, auto_retrain=False)
+            print(trader.get_status_summary())
+
+            results, pf = trader.run()
+            return results, pf
 
     # ── ML模式 ──
     if use_ml and "crypto" in markets:
@@ -380,8 +719,10 @@ def generate_status_report() -> str:
         bias = estimate_survival_bias("crypto")
         lines.append(f"🔍 偏差修正: 回测×{bias['correction_factor']} (虚高{bias['estimated_overstatement_pct']}%)")
 
-    # ML状态 (Phase 7)
-    if ML_SIGNAL_AVAILABLE:
+    # ML状态 (Phase 7/10)
+    if ROLLING_AVAILABLE:
+        lines.append("🔄 Rolling引擎: ✅ 可用 (使用 --rolling 启动 Phase 10)")
+    elif ML_SIGNAL_AVAILABLE:
         lines.append("🧠 ML引擎: ✅ 可用 (使用 --ml 启动)")
     else:
         lines.append("🧠 ML引擎: ⚠️ 不可用")
@@ -398,6 +739,8 @@ if __name__ == "__main__":
                        help="仅生成状态报告")
     parser.add_argument("--ml", action="store_true",
                        help="使用ML信号引擎 (Phase 7)")
+    parser.add_argument("--rolling", action="store_true",
+                       help="使用滚动训练感知模式 (Phase 10, Qlib融合+模型新鲜度检查)")
     parser.add_argument("--ml-scan", action="store_true",
                        help="仅ML扫描, 不执行交易 (调试用)")
     args = parser.parse_args()
@@ -408,26 +751,40 @@ if __name__ == "__main__":
 
     # ML调试模式: 仅扫描
     if args.ml_scan:
-        if not ML_SIGNAL_AVAILABLE:
+        if ROLLING_AVAILABLE:
+            print("🔄 Rolling-Aware 扫描模式\n")
+            trader = RollingAwareAutoTrader(use_v5=True, use_rolling=True, auto_retrain=False)
+            print(trader.get_status_summary())
+            print()
+            signals = trader.scan()
+            print(f"\n📊 扫描结果 ({len(signals)}个):")
+            for s in signals:
+                icon = "🟢" if s["action"] == "BUY" else "🔴" if s["action"] == "SELL" else "⚪"
+                print(f"  {icon} {s['symbol']:12s} | {s['action']:4s} | "
+                      f"信号={s['signal_val']:+.3f} | "
+                      f"置信={s['confidence']:.0%} | "
+                      f"共识={s['consensus']:.0%} | "
+                      f"{s['n_active']}活跃 | [{s['engine']}]")
+        elif ML_SIGNAL_AVAILABLE:
+            print("🧠 ML扫描模式 (仅查看信号)\n")
+            trader = MLAutoTrader(use_lgbm=True)
+            print(trader.get_status_summary())
+            print()
+            signals = trader.scan()
+            print(f"\n📊 扫描结果 ({len(signals)}个):")
+            for s in signals:
+                icon = "🟢" if s["action"] == "BUY" else "🔴" if s["action"] == "SELL" else "⚪"
+                print(f"  {icon} {s['symbol']:12s} | {s['action']:4s} | "
+                      f"信号={s['signal_val']:+.3f} | "
+                      f"置信={s['confidence']:.0%} | "
+                      f"共识={s['consensus']:.0%} | "
+                      f"{s['active_themes']}/7主题")
+        else:
             print("❌ ML信号引擎不可用")
-            sys.exit(1)
-        print("🧠 ML扫描模式 (仅查看信号)\n")
-        trader = MLAutoTrader(use_lgbm=True)
-        print(trader.get_status_summary())
-        print()
-        signals = trader.scan()
-        print(f"\n📊 扫描结果 ({len(signals)}个):")
-        for s in signals:
-            icon = "🟢" if s["action"] == "BUY" else "🔴" if s["action"] == "SELL" else "⚪"
-            print(f"  {icon} {s['symbol']:12s} | {s['action']:4s} | "
-                  f"信号={s['signal_val']:+.3f} | "
-                  f"置信={s['confidence']:.0%} | "
-                  f"共识={s['consensus']:.0%} | "
-                  f"{s['active_themes']}/7主题")
         sys.exit(0)
 
     markets = ["crypto", "a_stock", "us_stock"] if args.markets == ["all"] else args.markets
-    results, pf = auto_scan_and_trade(markets, use_ml=args.ml)
+    results, pf = auto_scan_and_trade(markets, use_ml=args.ml, use_rolling=args.rolling)
 
     print(generate_status_report())
 

@@ -22,6 +22,7 @@
 | **LightGBM** | ✅ | 7个独立主题模型 · PurgedKFold · ICIR 0.11-0.71 |
 | **🧠 Qlib DL模型** | ✅ **NEW** | ALSTM + Transformer + TabNet + GATs 深度学习 |
 | **模型融合 v5.0** | ✅ **NEW** | LightGBM + Qlib模型 ICIR加权融合 + 共识投票 |
+| **🔄 滚动在线学习** | ✅ **NEW** | 自适应模型更新 · 特征漂移检测 · 自动重训调度 |
 | **自动交易** | ✅ | auto_trade.py · ML驱动 · 多币种扫描 |
 | **五层风控** | ✅ | 事前→订单→持仓→组合→异常 · 硬止损-8% |
 | **Walk-Forward** | ✅ | 滚动窗口OOS验证 · 参数稳定性评分 |
@@ -64,6 +65,7 @@ yina-app/
 │   │
 │   ├── qlib_models.py           # 🆕 Qlib DL模型 (ALSTM/Transformer/TabNet/GATs)
 │   ├── qlib_trainer.py          # 🆕 Qlib模型训练器 + PurgedKFold
+│   ├── rolling_trainer.py       # 🆕 滚动在线学习引擎 (Phase 10)
 │   │
 │   ├── ml_cross_market.py       # 跨市场数据 (ETH/SPY/DXY/VIX/F&G)
 │   ├── strategy_backtest.py     # 策略回测引擎
@@ -129,6 +131,12 @@ python3 ml_lightgbm_trainer.py
 python3 qlib_trainer.py --model alstm --epochs 50
 python3 qlib_trainer.py --compare   # 对比所有模型 vs LightGBM
 
+# 🔄 滚动在线学习 (NEW! Phase 10)
+python3 rolling_trainer.py --init      # 首次全量训练
+python3 rolling_trainer.py --update    # 增量更新 (自动检查是否需要)
+python3 rolling_trainer.py --status    # 查看模型新鲜度
+python3 rolling_trainer.py --backtest  # 回测滚动窗口性能
+
 # 策略回测
 python3 strategy_backtest.py
 
@@ -144,6 +152,9 @@ python3 walk_forward_validator.py
 ```bash
 # 添加到 crontab (每30分钟)
 */30 * * * * cd ~/yina-app/chase-quant-web && python3 auto_trade.py --ml
+
+# Phase 10: 滚动训练感知模式 (推荐!)
+*/30 * * * * cd ~/yina-app/chase-quant-web && python3 auto_trade.py --rolling
 ```
 
 ---
@@ -175,6 +186,29 @@ python3 walk_forward_validator.py
                                     │
                               最终信号
                         BUY (>0.5) / HOLD / SELL (<-0.5)
+```
+
+### 滚动在线学习 (Phase 10) 🆕
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                   Rolling Trainer                        │
+│                                                         │
+│  ┌─────────────┐    ┌──────────────┐    ┌────────────┐ │
+│  │   Window    │ →  │   Retrain    │ →  │   Model    │ │
+│  │   Manager   │    │   Scheduler  │    │  Registry  │ │
+│  │             │    │              │    │            │ │
+│  │ expanding/  │    │ daily/weekly/│    │ versioned  │ │
+│  │ sliding/    │    │ monthly      │    │ .pth +     │ │
+│  │ hybrid      │    │              │    │ metadata   │ │
+│  └─────────────┘    └──────────────┘    └────────────┘ │
+│                                                         │
+│  触发条件:                                               │
+│  🔴 模型过期 (>21天)  →  自动重训                          │
+│  🟡 ICIR退化 (>15%)   →  自动重训                          │
+│  🟠 特征漂移 (>0.3)   →  自动重训                          │
+│  🟢 模型新鲜 (<7天)   →  跳过                              │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -227,8 +261,8 @@ python3 hk_momentum_rotation.py
 - [x] **🧠 Qlib深度学习模型集成 (ALSTM/Transformer/TabNet/GATs)**
 - [x] **模型融合 v5.0 (LightGBM + Qlib DL)**
 - [x] 模型版本管理 (自动老化监控)
+- [x] **🔄 滚动在线学习 (Rolling Training)** — 自适应模型更新
 - [ ] GATs 真实资产关系图 + 多资产联合预测
-- [ ] 在线学习 (Rolling Training)
 - [ ] 自动Alpha挖掘 (表达式引擎)
 - [ ] 企业微信日报自动推送
 - [ ] 订单执行优化 (拆单算法)
@@ -242,7 +276,7 @@ MIT License — 欢迎 Star ⭐ & Fork
 ---
 
 <p align="center">
-  <b>🐾 Chase的量化策略 v2.0 — Qlib增强版</b><br>
+  <b>🐾 Chase的量化策略 v2.1 — Qlib增强 + 滚动在线学习</b><br>
   <i>Built with ❤️ by Yina for Chase哥</i><br>
   <sub>用Qlib的AI大脑 + 我们的实盘肌肉 = 无敌组合 🚀</sub>
 </p>

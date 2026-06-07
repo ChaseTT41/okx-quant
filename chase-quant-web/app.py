@@ -35,6 +35,13 @@ try:
 except ImportError:
     QLIB_AVAILABLE = False
 
+# Rolling Trainer (Phase 10)
+try:
+    from rolling_trainer import RollingTrainer, RollingModelRegistry, auto_rolling_check
+    ROLLING_AVAILABLE = True
+except ImportError:
+    ROLLING_AVAILABLE = False
+
 # ── 页面配置 ──
 st.set_page_config(
     page_title="Chase的量化策略 🐾",
@@ -1271,6 +1278,177 @@ with tab7:
                 for rf in sorted(report_files, reverse=True)[:5]:
                     st.caption(f"  • {rf.name}")
 
+        # ═══════════════════════════════════════════
+        # Phase 10: Rolling Training (在线学习)
+        # ═══════════════════════════════════════════
+        st.divider()
+        st.subheader("🔄 滚动在线学习 — Phase 10 🆕")
+
+        if not ROLLING_AVAILABLE:
+            st.warning("⚠️ Rolling Trainer 暂不可用")
+        else:
+            st.markdown("""
+            > 🔄 **滚动在线学习**: 定期自动重训模型, 适应市场变化 — 解决 vs Qlib 最大劣势
+            >
+            > 检查模型新鲜度 → 检测特征漂移 → 自动增量训练 → 模型版本管理
+            """)
+
+            # 初始化 rolling trainer
+            if "rolling_trainer" not in st.session_state:
+                st.session_state.rolling_trainer = RollingTrainer({
+                    "mode": "hybrid",
+                    "models_to_train": ["alstm", "transformer", "tabnet"],
+                    "qlib_epochs": 50,
+                })
+
+            rt = st.session_state.rolling_trainer
+            rt_status = rt.status()
+
+            # 状态卡片
+            rs_col1, rs_col2, rs_col3, rs_col4, rs_col5 = st.columns(5)
+            with rs_col1:
+                st.metric("模型快照", rt_status["n_snapshots"])
+            with rs_col2:
+                st.metric("覆盖模型", rt_status["n_models"], delta="种架构")
+            with rs_col3:
+                st.metric("覆盖主题", rt_status["n_themes"], delta="个")
+            with rs_col4:
+                max_age = rt_status["max_age_days"]
+                age_color = "🟢" if max_age <= 7 else "🟡" if max_age <= 21 else "🔴"
+                st.metric("最大年龄", f"{age_color} {max_age}天")
+            with rs_col5:
+                need_retrain = "是 🔧" if rt_status["should_retrain"] else "否 ✅"
+                st.metric("需重训", need_retrain)
+
+            # 模型新鲜度表
+            if rt_status["staleness_summary"]:
+                st.caption(f"📋 模型新鲜度 (最新训练: {rt_status['latest_training'][:19] if rt_status['latest_training'] != 'never' else '从未'})")
+                freshness_data = []
+                for s in rt_status["staleness_summary"]:
+                    freshness_data.append({
+                        "新鲜度": s["staleness"],
+                        "模型": s["model"],
+                        "主题": s["theme"],
+                        "版本": f"v{s['version']}",
+                        "年龄": f"{s['age_days']}天",
+                        "ICIR": f"{s['icir']:.3f}",
+                        "趋势": s["trend"],
+                        "漂移": f"{s['drift']:.2f}",
+                    })
+                st.dataframe(pd.DataFrame(freshness_data), hide_index=True, use_container_width=True)
+
+            # 滚动训练操作
+            st.caption("🎮 滚动训练控制")
+            roll_col1, roll_col2, roll_col3, roll_col4 = st.columns([2, 1, 1, 1])
+            with roll_col1:
+                roll_mode = st.selectbox(
+                    "窗口模式",
+                    options=["hybrid", "sliding", "expanding"],
+                    index=0,
+                    help="hybrid=2年滑动+拐点保留 | sliding=固定窗口 | expanding=全量历史",
+                )
+            with roll_col2:
+                roll_models = st.multiselect(
+                    "模型",
+                    options=["alstm", "transformer", "tabnet"],
+                    default=["alstm", "transformer"],
+                )
+            with roll_col3:
+                roll_epochs = st.slider("Epochs", 20, 200, 50, 10, key="roll_epochs")
+            with roll_col4:
+                roll_force = st.checkbox("强制全量", value=False,
+                                        help="忽略新鲜度检查, 强制重新训练所有模型")
+
+            if st.button("🔄 执行滚动训练", type="primary", key="roll_train_btn"):
+                with st.spinner(f"滚动训练中... 模式={roll_mode} | {len(roll_models)}模型×7主题"):
+                    try:
+                        import ccxt
+                        exchange = ccxt.binance({"enableRateLimit": True, "timeout": 15000})
+                        ohlcv = exchange.fetch_ohlcv("BTC/USDT", "1d", limit=800)
+                        df_btc = pd.DataFrame(ohlcv, columns=["date","open","high","low","close","volume"])
+
+                        # 更新配置
+                        rt.config["mode"] = roll_mode
+                        rt.config["models_to_train"] = roll_models
+                        rt.config["qlib_epochs"] = roll_epochs
+
+                        mode = "full" if roll_force else "update"
+                        result = rt.run(df_btc, force=roll_force, mode=mode)
+
+                        if result["action"] == "skip":
+                            st.success(f"✅ {result['reason']}")
+                        else:
+                            st.success(f"✅ 滚动训练完成!")
+                            if result.get("report"):
+                                r = result["report"]["summary"]
+                                imp_color = "green" if r["n_improved"] > r["n_degraded"] else "red"
+                                st.metric("训练模型", r["n_models_trained"], delta=f"↑{r['n_improved']} →{r['n_stable']} ↓{r['n_degraded']}")
+                                st.metric("平均ICIR", f"{r['mean_icir']:.4f}")
+                                st.metric("中位ICIR", f"{r['median_icir']:.4f}")
+
+                            # 显示 Top 表现
+                            if result.get("report", {}).get("top_performers"):
+                                with st.expander("🏆 Top 5 模型", expanded=True):
+                                    top_data = []
+                                    for tp in result["report"]["top_performers"]:
+                                        top_data.append({
+                                            "模型": tp["model_name"],
+                                            "主题": tp["theme_name"],
+                                            "ICIR": f"{tp['oos_icir']:.4f}",
+                                            "Hit%": f"{tp['oos_hit_rate']:.1%}",
+                                            "版本": f"v{tp['version']}",
+                                            "趋势": tp["icir_trend"],
+                                        })
+                                    st.dataframe(pd.DataFrame(top_data), hide_index=True, use_container_width=True)
+
+                            # 刷新状态
+                            st.rerun()
+
+                    except ImportError:
+                        st.error("❌ ccxt 未安装")
+                    except Exception as e:
+                        st.error(f"❌ 滚动训练失败: {e}")
+
+            # 自动检查按钮
+            if st.button("🔍 快速检查 (不重训)", key="roll_check_btn"):
+                rt_status = rt.status()
+                if rt_status["should_retrain"]:
+                    st.warning(f"⚠️ 建议重训: {rt_status['retrain_reason']}")
+                else:
+                    st.success(f"✅ {rt_status['retrain_reason']}")
+
+            # Cron 提示
+            with st.expander("⏰ 自动定时重训 (Cron)", expanded=False):
+                st.code("""
+        # 每周一早上8点自动检查并滚动训练
+        0 8 * * 1 cd ~/yina-app/chase-quant-web && python3 rolling_trainer.py --update
+
+        # 或使用 Python 直接调用
+        0 8 * * 1 cd ~/yina-app/chase-quant-web && python3 -c "
+        from rolling_trainer import auto_rolling_check
+        import ccxt, pandas as pd
+        ex = ccxt.binance()
+        ohlcv = ex.fetch_ohlcv('BTC/USDT', '1d', limit=800)
+        df = pd.DataFrame(ohlcv, columns=['date','open','high','low','close','volume'])
+        print(auto_rolling_check(df))
+        "
+                """, language="bash")
+
+        # 滚动历史报告
+        roll_reports = list(Path(__file__).parent.glob("data/rolling/rolling_report_*.json"))
+        if roll_reports:
+            with st.expander(f"📄 滚动训练历史 ({len(roll_reports)} 份报告)", expanded=False):
+                for rp in sorted(roll_reports, reverse=True)[:10]:
+                    try:
+                        with open(rp) as f:
+                            rr = json.load(f)
+                        st.caption(f"📅 {rp.stem.replace('rolling_report_', '')} | "
+                                  f"触发: {rr.get('trigger_reason', '?')} | "
+                                  f"模型: {rr.get('summary', {}).get('n_models_trained', '?')}个 | "
+                                  f"均ICIR: {rr.get('summary', {}).get('mean_icir', '?')}")
+                    except Exception:
+                        st.caption(f"  • {rp.name}")
+
         # 架构对比
         st.divider()
         with st.expander("📐 与 Qlib 原框架对比", expanded=False):
@@ -1285,7 +1463,7 @@ with tab7:
             | **图模型** | GATs (自实现) | GATs + RGCN + RSRL |
             | **集成方法** | DoubleEnsemble (自实现) | DoubleEnsemble + 更多变体 |
             | **自动因子挖掘** | ❌ | ✅ Alpha Mining Pipeline |
-            | **在线学习** | ❌ | ✅ Rolling Training |
+            | **在线学习** | ✅ **NEW! 滚动在线学习** | ✅ Rolling Training |
             | **市场覆盖** | ✅ 4市场 (Crypto+A股+美股+港股) | ❌ A股为主 |
             | **实盘交易** | ✅ 自动交易 + 五层风控 | ❌ 研究为主 |
             | **可视化** | ✅ Streamlit 仪表板 | ⚠️ Jupyter/CLI |
@@ -1298,7 +1476,7 @@ with tab7:
 # 底部
 # ═══════════════════════════════════════════
 st.divider()
-st.caption("🐾 Chase的量化策略 v2.0 | 由 Yina 为 Chase哥 打造 | Qlib增强 · 虚拟盘 · 风险自负")
+st.caption("🐾 Chase的量化策略 v2.1 | 由 Yina 为 Chase哥 打造 | Qlib增强 + 滚动在线学习 · 虚拟盘 · 风险自负")
 
 # 自动快照 (每60秒)
 if "last_snapshot" not in st.session_state:

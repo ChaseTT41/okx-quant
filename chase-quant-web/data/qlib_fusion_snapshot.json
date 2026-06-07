@@ -1,0 +1,127 @@
+{
+  "time": "2026-06-07T09:14:35.084500",
+  "symbol": "BTC/USDT",
+  "price": 61445.42,
+  "signal_weighted": -0.33,
+  "signal_equal": -0.33,
+  "consensus_ratio": 0.8462,
+  "divergence": 0.4506,
+  "action": "HOLD",
+  "confidence": 0.6346,
+  "suggested_size_pct": 0.0559,
+  "n_models_active": 3,
+  "n_themes_active": 7,
+  "models_available": [
+    "transformer",
+    "lgbm",
+    "alstm"
+  ],
+  "lgbm_signal": -0.335,
+  "feature_count": 286,
+  "model_predictions": [
+    {
+      "model": "alstm",
+      "theme": "趋势跟踪",
+      "prediction": -0.0083,
+      "direction": "SHORT",
+      "confidence": 0.1656,
+      "weight": 0.3
+    },
+    {
+      "model": "transformer",
+      "theme": "趋势跟踪",
+      "prediction": -0.0319,
+      "direction": "SHORT",
+      "confidence": 0.6376,
+      "weight": 0.3
+    },
+    {
+      "model": "alstm",
+      "theme": "均值回归",
+      "prediction": -0.0194,
+      "direction": "SHORT",
+      "confidence": 0.3881,
+      "weight": 0.3
+    },
+    {
+      "model": "transformer",
+      "theme": "均值回归",
+      "prediction": -0.0196,
+      "direction": "SHORT",
+      "confidence": 0.3928,
+      "weight": 0.3
+    },
+    {
+      "model": "alstm",
+      "theme": "量价确认",
+      "prediction": -0.0045,
+      "direction": "SHORT",
+      "confidence": 0.0908,
+      "weight": 0.3
+    },
+    {
+      "model": "transformer",
+      "theme": "量价确认",
+      "prediction": -0.0034,
+      "direction": "SHORT",
+      "confidence": 0.0675,
+      "weight": 0.3
+    },
+    {
+      "model": "lgbm",
+      "theme": "趋势跟踪",
+      "prediction": -1.0,
+      "direction": "SHORT",
+      "confidence": 0.319,
+      "weight": 0.3
+    },
+    {
+      "model": "lgbm",
+      "theme": "均值回归",
+      "prediction": -1.0,
+      "direction": "SHORT",
+      "confidence": 0.319,
+      "weight": 0.3
+    },
+    {
+      "model": "lgbm",
+      "theme": "量价确认",
+      "prediction": -1.0,
+      "direction": "SHORT",
+      "confidence": 0.85,
+      "weight": 0.3
+    },
+    {
+      "model": "lgbm",
+      "theme": "波动率突破",
+      "prediction": -1.0,
+      "direction": "SHORT",
+      "confidence": 0.85,
+      "weight": 0.3
+    },
+    {
+      "model": "lgbm",
+      "theme": "尾部风险",
+      "prediction": 0.0267,
+      "direction": "NEUTRAL",
+      "confidence": 0.212,
+      "weight": 0.3
+    },
+    {
+      "model": "lgbm",
+      "theme": "动量增强",
+      "prediction": -0.231,
+      "direction": "SHORT",
+      "confidence": 0.425,
+      "weight": 0.3
+    },
+    {
+      "model": "lgbm",
+      "theme": "跨市场联动",
+      "prediction": 0.001,
+      "direction": "NEUTRAL",
+      "confidence": 0.9,
+      "weight": 0.3
+    }
+  ]
+}
