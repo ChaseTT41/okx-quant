@@ -1,7 +1,48 @@
-# Yina App — Chase哥的量化交易系统 🐾
+# 🐾 Yina Quant — Chase哥的AI量化交易系统
 
-> 港股 + 加密货币 双轨量化分析平台
-> 蒸馏自 QuantDinger 全体系, 适配 Claude Code 交互
+> **Multi-Market + ML/DL + Auto Trade + Risk Control**  
+> 加密货币 · A股 · 美股 · 港股 | Qlib深度学习增强 | Streamlit 仪表板  
+> Built with ❤️ by Yina for Chase哥
+
+[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
+[![LightGBM](https://img.shields.io/badge/LightGBM-4.0+-00b159.svg)](https://lightgbm.readthedocs.io/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.28+-ff4b4b.svg)](https://streamlit.io/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+---
+
+## 🧬 核心亮点
+
+| 能力 | 状态 | 说明 |
+|------|:---:|------|
+| **4市场覆盖** | ✅ | 加密货币 (Binance) + A股 (akshare) + 美股 (yfinance) + 港股 (3136只) |
+| **500+特征工程** | ✅ | 17类别 · FDR筛选 · 西蒙斯风格 "让数据说话" |
+| **7主题子信号** | ✅ | 趋势/均值回归/量价/波动/尾部风险/动量/跨市场 |
+| **LightGBM** | ✅ | 7个独立主题模型 · PurgedKFold · ICIR 0.11-0.71 |
+| **🧠 Qlib DL模型** | ✅ **NEW** | ALSTM + Transformer + TabNet + GATs 深度学习 |
+| **模型融合 v5.0** | ✅ **NEW** | LightGBM + Qlib模型 ICIR加权融合 + 共识投票 |
+| **自动交易** | ✅ | auto_trade.py · ML驱动 · 多币种扫描 |
+| **五层风控** | ✅ | 事前→订单→持仓→组合→异常 · 硬止损-8% |
+| **Walk-Forward** | ✅ | 滚动窗口OOS验证 · 参数稳定性评分 |
+| **Web仪表板** | ✅ | Streamlit · 实时净值 · 一键交易 · 7个Tab |
+| **港股量化** | ✅ | 3136只全覆盖 · 五维评分 · 动量轮动 |
+
+---
+
+## 🆚 vs Microsoft Qlib
+
+> 详细对比见 [Qlib对比分析](https://github.com/ChaseTT41/yina-quant#vs-microsoft-qlib)
+
+| 维度 | 🐾 Yina Quant | 🏢 Microsoft Qlib |
+|------|:---:|:---:|
+| 市场覆盖 | **4市场** | A股为主 |
+| 深度学习模型 | ALSTM/Transformer/TabNet/GATs | **20+模型** |
+| 自动Alpha挖掘 | ❌ | ✅ |
+| 实盘交易 | ✅ | ❌ |
+| 风控体系 | **五层铁律** | 薄弱 |
+| 在线学习 | ❌ | ✅ |
+| **我们的策略** | **用Qlib的AI + 我们的实盘 = 🚀** | |
 
 ---
 
@@ -9,87 +50,199 @@
 
 ```
 yina-app/
-├── data/
-│   └── hk_stocks/                  # 港股数据 (40MB → 75MB 解压)
-│       ├── stock_list.parquet       # 3136只港股 (代码+名称)
-│       ├── all_daily.parquet        # 145万条合并日线 (2007-2026)
-│       └── daily/                   # 每只股票单独日线 (3136个文件)
+├── chase-quant-web/              # 🎯 核心量化仪表板
+│   ├── app.py                    # Streamlit Web App (7个Tab)
+│   ├── auto_trade.py             # 自动交易脚本 (Cron触发)
+│   │
+│   ├── feature_engine.py         # 500+特征工厂 (单值版)
+│   ├── feature_ts.py             # 时序特征工厂 v4.0 (500+特征一次计算)
+│   ├── feature_backtest_v4.py   # FDR校正 + PurgedKFold + ICIR筛选
+│   │
+│   ├── ml_signal_v4.py          # 信号引擎 v4.0 (LightGBM + 7子信号)
+│   ├── ml_signal_v5.py          # 🆕 信号引擎 v5.0 (Qlib DL + LightGBM 融合)
+│   ├── ml_lightgbm_trainer.py   # LightGBM训练器 + 模型注册表
+│   │
+│   ├── qlib_models.py           # 🆕 Qlib DL模型 (ALSTM/Transformer/TabNet/GATs)
+│   ├── qlib_trainer.py          # 🆕 Qlib模型训练器 + PurgedKFold
+│   │
+│   ├── ml_cross_market.py       # 跨市场数据 (ETH/SPY/DXY/VIX/F&G)
+│   ├── strategy_backtest.py     # 策略回测引擎
+│   ├── hyperparam_optimizer.py  # Optuna + Grid Search参数优化
+│   ├── walk_forward_validator.py # Walk-Forward滚动验证
+│   ├── bias_correction.py       # 偏差修正 (Survival Bias)
+│   │
+│   ├── signals.py               # 传统信号引擎 (RSI/MACD)
+│   ├── portfolio.py             # 组合管理 (3市场虚拟盘)
+│   ├── risk.py                  # 五层风控控制器
+│   │
+│   ├── data/                    # 数据 & 模型 & 回测结果
+│   │   ├── models/              # LightGBM模型 (.pkl) + Qlib模型 (.pth)
+│   │   ├── backtest_results/    # 回测报告
+│   │   └── optimization_results/ # 参数优化结果
+│   │
+│   └── requirements.txt
 │
-├── hk_stock_data.py                # 港股数据加载器
-├── hk_five_dim_scorer.py           # 五维评分卡 (港股版)
-├── hk_stock_screener.py            # 全市场批量筛选器
+├── hk_stock_data.py             # 港股数据加载器 (3136只)
+├── hk_five_dim_scorer.py        # 五维评分卡 (港股版)
+├── hk_stock_screener.py         # 港股全市场批量筛选
+├── hk_momentum_rotation.py     # 动量轮动策略 (backtrader)
 │
-├── reports/                        # 输出报告
-│   └── hk_screener_YYYYMMDD.md     # 每日筛选报告
-│
-├── requirements.txt                # Python 依赖
-└── README.md                       # 本文件
+├── data/hk_stocks/              # 港股数据 (145万条日线)
+├── reports/                     # 每日筛选报告
+└── README.md
 ```
+
+---
 
 ## 🚀 快速开始
 
+### 1. 安装依赖
+
 ```bash
-cd ~/yina-app
+cd ~/yina-app/chase-quant-web
 
-# 1. 安装依赖
-pip3 install pandas numpy pyarrow
+# 基础依赖
+pip install streamlit pandas numpy plotly ccxt yfinance lightgbm scikit-learn scipy
 
-# 2. 单只股票评分
-python3 hk_five_dim_scorer.py
+# Qlib 深度学习增强 (Phase 9)
+pip install torch torchvision torchaudio
 
-# 3. 批量筛选 (自选股)
-python3 hk_stock_screener.py
-
-# 4. 全市场扫描 (耗时较长)
-python3 hk_stock_screener.py --full
+# 参数优化
+pip install optuna
 ```
 
-## 🎯 模块说明
+### 2. 启动量化仪表板
 
-### hk_stock_data.py — 数据加载器
-- `HKStockData.search("腾讯")` → 按名称/代码搜索
-- `HKStockData.get_daily("00700")` → 单只股票完整日线
-- `HKStockData.get_multi_daily([...])` → 批量获取
-- `get_data()` → 全局单例
+```bash
+cd ~/yina-app/chase-quant-web
+streamlit run app.py --server.port 8501
+# 浏览器打开: http://localhost:8501
+```
 
-### hk_five_dim_scorer.py — 五维评分
-- `FiveDimScorer().score("00700")` → 单只股票完整评分
-- `FiveDimScorer().score_batch([...])` → 批量评分
-- 输出: [买/卖/观] + ⭐(1-5) + 置信度% + 五维明细 + 止损/目标
+### 3. 训练模型
 
-### hk_stock_screener.py — 批量筛选
-- `HKScreener().run_quick(codes)` → 快速评分指定列表
-- `HKScreener().run(top_n=50)` → 全市场扫描
-- `HKScreener().report(df)` → 格式化报告
+```bash
+# LightGBM 训练
+python3 ml_lightgbm_trainer.py
 
-## 🤖 Claude Code 集成
+# Qlib 深度学习训练 (NEW!)
+python3 qlib_trainer.py --model alstm --epochs 50
+python3 qlib_trainer.py --compare   # 对比所有模型 vs LightGBM
 
-在 Claude Code 中直接说以下关键词触发:
+# 策略回测
+python3 strategy_backtest.py
 
-| 命令 | 效果 |
-|------|------|
-| "港股评分 00700" | 腾讯五维评分 + 操作建议 |
-| "港股搜索 腾讯" | 搜索港股代码 |
-| "港股扫描" | 自选股批量评分 Top 榜 |
-| "港股日报" | 今日港股市场日报 |
-| "港股对比 00700 09988" | 腾讯 vs 阿里 多空对比 |
+# 参数优化
+python3 hyperparam_optimizer.py
 
-## 📊 五维评分体系
+# Walk-Forward 验证
+python3 walk_forward_validator.py
+```
 
-| 维度 | 权重 | 关键指标 |
-|------|:---:|---------|
-| 📈 趋势强度 | 25% | MACD + 均线排列 + ADX + 金叉 |
-| 🔄 超买超卖 | 15% | RSI(14) + 布林带位置 |
-| 🏗️ 支撑阻力 | 20% | 关键价位 + 距支撑/阻力距离 |
-| 💎 基本面 | 25% | 量价关系 + 动量 + 波动率 + 涨跌比 |
-| ⚡ 风险度 | 15% | 历史波动率 + 最大回撤 + 流动性 + VaR |
+### 4. 部署自动交易
+
+```bash
+# 添加到 crontab (每30分钟)
+*/30 * * * * cd ~/yina-app/chase-quant-web && python3 auto_trade.py --ml
+```
+
+---
+
+## 🧠 Qlib 深度学习模型详解 (Phase 9)
+
+### 模型架构
+
+| 模型 | 类型 | 擅长 | 论文 |
+|------|------|------|------|
+| **ALSTM** | Attention LSTM | 时序模式识别 + 注意力加权 | Feng et al., 2019 |
+| **Transformer** | Self-Attention | 长程依赖 + 全局时序建模 | Vaswani et al., 2017 |
+| **TabNet** | Attentive Tabular | 稀疏特征选择 + 可解释性 | Arik & Pfister, 2019 |
+| **GATs** | Graph Attention | 资产关系图 + 邻居聚合 | Veličković et al., 2018 |
+
+### 融合策略
+
+```
+286个特征 (FeatureFactoryV4)
+    │
+    ├──→ LightGBM × 7 主题  →  7个预测
+    ├──→ ALSTM    × 7 主题  →  7个预测
+    ├──→ Transformer × 7 主题 → 7个预测
+    └──→ TabNet   × 7 主题  →  7个预测
+                                    │
+                             ICIR 加权融合
+                            + 共识投票机制
+                            + 分歧惩罚
+                                    │
+                              最终信号
+                        BUY (>0.5) / HOLD / SELL (<-0.5)
+```
+
+---
+
+## 🛡️ 风控铁律 (5层防御)
+
+| 层级 | 规则 | 触发条件 |
+|------|------|---------|
+| 🔴 硬止损 | 无条件-8%止损 | 单笔亏损≥8% |
+| 💰 单笔上限 | ≤ 总资金 2% | 潜在亏损超限 |
+| 📦 持仓上限 | ≤ 5 只 | 同时持仓数 |
+| 📊 仓位上限 | ≤ 40% 单仓位 | 单仓位集中 |
+| 🛑 日熔断 | 日亏损 > 5% 停交易 | 日内回撤 |
+
+---
+
+## 📊 港股量化模块
+
+```bash
+# 单只评分
+python3 hk_five_dim_scorer.py 00700
+
+# 全市场扫描 (3136只)
+python3 hk_stock_screener.py --full --top 50
+
+# 动量轮动回测
+python3 hk_momentum_rotation.py
+```
+
+### 五维评分卡
+
+| 维度 | 权重 | 指标 |
+|------|:---:|------|
+| 📈 趋势强度 | 25% | MACD + 均线排列 + ADX |
+| 🔄 超买超卖 | 15% | RSI + 布林带 |
+| 🏗️ 支撑阻力 | 20% | 关键价位 + 距离 |
+| 💎 基本面 | 25% | 量价 + 动量 + 波动率 |
+| ⚡ 风险度 | 15% | 历史波动率 + VaR |
+
+---
 
 ## 🔮 路线图
 
-- [x] 港股数据接入
-- [x] 五维评分卡 (港股版)
-- [x] 批量筛选器
-- [ ] 动量轮动回测 (backtrader)
-- [ ] Multi-LLM Ensemble 集成
-- [ ] 企业微信日报推送
-- [ ] 纸交易订单模拟
+- [x] 港股数据接入 + 五维评分 (3136只)
+- [x] Streamlit Web仪表板 (3市场虚拟盘)
+- [x] ML特征工厂 v4.0 (500+特征)
+- [x] LightGBM 7主题模型训练
+- [x] Walk-Forward优化 + 参数验证
+- [x] 跨市场数据 (ETH/SPY/DXY/VIX/F&G)
+- [x] **🧠 Qlib深度学习模型集成 (ALSTM/Transformer/TabNet/GATs)**
+- [x] **模型融合 v5.0 (LightGBM + Qlib DL)**
+- [x] 模型版本管理 (自动老化监控)
+- [ ] GATs 真实资产关系图 + 多资产联合预测
+- [ ] 在线学习 (Rolling Training)
+- [ ] 自动Alpha挖掘 (表达式引擎)
+- [ ] 企业微信日报自动推送
+- [ ] 订单执行优化 (拆单算法)
+
+---
+
+## 📄 License
+
+MIT License — 欢迎 Star ⭐ & Fork
+
+---
+
+<p align="center">
+  <b>🐾 Chase的量化策略 v2.0 — Qlib增强版</b><br>
+  <i>Built with ❤️ by Yina for Chase哥</i><br>
+  <sub>用Qlib的AI大脑 + 我们的实盘肌肉 = 无敌组合 🚀</sub>
+</p>

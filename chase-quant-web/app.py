@@ -26,6 +26,15 @@ try:
 except ImportError:
     ML_AVAILABLE = False
 
+# Qlib深度学习模型 (Phase 9)
+try:
+    from ml_signal_v5 import MLSignalEngineV5, FusionSignal
+    from qlib_trainer import QlibTrainer
+    from qlib_models import MODEL_REGISTRY
+    QLIB_AVAILABLE = True
+except ImportError:
+    QLIB_AVAILABLE = False
+
 # ── 页面配置 ──
 st.set_page_config(
     page_title="Chase的量化策略 🐾",
@@ -119,8 +128,8 @@ with st.sidebar:
 
 
 # ── Tab 页 ──
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📊 总览", "📈 信号", "💼 持仓", "📋 交易记录", "🛡️ 风控", "🧬 ML信号"
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "📊 总览", "📈 信号", "💼 持仓", "📋 交易记录", "🛡️ 风控", "🧬 ML信号", "🧠 Qlib深度模型"
 ])
 
 # ═══════════════════════════════════════════
@@ -957,10 +966,339 @@ with tab6:
             pass
 
 # ═══════════════════════════════════════════
+# Tab 7: Qlib 深度学习模型
+# ═══════════════════════════════════════════
+with tab7:
+    st.header("🧠 Qlib 深度学习模型 — Phase 9")
+
+    if not QLIB_AVAILABLE:
+        st.warning("⚠️ Qlib 模型引擎暂不可用 — 请检查 PyTorch 安装")
+        st.code("pip install torch torchvision torchaudio", language="bash")
+    else:
+        st.markdown("""
+        > 🧠 **Qlib 风格深度学习**: 将 Microsoft Qlib 的核心模型架构嫁接到我们的特征矩阵上
+        >
+        > ALSTM (时序注意力) | Transformer (长程依赖) | TabNet (特征选择) | GATs (资产关系图)
+        >
+        > 与 LightGBM 互补 — **树模型 + 深度学习 = 王炸组合**
+        """)
+
+        # 模型状态
+        model_col1, model_col2, model_col3, model_col4 = st.columns(4)
+        with model_col1:
+            st.metric("模型架构", "4")
+        with model_col2:
+            try:
+                import torch
+                device = "🖥️ GPU" if torch.cuda.is_available() else "💻 CPU"
+                st.metric("计算设备", device)
+            except Exception:
+                st.metric("计算设备", "❌")
+        with model_col3:
+            # 检查已有模型
+            model_files = list(Path(__file__).parent.glob("data/models/qlib_*.pth"))
+            st.metric("已训练模型", len(model_files))
+        with model_col4:
+            report_path = Path(__file__).parent / "data" / "qlib_reports" / "qlib_train_latest.json"
+            if report_path.exists():
+                try:
+                    with open(report_path) as f:
+                        report = json.load(f)
+                    st.metric("最新报告", report.get("generated_at", "?")[:10])
+                except Exception:
+                    st.metric("最新报告", "未找到")
+            else:
+                st.metric("最新报告", "未训练")
+
+        st.divider()
+
+        # 模型架构图
+        with st.expander("📐 模型架构", expanded=False):
+            st.markdown("""
+            ### Qlib 深度学习模型架构
+
+            ```
+                        FeatureFactoryV4 (286特征 × 17类别)
+                                 │
+                    ┌────────────┼────────────┬──────────────┐
+                    ▼            ▼            ▼              ▼
+                 ALSTM       Transformer   TabNet         GATs
+              "时序+注意力"   "长程Self-Attn" "特征选择"   "资产关系图"
+                    │            │            │              │
+                    └────────────┼────────────┴──────────────┘
+                                 │
+                         模型融合层
+                    (ICIR加权 + 共识投票)
+                                 │
+                            最终信号
+                    BUY (>0.5) / HOLD / SELL (<-0.5)
+            ```
+
+            | 模型 | 擅长 | 输入 | 特色 |
+            |------|------|------|------|
+            | **ALSTM** | 时序模式识别 | (T, 60) 窗口 | 双向LSTM + 多头注意力池化 |
+            | **Transformer** | 长程依赖 | (T, 60) 窗口 | 位置编码 + Self-Attention |
+            | **TabNet** | 特征重要性 | 单步特征向量 | Sparse Attention → 可解释特征选择 |
+            | **GATs** | 资产关系 | 多资产特征 + 图 | 注意力聚合邻居节点 |
+            """)
+
+        # 训练控制
+        st.subheader("🎮 模型训练")
+        train_col1, train_col2, train_col3 = st.columns([2, 1, 1])
+        with train_col1:
+            qlib_model_choice = st.multiselect(
+                "选择模型架构",
+                options=["alstm", "transformer", "tabnet"],
+                default=["alstm", "transformer"],
+                help="GATs 需要预建资产关系图, 暂不默认训练",
+            )
+        with train_col2:
+            qlib_epochs = st.slider("训练轮数", 20, 200, 50, 10,
+                                    help="更多轮数=更好效果但更慢")
+        with train_col3:
+            qlib_double = st.checkbox("DoubleEnsemble", value=False,
+                                      help="两阶段集成降低过拟合")
+
+        if st.button("🚀 训练 Qlib 模型", type="primary", key="qlib_train_btn"):
+            with st.spinner(f"正在训练 {len(qlib_model_choice)} 个模型 × 7个主题..."):
+                try:
+                    import ccxt
+                    exchange = ccxt.binance({"enableRateLimit": True, "timeout": 15000})
+                    ohlcv = exchange.fetch_ohlcv("BTC/USDT", "1d", limit=400)
+                    df_btc = pd.DataFrame(ohlcv, columns=["date","open","high","low","close","volume"])
+
+                    trainer = QlibTrainer({
+                        "n_epochs_max": qlib_epochs,
+                        "batch_size": 32,
+                        "seq_len": 60,
+                    })
+
+                    results = trainer.train_all(
+                        df_btc,
+                        models=qlib_model_choice,
+                        use_double_ensemble=qlib_double,
+                    )
+
+                    if results:
+                        st.success(f"✅ 训练完成! {len(results)} 个模型")
+                        # 显示结果表
+                        result_rows = []
+                        for r in sorted(results, key=lambda x: x.oos_icir, reverse=True):
+                            vs_lgbm = f"{r.improvement_vs_lgbm:+.1f}%" if r.lgbm_icir != 0 else "N/A"
+                            result_rows.append({
+                                "模型": r.model_name,
+                                "主题": r.theme_name,
+                                "ICIR": f"{r.oos_icir:.4f}",
+                                "R²": f"{r.oos_r2:.4f}",
+                                "Hit%": f"{r.oos_hit_rate:.1%}",
+                                "vs LGBM": vs_lgbm,
+                                "特征数": r.n_features_used,
+                            })
+                        st.dataframe(pd.DataFrame(result_rows), hide_index=True, use_container_width=True)
+                    else:
+                        st.warning("⚠️ 训练未产生结果, 检查数据是否充足")
+
+                except ImportError:
+                    st.error("❌ ccxt 未安装, 无法获取训练数据")
+                except Exception as e:
+                    st.error(f"❌ 训练失败: {e}")
+
+        st.divider()
+
+        # 实时预测
+        st.subheader("🔮 实时预测 — Qlib vs LightGBM 对比")
+
+        if st.button("🧠 生成 Qlib 融合信号", type="primary", key="qlib_predict_btn"):
+            with st.spinner("正在运行多模型融合预测..."):
+                try:
+                    import ccxt
+                    exchange = ccxt.binance({"enableRateLimit": True, "timeout": 15000})
+                    ohlcv = exchange.fetch_ohlcv("BTC/USDT", "1d", limit=400)
+                    df_btc = pd.DataFrame(ohlcv, columns=["date","open","high","low","close","volume"])
+
+                    # v4 LightGBM 信号
+                    engine_v4 = MLSignalEngineV4()
+                    signal_v4 = engine_v4.generate_signal(df_btc, "BTC/USDT", use_lgbm=True)
+
+                    # v5 融合信号
+                    engine_v5 = MLSignalEngineV5(use_qlib=True, use_lgbm=True)
+                    signal_v5 = engine_v5.generate_signal(df_btc, "BTC/USDT")
+
+                    # ── 对比卡片 ──
+                    col_lgbm, col_qlib, col_fusion = st.columns(3)
+
+                    with col_lgbm:
+                        lgbm_val = signal_v4.signal_lgbm if signal_v4.lgbm_available else signal_v4.signal_ic
+                        lgbm_action_color = "#00ff88" if signal_v4.action == "BUY" else "#ff4444" if signal_v4.action == "SELL" else "#888"
+                        st.markdown(f"""
+                        <div style="background:#1a1d24; border-radius:16px; padding:20px; text-align:center; border:2px solid #4488ff;">
+                            <div style="font-size:14px; color:#888;">LightGBM (v4)</div>
+                            <div style="font-size:32px; font-weight:bold; color:{lgbm_action_color};">{signal_v4.action}</div>
+                            <div style="color:#aaa; margin-top:8px;">信号: {lgbm_val:+.4f}</div>
+                            <div style="color:#888;">置信: {signal_v4.confidence:.0%}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col_qlib:
+                        # Qlib ensemble 平均
+                        qlib_preds = [p for p in signal_v5.model_predictions if p.model_name != "lgbm"]
+                        qlib_mean = np.mean([p.prediction for p in qlib_preds]) if qlib_preds else 0
+                        qlib_action = "BUY" if qlib_mean > 0.001 else "SELL" if qlib_mean < -0.001 else "HOLD"
+                        qlib_color = "#00ff88" if qlib_action == "BUY" else "#ff4444" if qlib_action == "SELL" else "#888"
+                        st.markdown(f"""
+                        <div style="background:#1a1d24; border-radius:16px; padding:20px; text-align:center; border:2px solid #ff8800;">
+                            <div style="font-size:14px; color:#888;">Qlib Ensemble</div>
+                            <div style="font-size:32px; font-weight:bold; color:{qlib_color};">{qlib_action}</div>
+                            <div style="color:#aaa; margin-top:8px;">信号: {qlib_mean:+.4f}</div>
+                            <div style="color:#888;">{len(qlib_preds)}个模型</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col_fusion:
+                        fusion_action = signal_v5.action
+                        fusion_color = "#00ff88" if fusion_action == "BUY" else "#ff4444" if fusion_action == "SELL" else "#ffaa00"
+                        st.markdown(f"""
+                        <div style="background:#1a1d24; border-radius:16px; padding:20px; text-align:center; border:3px solid {fusion_color};">
+                            <div style="font-size:14px; color:#888;">🧬 融合信号 (v5)</div>
+                            <div style="font-size:36px; font-weight:bold; color:{fusion_color};">{fusion_action}</div>
+                            <div style="color:#aaa; margin-top:8px;">加权: {signal_v5.signal_weighted:+.4f}</div>
+                            <div style="color:#888;">置信: {signal_v5.confidence:.0%}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    # 融合详情
+                    st.divider()
+                    st.subheader("🔬 融合详情")
+
+                    detail_col1, detail_col2, detail_col3, detail_col4 = st.columns(4)
+                    with detail_col1:
+                        st.metric("共识比例", f"{signal_v5.consensus_ratio:.0%}",
+                                 delta=f"{signal_v5.n_models_active}个模型/{len(signal_v5.model_predictions)}个预测")
+                    with detail_col2:
+                        st.metric("模型分歧度", f"{signal_v5.divergence:.4f}",
+                                 delta="低分歧✅" if signal_v5.divergence < 0.15 else "高分歧⚠️")
+                    with detail_col3:
+                        st.metric("建议仓位", f"{signal_v5.suggested_size_pct:.0%}",
+                                 delta=f"¥{pf.total_value * signal_v5.suggested_size_pct:,.0f}")
+                    with detail_col4:
+                        agreement = "✅ 一致" if (signal_v4.action == signal_v5.action) else "⚠️ 分歧"
+                        st.metric("v4 vs v5", agreement)
+
+                    # 各模型预测明细
+                    st.subheader("📋 各模型 × 主题预测明细")
+                    pred_data = []
+                    for p in signal_v5.model_predictions:
+                        if p.model_name == "lgbm":
+                            continue
+                        pred_data.append({
+                            "模型": p.model_name.replace("qlib_", ""),
+                            "主题": p.theme_name,
+                            "预测": f"{p.prediction:+.4f}",
+                            "方向": p.direction,
+                            "权重": f"{p.weight:.3f}",
+                            "ICIR": f"{p.oos_icir:.3f}",
+                        })
+                    if pred_data:
+                        st.dataframe(pd.DataFrame(pred_data), hide_index=True, use_container_width=True)
+                    else:
+                        st.info("📭 Qlib 模型预测数据未生成 — 请先训练模型")
+
+                    # 对比柱状图
+                    if pred_data:
+                        st.subheader("📊 各模型预测信号值")
+                        model_names = list(set(d["模型"] for d in pred_data))
+                        model_avgs = []
+                        for m in model_names:
+                            m_preds = [float(d["预测"]) for d in pred_data if d["模型"] == m]
+                            model_avgs.append({"模型": m, "平均信号": np.mean(m_preds)})
+
+                        fig = go.Figure()
+                        colors = ["#00ff88" if v["平均信号"] > 0 else "#ff4444" for v in model_avgs]
+                        fig.add_trace(go.Bar(
+                            x=[v["模型"] for v in model_avgs],
+                            y=[v["平均信号"] for v in model_avgs],
+                            marker_color=colors,
+                            text=[f"{v['平均信号']:+.4f}" for v in model_avgs],
+                            textposition="outside",
+                        ))
+                        fig.add_hline(y=0, line_dash="dash", line_color="gray")
+                        fig.update_layout(
+                            template="plotly_dark", height=250,
+                            margin=dict(l=0, r=0, t=10, b=0),
+                            title="各模型平均信号 (跨7主题)",
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    # 分歧检测
+                    if signal_v5.divergence > 0.2:
+                        st.warning(f"⚠️ 模型间分歧较大 ({signal_v5.divergence:.3f}) — 市场不确定性高, 建议降低仓位")
+                    elif signal_v5.consensus_ratio > 0.7:
+                        st.success(f"✅ 模型共识度高 ({signal_v5.consensus_ratio:.0%}) — 信号可信任")
+                    else:
+                        st.info(f"ℹ️ 模型意见分散 — 建议参考 LightGBM 基线")
+
+                except ImportError:
+                    st.error("❌ 依赖缺失 — 请安装 ccxt, torch 等")
+                except Exception as e:
+                    st.error(f"❌ 预测失败: {e}")
+
+        # 模型管理
+        st.divider()
+        with st.expander("🔄 Qlib 模型管理", expanded=False):
+            model_files = list(Path(__file__).parent.glob("data/models/qlib_*.pth"))
+            if model_files:
+                st.caption(f"📦 {len(model_files)} 个 Qlib 模型文件")
+                mf_data = []
+                for mf in sorted(model_files):
+                    mtime = datetime.fromtimestamp(mf.stat().st_mtime)
+                    size_kb = mf.stat().st_size / 1024
+                    parts = mf.stem.split("_")
+                    mf_data.append({
+                        "文件名": mf.name,
+                        "模型": parts[1] if len(parts) > 1 else "?",
+                        "主题": parts[2] if len(parts) > 2 else "?",
+                        "大小": f"{size_kb:.0f}KB",
+                        "修改时间": mtime.strftime("%m-%d %H:%M"),
+                    })
+                st.dataframe(pd.DataFrame(mf_data), hide_index=True, use_container_width=True)
+            else:
+                st.caption("💡 尚未训练 Qlib 模型 — 点击上方训练按钮")
+
+            # 训练报告历史
+            report_files = list(Path(__file__).parent.glob("data/qlib_reports/*.json"))
+            if report_files:
+                st.caption(f"📄 {len(report_files)} 份训练报告")
+                for rf in sorted(report_files, reverse=True)[:5]:
+                    st.caption(f"  • {rf.name}")
+
+        # 架构对比
+        st.divider()
+        with st.expander("📐 与 Qlib 原框架对比", expanded=False):
+            st.markdown("""
+            ### Chase Quant vs Microsoft Qlib — 架构对比
+
+            | 维度 | Chase Quant (v5) | Microsoft Qlib |
+            |------|:---:|:---:|
+            | **时序模型** | ALSTM (自实现) | ALSTM + GRU + LSTM |
+            | **注意力模型** | Transformer (自实现) | Transformer + HIST |
+            | **特征选择** | TabNet (自实现) | TabNet + 表达式引擎 |
+            | **图模型** | GATs (自实现) | GATs + RGCN + RSRL |
+            | **集成方法** | DoubleEnsemble (自实现) | DoubleEnsemble + 更多变体 |
+            | **自动因子挖掘** | ❌ | ✅ Alpha Mining Pipeline |
+            | **在线学习** | ❌ | ✅ Rolling Training |
+            | **市场覆盖** | ✅ 4市场 (Crypto+A股+美股+港股) | ❌ A股为主 |
+            | **实盘交易** | ✅ 自动交易 + 五层风控 | ❌ 研究为主 |
+            | **可视化** | ✅ Streamlit 仪表板 | ⚠️ Jupyter/CLI |
+            | **开源** | ✅ (本仓库) | ✅ MIT License |
+
+            > 💡 **我们的定位**: 用 Qlib 的 AI 能力武装我们的实盘系统 — 取其精华, 为我所用。
+            """)
+
+# ═══════════════════════════════════════════
 # 底部
 # ═══════════════════════════════════════════
 st.divider()
-st.caption("🐾 Chase的量化策略 v1.0 | 由 Yina 为 Chase哥 打造 | 虚拟盘 · 风险自负")
+st.caption("🐾 Chase的量化策略 v2.0 | 由 Yina 为 Chase哥 打造 | Qlib增强 · 虚拟盘 · 风险自负")
 
 # 自动快照 (每60秒)
 if "last_snapshot" not in st.session_state:

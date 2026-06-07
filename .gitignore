@@ -43,6 +43,9 @@ credentials.json
 .pytest_cache/
 hk-stock-quant/
 
-# Chase Quant Web — 缓存 + 备份
+# Chase Quant Web — 缓存 + 备份 + Qlib模型
 chase-quant-web/data/cross_market_cache/
 chase-quant-web/data/models_backup*/
+chase-quant-web/data/models/*.pth
+chase-quant-web/data/models/*.pkl
+chase-quant-web/data/qlib_reports/
