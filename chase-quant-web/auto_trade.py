@@ -991,6 +991,8 @@ if __name__ == "__main__":
                        help="执行紧急度 0-1 (默认0.5)")
     parser.add_argument("--ml-scan", action="store_true",
                        help="仅ML扫描, 不执行交易 (调试用)")
+    parser.add_argument("--wechat-report", action="store_true",
+                       help="交易后推送日报到企业微信 (Phase 14)")
     args = parser.parse_args()
 
     if args.report:
@@ -1052,3 +1054,53 @@ if __name__ == "__main__":
             print(f"  {r}")
     else:
         print("\n💤 本次扫描无操作")
+
+    # Phase 14: 交易后推送企业微信简报
+    if args.wechat_report:
+        print("\n📱 推送交易简报到企业微信...")
+        try:
+            from wechat_report import WeChatPusher, DataCollector
+            pusher = WeChatPusher()
+            collector = DataCollector()
+
+            # 构建精简版交易简报
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            pf_local = PortfolioManager()
+
+            lines = [
+                f"📊 **Yina交易简报** | {now_str}",
+                f"> Chase哥的AI量化助手 · 自动交易通知",
+                "",
+                "## 🏷️ 本次操作",
+            ]
+
+            if results:
+                for r in results[:10]:
+                    lines.append(f"> {r}")
+            else:
+                lines.append("> 💤 本次扫描无操作")
+
+            lines.append("")
+            lines.append("## 📈 当前持仓")
+            open_pos = pf_local.open_positions
+            if open_pos:
+                for pos in open_pos[:5]:
+                    pnl_str = f"{pos.pnl_pct:+.2f}%"
+                    lines.append(f"> {pos.symbol}: {pnl_str} | 入场¥{pos.entry_price:,.0f} → 现价¥{pos.current_price:,.0f}")
+            else:
+                lines.append("> 当前无持仓")
+
+            lines.append("")
+            lines.append(f"> 🛡️ 总资产: ¥{pf_local.total_value:,.2f} | 总盈亏: {pf_local.total_pnl_pct:+.2f}%")
+            lines.append("")
+            lines.append("---")
+            lines.append(f"🐾 Yina Quant v2.5 · {now_str}")
+
+            brief = "\n".join(lines)
+            success = pusher.push_markdown(brief)
+            if success:
+                print("✅ 交易简报已推送到企业微信!")
+            else:
+                print("⚠️ 推送失败 (不影响交易结果)")
+        except Exception as e:
+            print(f"⚠️ 推送失败: {e} (不影响交易结果)")

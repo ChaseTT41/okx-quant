@@ -2034,6 +2034,7 @@ with tab7:
             | **集成方法** | DoubleEnsemble (自实现) | DoubleEnsemble + 更多变体 |
             | **自动因子挖掘** | ✅ **NEW! 表达式引擎+遗传算法** | ✅ Alpha Mining Pipeline |
             | **订单执行优化** | ✅ **NEW! 拆单算法 (TWAP/VWAP/Adaptive/Iceberg)** | ❌ 研究为主 |
+            | **企业微信日报推送** | ✅ **NEW! 智能日报+算法洞察+企微推送** | ❌ |
             | **在线学习** | ✅ **滚动在线学习** | ✅ Rolling Training |
             | **资产关系图** | ✅ **NEW! 6维关系+图漂移检测** | ⚠️ 研究为主 |
             | **市场覆盖** | ✅ 4市场 (Crypto+A股+美股+港股) | ❌ A股为主 |
@@ -2044,11 +2045,89 @@ with tab7:
             > 💡 **我们的定位**: 用 Qlib 的 AI 能力武装我们的实盘系统 — 取其精华, 为我所用。
             """)
 
+        # 企业微信日报推送 (Phase 14)
+        st.divider()
+        with st.expander("📱 企业微信日报推送 — Phase 14 🆕", expanded=False):
+            col_r1, col_r2 = st.columns([1, 2])
+
+            with col_r1:
+                st.markdown("### 📋 日报配置")
+                report_mode = st.selectbox(
+                    "报告时段",
+                    ["auto", "morning", "afternoon", "evening"],
+                    format_func=lambda x: {"auto": "🤖 自动判断", "morning": "🌅 早报 (08:30)", "afternoon": "☀️ 午报 (14:00)", "evening": "🌙 晚报 (22:00)"}[x],
+                    key="wechat_mode"
+                )
+                dry_run = st.checkbox("🔇 Dry-run (只预览不推送)", value=True, key="wechat_dry")
+
+                if st.button("🚀 生成并推送日报", type="primary", use_container_width=True, key="wechat_push_btn"):
+                    with st.spinner("🔍 正在采集数据 & 生成报告..."):
+                        try:
+                            from wechat_report import DailyReportEngine
+                            engine = DailyReportEngine()
+                            report = engine.generate_and_push(mode=report_mode, dry_run=dry_run)
+                            st.session_state.wechat_report = report
+                            st.session_state.wechat_report_text = ReportFormatter.format(report)  # noqa: F821
+                            if dry_run:
+                                st.success("✅ 报告已生成! (Dry-run, 未推送)")
+                            else:
+                                st.success("✅ 报告已推送到企业微信群「金融监控」!")
+                        except Exception as e:
+                            st.error(f"❌ 生成失败: {e}")
+
+                st.markdown("---")
+                st.markdown("### ⏰ 定时推送配置")
+                st.code("""# 添加到 crontab:
+# 早报 08:30
+30 8 * * * cd ~/yina-app/chase-quant-web && python3 wechat_report.py --mode morning
+
+# 午报 14:00
+0 14 * * * cd ~/yina-app/chase-quant-web && python3 wechat_report.py --mode afternoon
+
+# 晚报 22:00
+0 22 * * * cd ~/yina-app/chase-quant-web && python3 wechat_report.py --mode evening""", language="bash")
+
+            with col_r2:
+                st.markdown("### 📊 报告预览")
+                if "wechat_report_text" in st.session_state:
+                    st.markdown(st.session_state.wechat_report_text)
+                else:
+                    st.info("👆 点击左侧「生成并推送日报」查看预览")
+
+                st.markdown("---")
+                st.markdown("### 📋 最近历史报告")
+                reports_dir = Path(__file__).parent / "data" / "reports"
+                if reports_dir.exists():
+                    report_files = sorted(reports_dir.glob("report_*.md"), reverse=True)[:10]
+                    if report_files:
+                        for rf in report_files:
+                            st.caption(f"📄 {rf.name}")
+                    else:
+                        st.caption("暂无历史报告")
+                else:
+                    st.caption("暂无历史报告")
+
+        # Phase 14: 企业微信日报推送 — 在auto_trade中集成
+        st.divider()
+        with st.expander("📱 Auto-Trade + 日报联动", expanded=False):
+            st.markdown("""
+            ### 🔗 自动交易后推送简报
+
+            在 `auto_trade.py` 中集成交易后推送:
+            ```bash
+            # 扫描并交易, 完成后推送到企业微信
+            python3 auto_trade.py --rolling --execution smart --ml-scan --wechat-report
+            ```
+
+            > 💡 此模式会在每次自动交易后推送交易简报到企业微信群,
+            > 包含: 本次决策/执行信息/持仓变动/风控状态
+            """)
+
 # ═══════════════════════════════════════════
 # 底部
 # ═══════════════════════════════════════════
 st.divider()
-st.caption("🐾 Chase的量化策略 v2.4 | 由 Yina 为 Chase哥 打造 | Qlib增强 + 在线学习 + 资产关系图 + Alpha挖掘 + 订单执行优化 · 虚拟盘 · 风险自负")
+st.caption("🐾 Chase的量化策略 v2.5 | 由 Yina 为 Chase哥 打造 | Qlib增强 + 在线学习 + 资产关系图 + Alpha挖掘 + 订单执行优化 + 企微日报推送 · 虚拟盘 · 风险自负")
 
 # 自动快照 (每60秒)
 if "last_snapshot" not in st.session_state:

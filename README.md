@@ -26,6 +26,7 @@
 | **🔗 资产关系图** | ✅ **NEW** | 6维关系矩阵 · CrossAssetGAT · 图漂移检测 · 多资产联合预测 |
 | **🔬 自动Alpha挖掘** | ✅ **NEW** | 表达式引擎 · 46模板 · Grid/Genetic/Random · FDR筛选 |
 | **📊 订单执行优化** | ✅ **NEW** | TWAP/VWAP/Adaptive/Iceberg/Smart · Almgren-Chriss冲击模型 |
+| **📱 企业微信日报推送** | ✅ **NEW** | 智能日报生成 · 算法洞察+推算逻辑 · 企微Webhook自动推送 |
 | **自动交易** | ✅ | auto_trade.py · ML驱动 · 多币种扫描 |
 | **五层风控** | ✅ | 事前→订单→持仓→组合→异常 · 硬止损-8% |
 | **Walk-Forward** | ✅ | 滚动窗口OOS验证 · 参数稳定性评分 |
@@ -44,6 +45,7 @@
 | 深度学习模型 | ALSTM/Transformer/TabNet/GATs | **20+模型** |
 | 自动Alpha挖掘 | ✅ **NEW! 表达式引擎** | ✅ |
 | 订单执行优化 | ✅ **NEW! 拆单算法** | ❌ |
+| 企业微信日报推送 | ✅ **NEW! 智能日报+企微推送** | ❌ |
 | 实盘交易 | ✅ | ❌ |
 | 风控体系 | **五层铁律** | 薄弱 |
 | 在线学习 | ✅ **滚动在线学习** | ✅ |
@@ -74,6 +76,7 @@ yina-app/
 │   ├── asset_graph.py           # 🆕 资产关系图引擎 (Phase 11)
 │   ├── alpha_miner.py           # 🆕 自动Alpha挖掘引擎 (Phase 12)
 │   ├── execution.py             # 🆕 订单执行优化引擎 (Phase 13)
+│   ├── wechat_report.py         # 🆕 企业微信日报推送 (Phase 14)
 │   │
 │   ├── ml_cross_market.py       # 跨市场数据 (ETH/SPY/DXY/VIX/F&G)
 │   ├── strategy_backtest.py     # 策略回测引擎
@@ -166,6 +169,14 @@ python3 execution.py --simulate BTC/USDT --qty 0.1 --strategy smart  # 模拟拆
 python3 execution.py --compare                             # 策略对比
 python3 execution.py --stats                               # 执行质量统计
 python3 auto_trade.py --rolling --execution smart --ml-scan  # 扫描+执行配置预览
+
+# 📱 企业微信日报推送 (NEW! Phase 14)
+python3 wechat_report.py                         # 自动判断时段, 生成并推送
+python3 wechat_report.py --mode morning          # 早报 (08:30)
+python3 wechat_report.py --mode evening          # 晚报 (22:00)
+python3 wechat_report.py --dry-run               # 预览不推送
+python3 wechat_report.py --test                  # 测试Webhook连通性
+python3 auto_trade.py --rolling --ml --wechat-report  # 交易后推送简报
 
 # 策略回测
 python3 strategy_backtest.py
@@ -314,6 +325,34 @@ python3 walk_forward_validator.py
 └──────────────────────────────────────────────────────────────┘
 ```
 
+### 企业微信日报推送 (Phase 14) 🆕
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                   WeChat Report Engine                        │
+│                                                              │
+│  数据采集层                    日报生成层                      │
+│  ┌────────────────┐         ┌──────────────────────┐         │
+│  │ Binance行情     │         │ 📊 市场概览           │         │
+│  │ F&G恐慌指数     │         │   价格/涨跌/成交量    │         │
+│  │ ML信号引擎 v5   │  融合   │ 🤖 ML信号洞察         │         │
+│  │ 虚拟盘持仓      │ ────→  │   融合方向+推算逻辑    │         │
+│  │ 五层风控状态    │         │ 📈 模拟盘持仓+盈亏    │         │
+│  │ 执行质量统计    │         │ 🛡️ 风控状态           │         │
+│  │ 模型新鲜度      │         │ 💡 Yina综合研判       │         │
+│  │ Alpha挖掘库     │         │   (多因子推理)        │         │
+│  └────────────────┘         └──────────────────────┘         │
+│                                         │                    │
+│                              企业微信 Markdown 格式化           │
+│                              超长消息自动分段                   │
+│                              Webhook 推送 + 降级方案            │
+│                                         │                    │
+│                              定时调度 (Cron)                    │
+│                              早报08:30 / 午报14:00 / 晚报22:00  │
+│                              → 企业微信群「金融监控」            │
+└──────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## 🛡️ 风控铁律 (5层防御)
@@ -368,7 +407,7 @@ python3 hk_momentum_rotation.py
 - [x] **🔗 GATs 真实资产关系图 + 多资产联合预测** — 6维关系矩阵 + CrossAssetGAT
 - [x] **🔬 自动Alpha挖掘 (表达式引擎)** — Grid/Genetic/Random + 46模板 + FDR筛选
 - [x] **📊 订单执行优化 (拆单算法)** — TWAP/VWAP/Adaptive/Iceberg/Smart + Almgren-Chriss
-- [ ] 企业微信日报自动推送
+- [x] **📱 企业微信日报自动推送** — 智能日报 + 算法洞察 + 推算逻辑 + 企微推送
 
 ---
 
@@ -379,7 +418,7 @@ MIT License — 欢迎 Star ⭐ & Fork
 ---
 
 <p align="center">
-  <b>🐾 Chase的量化策略 v2.4 — Qlib增强 + 在线学习 + 资产关系图 + Alpha挖掘 + 订单执行优化</b><br>
+  <b>🐾 Chase的量化策略 v2.5 — Qlib增强 + 在线学习 + 资产关系图 + Alpha挖掘 + 订单执行优化 + 企微日报推送</b><br>
   <i>Built with ❤️ by Yina for Chase哥</i><br>
-  <sub>用Qlib的AI大脑 + 我们的实盘肌肉 + 资产关系网 + 自动Alpha挖掘 + 智能拆单执行 = 🚀</sub>
+  <sub>用Qlib的AI大脑 + 我们的实盘肌肉 + 资产关系网 + 自动Alpha挖掘 + 智能拆单 + 企微日报 = 🚀</sub>
 </p>
