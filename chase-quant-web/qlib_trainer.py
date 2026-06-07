@@ -112,6 +112,30 @@ class ModelTrainResult:
         }
 
 
+class PrebuiltSequenceDataset(torch.utils.data.Dataset):
+    """预构建序列数据集 — 用于已切好窗口的特征矩阵"""
+
+    def __init__(self, features: np.ndarray, targets: np.ndarray):
+        """
+        Args:
+            features: (n_samples, seq_len, n_features) — 已切好窗口
+            targets: (n_samples,) — 对应标签
+        """
+        self.features = torch.FloatTensor(features)
+        self.targets = torch.FloatTensor(targets)
+
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, idx):
+        x = self.features[idx]  # (seq_len, n_features)
+        y = self.targets[idx]
+        # 创建 mask (处理 NaN padding)
+        mask = ~torch.isnan(x).any(dim=1)
+        x = torch.nan_to_num(x, nan=0.0)
+        return x, y, mask
+
+
 class PurgedKFold:
     """
     时间序列 PurgedKFold — 防止前视信息泄露
@@ -184,7 +208,8 @@ class QlibTrainer:
     def __init__(self, config: Optional[dict] = None):
         self.config = {**self.DEFAULT_TRAIN_CONFIG, **(config or {})}
         self.feature_factory = FeatureFactoryV4()
-        self.sub_builder = SubSignalBuilder()
+        # SubSignalBuilder 需要 backtest_results 参数, 这里只引用 THEME_CONFIG 类变量
+        self.theme_config = SubSignalBuilder.THEME_CONFIG
 
     # ── 主入口 ──────────────────────────────────
 
@@ -216,7 +241,7 @@ class QlibTrainer:
 
         # 3. 按主题分组
         if themes is None:
-            themes = list(self.sub_builder.THEME_CONFIG.keys())
+            themes = list(self.theme_config.keys())
 
         if models is None:
             models = list(MODEL_REGISTRY.keys())
@@ -224,7 +249,7 @@ class QlibTrainer:
         results = []
 
         for theme_id in themes:
-            theme_info = self.sub_builder.THEME_CONFIG.get(theme_id)
+            theme_info = self.theme_config.get(theme_id)
             if not theme_info:
                 continue
             theme_name = theme_info.get("name", theme_id)
@@ -306,8 +331,8 @@ class QlibTrainer:
             if len(X_train) < 10 or len(X_val) < 10:
                 continue
 
-            train_dataset = TimeSeriesDataset(X_train, y_train, seq_len)
-            val_dataset = TimeSeriesDataset(X_val, y_val, seq_len)
+            train_dataset = PrebuiltSequenceDataset(X_train, y_train)
+            val_dataset = PrebuiltSequenceDataset(X_val, y_val)
 
             train_loader = DataLoader(
                 train_dataset, batch_size=self.config["batch_size"], shuffle=True
@@ -339,7 +364,10 @@ class QlibTrainer:
                 # Train
                 model.train()
                 train_loss = 0.0
+                n_train_batches = 0
                 for x_batch, y_batch, mask_batch in train_loader:
+                    if x_batch.dim() != 3:
+                        continue
                     x_batch = x_batch.to(DEVICE)
                     y_batch = y_batch.to(DEVICE)
                     mask_batch = mask_batch.to(DEVICE)
@@ -351,19 +379,26 @@ class QlibTrainer:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                     optimizer.step()
                     train_loss += loss.item()
+                    n_train_batches += 1
 
-                train_loss /= len(train_loader)
+                train_loss /= max(1, n_train_batches)
 
                 # Validate
                 model.eval()
                 val_loss = 0.0
+                n_val_batches = 0
                 with torch.no_grad():
                     for x_batch, y_batch, mask_batch in val_loader:
+                        if x_batch.dim() != 3:
+                            continue
                         x_batch = x_batch.to(DEVICE)
                         y_batch = y_batch.to(DEVICE)
                         mask_batch = mask_batch.to(DEVICE)
                         pred = model(x_batch, mask_batch).squeeze(-1)
                         val_loss += criterion(pred, y_batch).item()
+                        n_val_batches += 1
+
+                val_loss /= max(1, n_val_batches)
 
                 val_loss /= len(val_loader)
                 scheduler.step(val_loss)
@@ -453,7 +488,7 @@ class QlibTrainer:
     def _get_theme_feature_df(self, feature_df: pd.DataFrame,
                               theme_id: str) -> Optional[pd.DataFrame]:
         """获取某个主题的特征子DataFrame"""
-        theme_config = self.sub_builder.THEME_CONFIG.get(theme_id)
+        theme_config = self.theme_config.get(theme_id)
         if not theme_config:
             return None
 
@@ -500,6 +535,8 @@ class QlibTrainer:
 
         with torch.no_grad():
             for x_batch, y_batch, mask_batch in val_loader:
+                if x_batch.dim() != 3:
+                    continue
                 x_batch = x_batch.to(DEVICE)
                 mask_batch = mask_batch.to(DEVICE)
                 pred = model(x_batch, mask_batch).squeeze(-1).cpu().numpy()
@@ -513,23 +550,31 @@ class QlibTrainer:
         from scipy import stats
         ic, ic_p = stats.spearmanr(preds, targets)
 
-        # ICIR
-        icir = ic / (np.std(preds) * np.std(targets) + 1e-8)
+        # ICIR: 用 rolling IC 的 std 计算 (更合理)
+        # 在单一 OOS fold 中, 计算 sub-period IC 的标准差
+        n_sub = min(10, len(preds) // 10)
+        sub_ics = []
+        for s in range(0, len(preds) - n_sub, max(1, n_sub // 2)):
+            sub_ic, _ = stats.spearmanr(preds[s:s+n_sub], targets[s:s+n_sub])
+            if not np.isnan(sub_ic):
+                sub_ics.append(sub_ic)
+        ic_std = np.std(sub_ics) if len(sub_ics) > 1 else 0.1
+        icir = ic / max(0.001, ic_std)
 
         # R²
         ss_res = np.sum((targets - preds) ** 2)
         ss_tot = np.sum((targets - np.mean(targets)) ** 2)
-        r2 = 1 - ss_res / (ss_tot + 1e-8)
+        r2 = float(1 - ss_res / (ss_tot + 1e-8))
 
         # Hit Rate (方向正确率)
-        hit_rate = np.mean(np.sign(preds) == np.sign(targets))
+        hit_rate = float(np.mean(np.sign(preds) == np.sign(targets)))
 
         # MSE
-        mse = np.mean((targets - preds) ** 2)
+        mse = float(np.mean((targets - preds) ** 2))
 
         return {
-            "ic": ic,
-            "icir": icir,
+            "ic": float(ic),
+            "icir": float(icir),
             "r2": r2,
             "hit_rate": hit_rate,
             "mse": mse,
@@ -552,8 +597,8 @@ class QlibTrainer:
         if len(X_val) < 5:
             X_val, y_val = X_train[-10:], y_train[-10:]
 
-        train_dataset = TimeSeriesDataset(X_train, y_train, seq_len)
-        val_dataset = TimeSeriesDataset(X_val, y_val, seq_len)
+        train_dataset = PrebuiltSequenceDataset(X_train, y_train)
+        val_dataset = PrebuiltSequenceDataset(X_val, y_val)
 
         train_loader = DataLoader(train_dataset, batch_size=self.config["batch_size"], shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=self.config["batch_size"] * 2, shuffle=False)
@@ -572,6 +617,8 @@ class QlibTrainer:
         for epoch in range(self.config["n_epochs_max"]):
             model.train()
             for x_batch, y_batch, mask_batch in train_loader:
+                if x_batch.dim() != 3:
+                    continue
                 x_batch = x_batch.to(DEVICE)
                 y_batch = y_batch.to(DEVICE)
                 mask_batch = mask_batch.to(DEVICE)
@@ -587,14 +634,18 @@ class QlibTrainer:
 
             model.eval()
             val_loss = 0.0
+            n_vb = 0
             with torch.no_grad():
                 for x_batch, y_batch, mask_batch in val_loader:
+                    if x_batch.dim() != 3:
+                        continue
                     x_batch = x_batch.to(DEVICE)
                     y_batch = y_batch.to(DEVICE)
                     mask_batch = mask_batch.to(DEVICE)
                     pred = model(x_batch, mask_batch).squeeze(-1)
                     val_loss += criterion(pred, y_batch).item()
-            val_loss /= len(val_loader)
+                    n_vb += 1
+            val_loss /= max(1, n_vb)
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -686,7 +737,7 @@ class QlibPredictor:
         """
         self.models_to_use = models_to_use or list(MODEL_REGISTRY.keys())
         self.feature_factory = FeatureFactoryV4()
-        self.sub_builder = SubSignalBuilder()
+        self.theme_config = SubSignalBuilder.THEME_CONFIG
         self._loaded_models: Dict[str, Dict[str, nn.Module]] = {}
 
     def predict(self, df_btc: pd.DataFrame, theme_id: str,
@@ -738,7 +789,7 @@ class QlibPredictor:
                            model_name: str = "alstm") -> Dict[str, float]:
         """所有主题预测"""
         results = {}
-        for theme_id in self.sub_builder.THEME_CONFIG:
+        for theme_id in self.theme_config:
             pred = self.predict(df_btc, theme_id, model_name)
             if pred is not None:
                 results[theme_id] = pred

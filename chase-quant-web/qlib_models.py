@@ -265,11 +265,17 @@ class ALSTM(nn.Module):
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None):
         """
         Args:
-            x: (batch, seq_len, n_features)
+            x: (batch, seq_len, n_features) or (seq_len, n_features)
             mask: (batch, seq_len) — True=有效
         Returns:
             pred: (batch, 1) — 预测的前向收益
         """
+        # 确保是 3 维: (batch, seq_len, n_features)
+        if x.dim() == 2:
+            x = x.unsqueeze(0)  # (seq_len, n_features) → (1, seq_len, n_features)
+            if mask is not None and mask.dim() == 1:
+                mask = mask.unsqueeze(0)
+
         batch, seq_len, _ = x.shape
 
         # 输入投影
@@ -352,9 +358,15 @@ class TimeSeriesTransformer(nn.Module):
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None):
         """
         Args:
-            x: (batch, seq_len, n_features)
+            x: (batch, seq_len, n_features) or (seq_len, n_features)
             mask: (batch, seq_len) — True=有效
         """
+        # 确保 3 维
+        if x.dim() == 2:
+            x = x.unsqueeze(0)
+            if mask is not None and mask.dim() == 1:
+                mask = mask.unsqueeze(0)
+
         # 特征投影
         x_proj = self.feature_proj(x)  # (batch, seq_len, d_model)
 
@@ -386,12 +398,13 @@ class TimeSeriesTransformer(nn.Module):
 class AttentiveTransformer(nn.Module):
     """TabNet 的注意力变换器 — 学习每个特征的注意力掩码"""
 
-    def __init__(self, input_dim: int, hidden_dim: int, n_shared: int = 2):
+    def __init__(self, input_dim: int, hidden_dim: int, shared_dim: int = 0):
         super().__init__()
         self.bn = nn.BatchNorm1d(input_dim, momentum=0.01)
+        self.shared_dim = shared_dim
 
         layers = []
-        in_dim = input_dim + n_shared
+        in_dim = input_dim + shared_dim
         for i in range(2):
             layers.extend([
                 nn.Linear(in_dim if i == 0 else hidden_dim, hidden_dim),
@@ -404,8 +417,17 @@ class AttentiveTransformer(nn.Module):
     def forward(self, x: torch.Tensor, prior: torch.Tensor,
                 shared: List[torch.Tensor]):
         x_bn = self.bn(x)
-        # 拼接共享层信息
-        combined = torch.cat([x_bn] + shared, dim=1)
+        # 拼接共享层信息 (第一步 shared 为空)
+        if shared:
+            combined = torch.cat([x_bn] + shared, dim=1)
+        else:
+            combined = x_bn
+        # 如果维度不匹配, 用零填充 (第一个step时 shared 信息维度不足)
+        if combined.shape[1] != self.net[0].in_features:
+            pad_dim = self.net[0].in_features - combined.shape[1]
+            if pad_dim > 0:
+                pad = torch.zeros(combined.shape[0], pad_dim, device=combined.device)
+                combined = torch.cat([combined, pad], dim=1)
         mask_logits = self.net(combined)
         # Sparsemax 产生稀疏掩码
         mask = self._sparsemax(mask_logits)
@@ -432,25 +454,35 @@ class FeatureTransformer(nn.Module):
     """TabNet 的特征变换块 — GLU + 残差连接"""
 
     def __init__(self, input_dim: int, hidden_dim: int, n_shared: int = 2,
-                 n_independent: int = 2, dropout: float = 0.2):
+                 n_independent: int = 2, dropout: float = 0.2,
+                 shared_proj_dim: int = 8):
         super().__init__()
         self.n_independent = n_independent
         self.n_shared = n_shared
+        self.shared_proj_dim = shared_proj_dim
+
+        # 输入投影: 确保所有层都在 hidden_dim 空间操作
+        self.input_proj = nn.Linear(input_dim, hidden_dim)
 
         # Shared layers (跨步骤共享)
         self.shared = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(input_dim if i == 0 else hidden_dim, hidden_dim * 2),
+                nn.Linear(hidden_dim, hidden_dim * 2),
                 nn.BatchNorm1d(hidden_dim * 2, momentum=0.01),
-            ) for i in range(n_shared)
+            ) for _ in range(n_shared)
+        ])
+
+        # 将 shared 输出压缩到小维度, 供 AttentiveTransformer 使用
+        self.shared_proj = nn.ModuleList([
+            nn.Linear(hidden_dim, shared_proj_dim) for _ in range(n_shared)
         ])
 
         # Independent layers (每步骤独立)
         self.independent = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(input_dim if i == 0 else hidden_dim, hidden_dim * 2),
+                nn.Linear(hidden_dim, hidden_dim * 2),
                 nn.BatchNorm1d(hidden_dim * 2, momentum=0.01),
-            ) for i in range(n_independent)
+            ) for _ in range(n_independent)
         ])
 
         self.dropout = nn.Dropout(dropout)
@@ -459,6 +491,11 @@ class FeatureTransformer(nn.Module):
         """GLU: 取前一半为 gate, 后一半为值"""
         if shared_stack is None:
             shared_stack = []
+
+        # 投影到 hidden_dim 空间
+        x = self.input_proj(x)
+
+        shared_feed = []  # 传给 AttentiveTransformer 的压缩信息
 
         # Shared layers
         for i, layer in enumerate(self.shared):
@@ -471,6 +508,8 @@ class FeatureTransformer(nn.Module):
             x = x + self.dropout(h * torch.sigmoid(g))
             if i >= len(shared_stack):
                 shared_stack.append(x.detach())
+            # 压缩共享信息供 AttentiveTransformer 使用
+            shared_feed.append(self.shared_proj[i](x))
 
         # Independent layers
         for layer in self.independent:
@@ -478,7 +517,7 @@ class FeatureTransformer(nn.Module):
             g, h = gh[:, :gh.shape[1]//2], gh[:, gh.shape[1]//2:]
             x = x + self.dropout(h * torch.sigmoid(g))
 
-        return x, shared_stack
+        return x, shared_stack, shared_feed
 
 
 class TabNetModel(nn.Module):
@@ -504,29 +543,32 @@ class TabNetModel(nn.Module):
         self.n_features = n_features
         self.n_steps = n_steps
         self.gamma = gamma
+        shared_proj_dim = 8  # 每个 shared layer 压缩到 8 维
 
         # BatchNorm 输入
         self.bn = nn.BatchNorm1d(n_features, momentum=0.01)
 
         # 每步骤的特征变换器
         self.feature_transformers = nn.ModuleList([
-            FeatureTransformer(n_features, hidden_dim, n_shared, n_independent, dropout)
+            FeatureTransformer(n_features, hidden_dim, n_shared, n_independent,
+                             dropout, shared_proj_dim)
             for _ in range(n_steps)
         ])
 
         # 每步骤的注意力变换器
         self.attentive_transformers = nn.ModuleList([
-            AttentiveTransformer(n_features, hidden_dim, n_shared)
+            AttentiveTransformer(n_features, hidden_dim,
+                               shared_dim=n_shared * shared_proj_dim)
             for _ in range(n_steps)
         ])
 
-        # 决策步骤的输出聚合
+        # 决策步骤的输出聚合 (输入是 FeatureTransformer 输出的 hidden_dim)
         self.step_outputs = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(n_features, hidden_dim),
+                nn.Linear(hidden_dim, hidden_dim // 2),
                 nn.ReLU(),
                 nn.Dropout(dropout),
-                nn.Linear(hidden_dim, 1),
+                nn.Linear(hidden_dim // 2, 1),
             ) for _ in range(n_steps)
         ])
 
@@ -553,14 +595,15 @@ class TabNetModel(nn.Module):
         batch_size = x.size(0)
 
         prior = torch.ones(batch_size, self.n_features, device=x.device)
-        shared_stack = []
+        ft_shared_stack = None  # FeatureTransformer 内部共享状态
+        attn_feed = []           # 传给 AttentiveTransformer 的压缩信息
         total_output = 0.0
         total_entropy = 0.0
 
         for step in range(self.n_steps):
             # 1. 注意力选择特征掩码
             mask_feat, prior = self.attentive_transformers[step](
-                x, prior, shared_stack
+                x, prior, attn_feed
             )
             # 稀疏正则化
             total_entropy += self._entropy(mask_feat)
@@ -569,8 +612,8 @@ class TabNetModel(nn.Module):
             masked_x = x * mask_feat
 
             # 3. 特征变换
-            transformed, shared_stack = self.feature_transformers[step](
-                masked_x, shared_stack
+            transformed, ft_shared_stack, attn_feed = self.feature_transformers[step](
+                masked_x, ft_shared_stack
             )
 
             # 4. 步骤输出
@@ -873,7 +916,11 @@ def load_model(model_name: str, theme_id: str,
         return None
 
     checkpoint = torch.load(path, map_location=DEVICE, weights_only=False)
-    model = create_model(model_name, n_features)
+    # 去除 'qlib_' 前缀获取原始模型名
+    base_name = model_name.replace("qlib_", "")
+    if base_name not in MODEL_REGISTRY:
+        return None
+    model = create_model(base_name, n_features)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     return model

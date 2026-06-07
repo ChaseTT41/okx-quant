@@ -120,7 +120,7 @@ class MLSignalEngineV5:
         # 基础引擎 (v4)
         self.v4_engine = MLSignalEngineV4()
         self.feature_factory = FeatureFactoryV4()
-        self.sub_builder = SubSignalBuilder()
+        self.theme_config = SubSignalBuilder.THEME_CONFIG  # 类变量直接引用
 
         # Qlib 推理器
         self.qlib_predictor = None
@@ -159,7 +159,7 @@ class MLSignalEngineV5:
         all_predictions: List[ModelPrediction] = []
 
         if self.use_qlib and self.qlib_predictor:
-            for theme_id, theme_info in self.sub_builder.THEME_CONFIG.items():
+            for theme_id, theme_info in self.theme_config.items():
                 theme_name = theme_info.get("name", theme_id)
 
                 # 多模型集成预测
