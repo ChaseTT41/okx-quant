@@ -25,6 +25,7 @@
 | **🔄 滚动在线学习** | ✅ **NEW** | 自适应模型更新 · 特征漂移检测 · 自动重训调度 |
 | **🔗 资产关系图** | ✅ **NEW** | 6维关系矩阵 · CrossAssetGAT · 图漂移检测 · 多资产联合预测 |
 | **🔬 自动Alpha挖掘** | ✅ **NEW** | 表达式引擎 · 46模板 · Grid/Genetic/Random · FDR筛选 |
+| **📊 订单执行优化** | ✅ **NEW** | TWAP/VWAP/Adaptive/Iceberg/Smart · Almgren-Chriss冲击模型 |
 | **自动交易** | ✅ | auto_trade.py · ML驱动 · 多币种扫描 |
 | **五层风控** | ✅ | 事前→订单→持仓→组合→异常 · 硬止损-8% |
 | **Walk-Forward** | ✅ | 滚动窗口OOS验证 · 参数稳定性评分 |
@@ -42,6 +43,7 @@
 | 市场覆盖 | **4市场** | A股为主 |
 | 深度学习模型 | ALSTM/Transformer/TabNet/GATs | **20+模型** |
 | 自动Alpha挖掘 | ✅ **NEW! 表达式引擎** | ✅ |
+| 订单执行优化 | ✅ **NEW! 拆单算法** | ❌ |
 | 实盘交易 | ✅ | ❌ |
 | 风控体系 | **五层铁律** | 薄弱 |
 | 在线学习 | ✅ **滚动在线学习** | ✅ |
@@ -71,6 +73,7 @@ yina-app/
 │   ├── rolling_trainer.py       # 🆕 滚动在线学习引擎 (Phase 10)
 │   ├── asset_graph.py           # 🆕 资产关系图引擎 (Phase 11)
 │   ├── alpha_miner.py           # 🆕 自动Alpha挖掘引擎 (Phase 12)
+│   ├── execution.py             # 🆕 订单执行优化引擎 (Phase 13)
 │   │
 │   ├── ml_cross_market.py       # 跨市场数据 (ETH/SPY/DXY/VIX/F&G)
 │   ├── strategy_backtest.py     # 策略回测引擎
@@ -156,6 +159,13 @@ python3 alpha_miner.py --mine --n 500        # Grid Search挖掘500个Alpha
 python3 alpha_miner.py --evolve --generations 30  # 遗传进化
 python3 alpha_miner.py --list               # 查看已入库Alpha
 python3 alpha_miner.py --list-templates     # 查看模板库
+
+# 📊 订单执行优化 (NEW! Phase 13)
+python3 execution.py --estimate 0.5 BTC/USDT              # 预交易成本估算
+python3 execution.py --simulate BTC/USDT --qty 0.1 --strategy smart  # 模拟拆单
+python3 execution.py --compare                             # 策略对比
+python3 execution.py --stats                               # 执行质量统计
+python3 auto_trade.py --rolling --execution smart --ml-scan  # 扫描+执行配置预览
 
 # 策略回测
 python3 strategy_backtest.py
@@ -279,6 +289,31 @@ python3 walk_forward_validator.py
 └──────────────────────────────────────────────────────────────┘
 ```
 
+### 订单执行优化 (Phase 13) 🆕
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                   Execution Engine                             │
+│                                                              │
+│  5大拆单策略                   Market Impact Model            │
+│  ┌────────────────┐         ┌──────────────────────┐         │
+│  │ TWAP 时间加权   │         │ Almgren-Chriss 改编  │         │
+│  │ VWAP 成交量加权 │  驱动   │  暂时冲击 η·σ·X^β   │         │
+│  │ Adaptive 自适应 │ ────→  │  永久冲击 γ·σ·X^α   │         │
+│  │ Iceberg 冰山    │         │  最优切片数 闭式解   │         │
+│  │ Smart 智能路由  │         │  点差/延迟成本分解   │         │
+│  └────────────────┘         └──────────────────────┘         │
+│                                         │                    │
+│                              纸交易模拟 + 仿真滑点              │
+│                              Implementation Shortfall        │
+│                              VWAP Slippage / Fill Rate        │
+│                                         │                    │
+│                              执行质量入库 (JSON)                │
+│                              → auto_trade 拆单自动交易          │
+│                              → 策略对比分析仪表板               │
+└──────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## 🛡️ 风控铁律 (5层防御)
@@ -332,8 +367,8 @@ python3 hk_momentum_rotation.py
 - [x] **🔄 滚动在线学习 (Rolling Training)** — 自适应模型更新
 - [x] **🔗 GATs 真实资产关系图 + 多资产联合预测** — 6维关系矩阵 + CrossAssetGAT
 - [x] **🔬 自动Alpha挖掘 (表达式引擎)** — Grid/Genetic/Random + 46模板 + FDR筛选
+- [x] **📊 订单执行优化 (拆单算法)** — TWAP/VWAP/Adaptive/Iceberg/Smart + Almgren-Chriss
 - [ ] 企业微信日报自动推送
-- [ ] 订单执行优化 (拆单算法)
 
 ---
 
@@ -344,7 +379,7 @@ MIT License — 欢迎 Star ⭐ & Fork
 ---
 
 <p align="center">
-  <b>🐾 Chase的量化策略 v2.3 — Qlib增强 + 在线学习 + 资产关系图 + Alpha挖掘</b><br>
+  <b>🐾 Chase的量化策略 v2.4 — Qlib增强 + 在线学习 + 资产关系图 + Alpha挖掘 + 订单执行优化</b><br>
   <i>Built with ❤️ by Yina for Chase哥</i><br>
-  <sub>用Qlib的AI大脑 + 我们的实盘肌肉 + 资产关系网 + 自动Alpha挖掘 = 🚀</sub>
+  <sub>用Qlib的AI大脑 + 我们的实盘肌肉 + 资产关系网 + 自动Alpha挖掘 + 智能拆单执行 = 🚀</sub>
 </p>

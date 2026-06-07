@@ -46,10 +46,14 @@ class Position:
     stop_loss: float      # 止损价
     take_profit: float    # 止盈价
     status: str = "open"  # open / closed
+    avg_entry_price: float = 0.0     # Phase 13: 分笔成交后的加权均价
+    entry_prices: list = field(default_factory=list)  # Phase 13: 各切片成交价记录
+    execution_strategy: str = ""     # Phase 13: 使用的执行策略
 
     @property
     def cost(self) -> float:
-        return self.entry_price * self.quantity
+        px = self.avg_entry_price if self.avg_entry_price > 0 else self.entry_price
+        return px * self.quantity
 
     @property
     def value(self) -> float:
@@ -61,7 +65,8 @@ class Position:
 
     @property
     def pnl_pct(self) -> float:
-        return (self.current_price / self.entry_price - 1) * 100 if self.entry_price > 0 else 0
+        px = self.avg_entry_price if self.avg_entry_price > 0 else self.entry_price
+        return (self.current_price / px - 1) * 100 if px > 0 else 0
 
 
 @dataclass
@@ -181,7 +186,7 @@ class PortfolioManager:
 
     def buy(self, market: str, symbol: str, name: str, price: float,
             quantity: float, reason: str) -> Optional[Trade]:
-        """执行买入"""
+        """执行买入 (单笔市价单)"""
         amount = price * quantity
         fee = amount * FEES.get(market, 0.001)
 
@@ -200,6 +205,8 @@ class PortfolioManager:
             entry_reason=reason,
             stop_loss=price * 0.92,   # -8% 硬止损
             take_profit=price * 1.15,  # +15% 止盈
+            avg_entry_price=price,
+            entry_prices=[price],
         )
         self.positions[pid] = pos
 
@@ -213,6 +220,131 @@ class PortfolioManager:
         self.trades.append(trade)
         self._save()
         return trade
+
+    def buy_partial(self, position_id: str, price: float, quantity: float,
+                    slice_num: int = 0, total_slices: int = 0,
+                    strategy: str = "") -> Optional[bool]:
+        """
+        Phase 13: 分笔成交 — 向已有持仓追加数量
+
+        用于拆单算法中的每个子订单成交后累加仓位。
+        第一次调用创建持仓, 后续调用累加数量并更新加权均价。
+
+        Args:
+            position_id: 持仓 ID (同一个 parent order 共用)
+            price: 本笔成交价
+            quantity: 本笔数量
+            slice_num: 当前切片编号 (0-based)
+            total_slices: 总切片数
+            strategy: 执行策略名
+
+        Returns:
+            True if success, None if insufficient cash
+        """
+        amount = price * quantity
+        fee = amount * FEES.get("crypto", 0.001)
+
+        if not self.can_buy("crypto", amount + fee):
+            return None
+
+        # 扣钱
+        self.cash["crypto"] -= (amount + fee)
+
+        if position_id in self.positions:
+            # 追加到已有持仓
+            pos = self.positions[position_id]
+            total_qty = pos.quantity + quantity
+
+            # 更新加权均价
+            old_notional = pos.avg_entry_price * pos.quantity if pos.avg_entry_price > 0 else pos.entry_price * pos.quantity
+            new_notional = price * quantity
+            pos.avg_entry_price = (old_notional + new_notional) / total_qty if total_qty > 0 else price
+            pos.quantity = total_qty
+            pos.current_price = price
+            pos.entry_prices.append(price)
+        else:
+            # 首次建仓
+            symbol_clean = position_id.split("_", 2)[-1] if "_" in position_id else position_id
+            name = symbol_clean.replace("/USDT", "")
+            pos = Position(
+                id=position_id,
+                market="crypto",
+                symbol=f"crypto_{symbol_clean}" if "/" in symbol_clean else symbol_clean,
+                name=name,
+                entry_price=price,
+                current_price=price,
+                quantity=quantity,
+                entry_time=datetime.now(timezone.utc).isoformat(),
+                entry_reason=f"分笔成交 [{strategy}] ({slice_num+1}/{total_slices})" if total_slices > 0 else f"分笔成交 [{strategy}]",
+                stop_loss=price * 0.92,
+                take_profit=price * 1.15,
+                avg_entry_price=price,
+                entry_prices=[price],
+                execution_strategy=strategy,
+            )
+            self.positions[position_id] = pos
+
+        # 记录子交易
+        slice_trade = Trade(
+            id=f"{position_id}_s{slice_num}",
+            market="crypto",
+            symbol=self.positions[position_id].symbol,
+            name=self.positions[position_id].name,
+            side="buy",
+            price=price,
+            quantity=quantity,
+            amount=amount,
+            fee=fee,
+            time=datetime.now(timezone.utc).isoformat(),
+            reason=f"Slice {slice_num+1}/{total_slices} [{strategy}]",
+        )
+        self.trades.append(slice_trade)
+        self._save()
+        return True
+
+    def buy_sliced(self, symbol: str, name: str, total_quantity: float,
+                   slice_prices: List[float], slice_quantities: List[float],
+                   strategy: str = "", reason: str = "") -> Optional[str]:
+        """
+        Phase 13: 一次执行完整拆单计划
+
+        Args:
+            symbol: 交易对
+            name: 名称
+            total_quantity: 总数量
+            slice_prices: 每片成交价列表
+            slice_quantities: 每片数量列表
+            strategy: 执行策略名
+            reason: 交易理由
+
+        Returns:
+            position_id if all slices filled, None if failed
+        """
+        market = "crypto"
+        pid = f"{market}_{symbol}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+        total_filled = 0.0
+        n = len(slice_prices)
+
+        for i, (px, qty) in enumerate(zip(slice_prices, slice_quantities)):
+            result = self.buy_partial(pid, px, qty, slice_num=i,
+                                      total_slices=n, strategy=strategy)
+            if result is None:
+                # 现金不足, 停止后续切片
+                break
+            total_filled += qty
+
+        if total_filled <= 0:
+            return None
+
+        # 更新最终持仓信息
+        if pid in self.positions:
+            pos = self.positions[pid]
+            pos.entry_reason = f"[{strategy.upper()}] {reason}" if reason else f"[{strategy.upper()}] 分{N}笔执行"
+            pos.execution_strategy = strategy
+            self._save()
+
+        return pid
 
     def sell(self, position_id: str, price: float, reason: str) -> Optional[Trade]:
         """执行卖出"""

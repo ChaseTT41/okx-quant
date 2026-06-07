@@ -1831,6 +1831,194 @@ with tab7:
                 else:
                     st.info("📭 暂无存档, 点击挖掘按钮开始")
 
+        # ── 订单执行优化 (Phase 13) ──
+        st.subheader("📊 订单执行优化 — Phase 13 🆕")
+        exec_col1, exec_col2 = st.columns([1, 2])
+
+        with exec_col1:
+            st.caption("🔪 拆单策略")
+            exec_strategy = st.radio(
+                "执行策略",
+                ["smart", "twap", "vwap", "adaptive", "iceberg"],
+                format_func=lambda s: {
+                    "smart": "🧠 Smart Auto (推荐)",
+                    "twap": "⏱️ TWAP 时间加权",
+                    "vwap": "📊 VWAP 成交量加权",
+                    "adaptive": "🔄 Adaptive 自适应",
+                    "iceberg": "🧊 Iceberg 冰山订单",
+                }.get(s, s.upper()),
+                index=0, horizontal=True,
+                help="Smart: 自动根据订单大小/流动性选择最优策略"
+            )
+
+            exec_horizon = st.slider("执行窗口 (分钟)", 5, 240, 60, 5,
+                                     help="总执行时间，越长滑点越小但延迟风险越大")
+            exec_slices = st.slider("切片数 (0=自动)", 0, 50, 0, 1,
+                                    help="0=根据 Almgren-Chriss 模型自动计算最优切片数")
+            exec_urgency = st.slider("紧急度", 0.0, 1.0, 0.5, 0.1,
+                                     help="0=被动(省成本) → 1=激进(抢成交)")
+            exec_part_rate = st.slider("最大参与率 %", 1, 20, 5, 1,
+                                       help="每切片占日均量上限") / 100
+
+            st.divider()
+            st.caption("📐 预交易估算器")
+            est_symbol = st.selectbox("估算交易对",
+                                      ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"],
+                                      key="exec_est_symbol")
+            est_qty = st.number_input("订单数量", min_value=0.001, value=0.1, step=0.01,
+                                      format="%.3f", key="exec_est_qty",
+                                      help="BTC/ETH/SOL 等单位")
+
+            if st.button("💰 估算执行成本", use_container_width=True):
+                try:
+                    from execution import ExecutionEngine, ExecutionConfig
+                    mock_data = {
+                        "BTC/USDT": {"price": 87000, "avg_daily_volume": 35000, "volatility": 0.025, "spread": 0.0002},
+                        "ETH/USDT": {"price": 3200, "avg_daily_volume": 500000, "volatility": 0.030, "spread": 0.0003},
+                        "SOL/USDT": {"price": 180, "avg_daily_volume": 8000000, "volatility": 0.045, "spread": 0.0005},
+                        "BNB/USDT": {"price": 620, "avg_daily_volume": 500000, "volatility": 0.028, "spread": 0.0004},
+                        "XRP/USDT": {"price": 2.5, "avg_daily_volume": 200000000, "volatility": 0.035, "spread": 0.0008},
+                    }
+                    mdata = mock_data.get(est_symbol, {"price": 100, "avg_daily_volume": 1e6, "volatility": 0.03, "spread": 0.001})
+                    engine = ExecutionEngine()
+                    est = engine.pre_trade_estimate(est_qty, est_symbol, mdata)
+
+                    st.success(f"✅ 推荐策略: **{est['optimal_strategy'].upper()}** | "
+                               f"推荐切片: **{est['recommended_slices']}** 片")
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("预估冲击", f"{est['impact_estimate']['total_bps']:.1f} bps")
+                    c2.metric("预估手续费", f"${est['est_fee']:.2f}")
+                    c3.metric("预估滑点", f"${est['est_slippage']:.2f}")
+                    c4.metric("总成本", f"${est['est_total_cost']:.2f}")
+                    if est.get("warning_flags"):
+                        st.warning(est["warning_flags"])
+                except Exception as e:
+                    st.error(f"估算失败: {e}")
+
+        with exec_col2:
+            st.caption("📈 执行质量仪表板")
+
+            try:
+                from execution import ExecutionStore
+                estore = ExecutionStore()
+                estats = estore.get_stats()
+                comp = estore.get_strategy_comparison()
+
+                if estats.get("n_reports", 0) > 0:
+                    mc1, mc2, mc3, mc4 = st.columns(4)
+                    mc1.metric("总执行次数", str(estats["n_reports"]))
+                    mc2.metric("平均 IS", f"{estats['avg_shortfall_bps']:.1f} bps")
+                    mc3.metric("平均成交率", f"{estats['avg_fill_rate']:.1%}")
+                    mc4.metric("最佳执行", f"{estats['best_execution_bps']:.1f} bps")
+
+                    # 策略对比柱状图
+                    if comp:
+                        import plotly.express as px
+                        df_comp = pd.DataFrame(comp)
+                        fig_comp = px.bar(df_comp, x="strategy", y="avg_shortfall_bps",
+                                          title="各策略平均 Implementation Shortfall (越低越好)",
+                                          color="strategy",
+                                          color_discrete_sequence=px.colors.qualitative.Set2)
+                        fig_comp.update_layout(height=280, margin=dict(l=10, r=10, t=30, b=10),
+                                               showlegend=False, xaxis_title="", yaxis_title="IS (bps)")
+                        st.plotly_chart(fig_comp, use_container_width=True)
+
+                    # 最近执行记录
+                    st.caption("📋 最近执行")
+                    reports = estore.load(5)
+                    if reports:
+                        rec_rows = []
+                        for r in reversed(reports):
+                            is_val = r["implementation_shortfall_bps"]
+                            icon = "🟢" if is_val < 5 else "🟡" if is_val < 20 else "🔴"
+                            rec_rows.append({
+                                "时间": r["timestamp"][:19],
+                                "交易对": r["symbol"],
+                                "方向": r["side"].upper(),
+                                "策略": r["strategy_used"].upper(),
+                                "IS": f"{icon} {is_val:+.1f}bps",
+                                "成交": f"{r['fill_rate']:.0%}",
+                                "切片": f"{r['n_slices_filled']}/{r['n_slices_total']}",
+                            })
+                        st.dataframe(pd.DataFrame(rec_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.info("📭 暂无执行记录。运行一次模拟执行来填充数据:")
+                    st.code("python3 execution.py --simulate BTC/USDT --qty 0.1 --strategy smart")
+
+            except ImportError:
+                st.info("🔌 执行引擎模块 (execution.py) 未加载, 请确保文件存在")
+
+            # 模拟执行
+            st.divider()
+            st.caption("🎮 模拟执行")
+            sim_col1, sim_col2, sim_col3 = st.columns(3)
+            with sim_col1:
+                sim_symbol = st.selectbox("交易对",
+                                          ["BTC/USDT", "ETH/USDT", "SOL/USDT"],
+                                          key="exec_sim_symbol")
+            with sim_col2:
+                sim_side = st.selectbox("方向", ["buy", "sell"], key="exec_sim_side")
+            with sim_col3:
+                sim_qty = st.number_input("数量", min_value=0.001, value=0.05, step=0.01, format="%.3f", key="exec_sim_qty")
+
+            if st.button("🔪 模拟拆单执行", use_container_width=True):
+                try:
+                    from execution import ExecutionEngine, ExecutionConfig
+                    mock_data = {
+                        "BTC/USDT": {"price": 87000, "avg_daily_volume": 35000, "volatility": 0.025, "spread": 0.0002},
+                        "ETH/USDT": {"price": 3200, "avg_daily_volume": 500000, "volatility": 0.030, "spread": 0.0003},
+                        "SOL/USDT": {"price": 180, "avg_daily_volume": 8000000, "volatility": 0.045, "spread": 0.0005},
+                    }
+                    mdata = mock_data.get(sim_symbol, {"price": 100, "avg_daily_volume": 1e6, "volatility": 0.03, "spread": 0.001})
+                    cfg = ExecutionConfig(
+                        strategy=exec_strategy,
+                        horizon_minutes=exec_horizon,
+                        n_slices=exec_slices,
+                        urgency=exec_urgency,
+                        participation_rate=exec_part_rate,
+                    )
+                    engine = ExecutionEngine(config=cfg)
+                    report = engine.execute_paper(
+                        symbol=sim_symbol, side=sim_side,
+                        quantity=sim_qty, price=mdata["price"],
+                        market_data=mdata
+                    )
+
+                    # 显示结果
+                    is_color = "green" if report.implementation_shortfall_bps < 5 else "orange" if report.implementation_shortfall_bps < 20 else "red"
+                    st.success(f"✅ 执行完成! 策略: **{report.strategy_used.upper()}** | "
+                               f"IS: :{is_color}[{report.implementation_shortfall_bps:+.1f} bps] | "
+                               f"Fill: {report.fill_rate:.1%}")
+
+                    r1, r2, r3, r4 = st.columns(4)
+                    r1.metric("Arrival Price", f"${report.arrival_price:,.2f}")
+                    r2.metric("Avg Exec Price", f"${report.avg_execution_price:,.2f}")
+                    r3.metric("成交/总切片", f"{report.n_slices_filled}/{report.n_slices_total}")
+                    r4.metric("执行时间", f"{report.duration_seconds:.0f}s")
+
+                    # 成本分解
+                    st.caption("💸 成本分解 (bps)")
+                    cost_data = pd.DataFrame({
+                        "成本项": ["点差", "市场冲击", "延迟", "VWAP滑点"],
+                        "bps": [report.spread_cost_bps, report.market_impact_bps,
+                                report.delay_cost_bps, report.vwap_slippage_bps],
+                    })
+                    fig_cost = px.bar(cost_data, x="成本项", y="bps", color="成本项",
+                                      title="执行成本分解",
+                                      color_discrete_sequence=["#4488ff", "#ffaa00", "#ff4444", "#888888"])
+                    fig_cost.update_layout(height=200, margin=dict(l=10, r=10, t=30, b=10),
+                                           showlegend=False)
+                    st.plotly_chart(fig_cost, use_container_width=True)
+
+                    # 切片明细
+                    if report.slice_details:
+                        with st.expander("📋 切片成交明细", expanded=False):
+                            sl_df = pd.DataFrame(report.slice_details)
+                            st.dataframe(sl_df, use_container_width=True, hide_index=True)
+
+                except Exception as e:
+                    st.error(f"模拟执行失败: {e}")
+
         # 架构对比
         st.divider()
         with st.expander("📐 与 Qlib 原框架对比", expanded=False):
@@ -1845,6 +2033,7 @@ with tab7:
             | **图模型** | GATs (自实现) + **真实资产关系图 🆕** | GATs + RGCN + RSRL |
             | **集成方法** | DoubleEnsemble (自实现) | DoubleEnsemble + 更多变体 |
             | **自动因子挖掘** | ✅ **NEW! 表达式引擎+遗传算法** | ✅ Alpha Mining Pipeline |
+            | **订单执行优化** | ✅ **NEW! 拆单算法 (TWAP/VWAP/Adaptive/Iceberg)** | ❌ 研究为主 |
             | **在线学习** | ✅ **滚动在线学习** | ✅ Rolling Training |
             | **资产关系图** | ✅ **NEW! 6维关系+图漂移检测** | ⚠️ 研究为主 |
             | **市场覆盖** | ✅ 4市场 (Crypto+A股+美股+港股) | ❌ A股为主 |
@@ -1859,7 +2048,7 @@ with tab7:
 # 底部
 # ═══════════════════════════════════════════
 st.divider()
-st.caption("🐾 Chase的量化策略 v2.3 | 由 Yina 为 Chase哥 打造 | Qlib增强 + 在线学习 + 资产关系图 + Alpha挖掘 · 虚拟盘 · 风险自负")
+st.caption("🐾 Chase的量化策略 v2.4 | 由 Yina 为 Chase哥 打造 | Qlib增强 + 在线学习 + 资产关系图 + Alpha挖掘 + 订单执行优化 · 虚拟盘 · 风险自负")
 
 # 自动快照 (每60秒)
 if "last_snapshot" not in st.session_state:

@@ -64,6 +64,14 @@ try:
 except ImportError:
     ALPHA_AVAILABLE = False
 
+# 订单执行优化 (Phase 13)
+try:
+    from execution import (ExecutionEngine, ExecutionConfig, ExecutionStore,
+                           SmartOrderRouter, MarketImpactModel)
+    EXECUTION_AVAILABLE = True
+except ImportError:
+    EXECUTION_AVAILABLE = False
+
 
 def is_market_open(market: str) -> bool:
     """判断市场是否交易时段"""
@@ -212,7 +220,7 @@ class RollingAwareAutoTrader:
 
     def __init__(self, use_v5: bool = True, use_rolling: bool = True,
                  auto_retrain: bool = False, use_graph: bool = True,
-                 use_alphas: bool = False):
+                 use_alphas: bool = False, execution_config: "ExecutionConfig" = None):
         """
         Args:
             use_v5: 是否使用 MLSignalEngineV5 (Qlib融合)
@@ -220,12 +228,21 @@ class RollingAwareAutoTrader:
             auto_retrain: 模型过期时是否自动重训 (true=全自动, false=仅警告)
             use_graph: 是否使用资产关系图增强 (Phase 11)
             use_alphas: 是否使用Alpha挖掘增强 (Phase 12)
+            execution_config: 执行优化配置 (Phase 13), None=单笔市价
         """
         self.use_v5 = use_v5 and ML_V5_AVAILABLE
         self.use_rolling = use_rolling and ROLLING_AVAILABLE
         self.auto_retrain = auto_retrain
         self.use_graph = use_graph and GRAPH_AVAILABLE
         self.use_alphas = use_alphas and ALPHA_AVAILABLE
+        self.use_execution = execution_config is not None and EXECUTION_AVAILABLE
+        self.execution_config = execution_config
+
+        # 初始化执行引擎
+        if self.use_execution:
+            self.execution_engine = ExecutionEngine(config=execution_config)
+        else:
+            self.execution_engine = None
 
         # 初始化引擎
         if self.use_v5:
@@ -236,6 +253,8 @@ class RollingAwareAutoTrader:
                 label_parts.append(" + 图增强")
             if self.use_alphas:
                 label_parts.append(" + Alpha增强")
+            if self.use_execution and self.execution_config:
+                label_parts.append(f" + {self.execution_config.strategy.upper()}")
             label_parts.append(")")
             self.engine_label = "".join(label_parts)
         elif ML_SIGNAL_AVAILABLE:
@@ -597,14 +616,64 @@ class RollingAwareAutoTrader:
                 f"置信={sig['confidence']:.0%} | "
                 f"活跃={sig['n_active']}"
             )
-            trade = pf.buy(
-                market="crypto", symbol=sig["symbol"],
-                name=sig["name"],
-                price=sig["price"], quantity=quantity,
-                reason=reasoning,
-            )
-            if trade:
-                results.append(f"🧠 买入 {sig['symbol']} ¥{max_size:.0f} | {reasoning}")
+
+            # Phase 13: 拆单执行 vs 单笔市价
+            if self.use_execution and self.execution_engine is not None:
+                # 执行层风控
+                mdata = {
+                    "price": sig["price"],
+                    "avg_daily_volume": 35000 if "BTC" in sig["symbol"] else 500000,
+                    "volatility": 0.025,
+                    "spread": 0.0005,
+                }
+                exec_check = rc.execution_risk_check(
+                    quantity, mdata["avg_daily_volume"],
+                    mdata["spread"], mdata["volatility"],
+                    n_slices=self.execution_config.n_slices or 10
+                )
+                if not exec_check.passed:
+                    print(f"  ⚠️ 执行层风控拦截 ({sig['symbol']}): {exec_check.reason}")
+                    # 降级为单笔市价
+                    print(f"  ⬇️ 降级为单笔市价单")
+                    trade = pf.buy(market="crypto", symbol=sig["symbol"],
+                                   name=sig["name"], price=sig["price"],
+                                   quantity=quantity, reason=reasoning)
+                    if trade:
+                        results.append(f"🧠 买入 {sig['symbol']} ¥{max_size:.0f} (降级市价) | {reasoning}")
+                    continue
+
+                # 拆单执行
+                print(f"  🔪 拆单执行 [{self.execution_config.strategy.upper()}] "
+                      f"{quantity:.4f} {sig['symbol']}...")
+                exec_report = self.execution_engine.execute_paper(
+                    symbol=sig["symbol"], side="buy",
+                    quantity=quantity, price=sig["price"],
+                    market_data=mdata, pf=pf
+                )
+
+                if exec_report.fill_rate > 0:
+                    results.append(
+                        f"🔪 拆单买入 {sig['symbol']} ¥{max_size:.0f} | "
+                        f"[{exec_report.strategy_used.upper()}] "
+                        f"{exec_report.n_slices_filled}/{exec_report.n_slices_total}片 | "
+                        f"IS={exec_report.implementation_shortfall_bps:+.1f}bps | "
+                        f"Fill={exec_report.fill_rate:.0%}"
+                    )
+                    print(f"  ✅ 执行完成: Avg Px=${exec_report.avg_execution_price:,.2f} | "
+                          f"IS={exec_report.implementation_shortfall_bps:+.1f}bps | "
+                          f"Fill={exec_report.fill_rate:.0%}")
+                else:
+                    print(f"  ❌ 执行失败: 0% 成交率")
+            else:
+                # 标准单笔市价
+                trade = pf.buy(
+                    market="crypto", symbol=sig["symbol"],
+                    name=sig["name"],
+                    price=sig["price"], quantity=quantity,
+                    reason=reasoning,
+                )
+                if trade:
+                    results.append(f"🧠 买入 {sig['symbol']} ¥{max_size:.0f} | {reasoning}")
 
         pf.take_snapshot()
         return results, pf
@@ -617,7 +686,14 @@ class RollingAwareAutoTrader:
             f"  滚动检查: {'✅' if self.use_rolling else '❌'}",
             f"  自动重训: {'✅' if self.auto_retrain else '❌ (仅警告)'}",
             f"  资产关系图: {'✅' if self.use_graph else '❌'} (Phase 11)",
+            f"  订单执行: {'✅ ' + self.execution_config.strategy.upper() if self.use_execution else '❌ 单笔市价'} (Phase 13)",
         ]
+        if self.use_execution and self.execution_config:
+            lines.append(f"    策略: {self.execution_config.strategy.upper()}")
+            lines.append(f"    窗口: {self.execution_config.horizon_minutes}分钟")
+            n = self.execution_config.n_slices
+            lines.append(f"    切片: {n if n > 0 else '自动最优'}")
+            lines.append(f"    紧急度: {self.execution_config.urgency:.1f}")
 
         if self.use_graph and self.graph_predictor and self.graph_predictor.snapshot:
             snap = self.graph_predictor.snapshot
@@ -667,7 +743,16 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
             return auto_scan_and_trade(markets, use_ml=True, use_rolling=False)
         else:
             print("🔄 Rolling-Aware 自动交易模式 (Phase 10)")
-            trader = RollingAwareAutoTrader(use_v5=True, use_rolling=True, auto_retrain=False, use_alphas=args.alphas)
+            exec_cfg = None
+            if hasattr(args, 'execution') and args.execution and EXECUTION_AVAILABLE:
+                exec_cfg = ExecutionConfig(
+                    strategy=args.execution,
+                    horizon_minutes=args.execution_horizon,
+                    n_slices=args.execution_slices,
+                    urgency=args.execution_urgency,
+                )
+            trader = RollingAwareAutoTrader(use_v5=True, use_rolling=True, auto_retrain=False,
+                                            use_alphas=args.alphas, execution_config=exec_cfg)
             print(trader.get_status_summary())
 
             results, pf = trader.run()
@@ -895,6 +980,15 @@ if __name__ == "__main__":
                        help="使用滚动训练感知模式 (Phase 10, Qlib融合+模型新鲜度检查)")
     parser.add_argument("--alphas", action="store_true",
                        help="使用Alpha挖掘增强 (Phase 12)")
+    parser.add_argument("--execution", type=str, default=None,
+                       choices=["twap", "vwap", "adaptive", "iceberg", "smart"],
+                       help="订单执行策略 (Phase 13, 默认=单笔市价)")
+    parser.add_argument("--execution-horizon", type=int, default=60,
+                       help="执行时间窗口 (分钟, 默认60)")
+    parser.add_argument("--execution-slices", type=int, default=0,
+                       help="切片数 (0=自动最优, 默认0)")
+    parser.add_argument("--execution-urgency", type=float, default=0.5,
+                       help="执行紧急度 0-1 (默认0.5)")
     parser.add_argument("--ml-scan", action="store_true",
                        help="仅ML扫描, 不执行交易 (调试用)")
     args = parser.parse_args()
@@ -906,8 +1000,18 @@ if __name__ == "__main__":
     # ML调试模式: 仅扫描
     if args.ml_scan:
         if ROLLING_AVAILABLE:
+            # 构建执行配置
+            exec_cfg = None
+            if args.execution and EXECUTION_AVAILABLE:
+                exec_cfg = ExecutionConfig(
+                    strategy=args.execution,
+                    horizon_minutes=args.execution_horizon,
+                    n_slices=args.execution_slices,
+                    urgency=args.execution_urgency,
+                )
             print("🔄 Rolling-Aware 扫描模式\n")
-            trader = RollingAwareAutoTrader(use_v5=True, use_rolling=True, auto_retrain=False, use_alphas=args.alphas)
+            trader = RollingAwareAutoTrader(use_v5=True, use_rolling=True, auto_retrain=False,
+                                            use_alphas=args.alphas, execution_config=exec_cfg)
             print(trader.get_status_summary())
             print()
             signals = trader.scan()

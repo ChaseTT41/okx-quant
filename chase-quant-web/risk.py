@@ -16,6 +16,12 @@ MONTHLY_TARGET_PCT = 30.0     # 月盈利目标
 MAX_POSITION_SIZE_PCT = 40.0  # 单仓位 ≤ 总资金40%
 MIN_SCORE_FOR_ENTRY = 65      # 最低入场分
 
+# Phase 13: 执行层风控参数
+MAX_PARTICIPATION_RATE = 0.10  # 最大成交量占比 (10%)
+MAX_SPREAD_BPS = 100.0         # 最大可接受点差 (100bps)
+MAX_IMPACT_BPS = 50.0          # 最大可接受冲击成本 (50bps)
+MAX_SLIPPAGE_PER_SLICE_BPS = 25.0  # 单切片最大滑点
+
 
 @dataclass
 class RiskCheck:
@@ -88,6 +94,65 @@ class RiskController:
                 False, f"{pos.symbol} 仓位{pos_pct:.0f}%超限, 建议减仓", "danger"))
 
         return checks
+
+    def execution_risk_check(self, order_size: float, avg_daily_volume: float,
+                            spread: float = 0.001, volatility: float = 0.02,
+                            n_slices: int = 1) -> RiskCheck:
+        """
+        Phase 13: 执行层风控检查
+
+        在拆单执行前校验:
+          1. 参与率 ≤ 10% ADV
+          2. 点差 ≤ 100bps
+          3. 预估冲击 ≤ 50bps
+          4. 每片滑点 ≤ 25bps
+        """
+        # 1. 参与率
+        participation = order_size / max(avg_daily_volume, 1)
+        if participation > MAX_PARTICIPATION_RATE:
+            return RiskCheck(
+                False,
+                f"参与率 {participation:.1%} > {MAX_PARTICIPATION_RATE:.0%}上限",
+                "danger"
+            )
+
+        # 2. 点差
+        spread_bps = spread * 10000
+        if spread_bps > MAX_SPREAD_BPS:
+            return RiskCheck(
+                False,
+                f"点差 {spread_bps:.0f}bps > {MAX_SPREAD_BPS:.0f}bps上限 (流动性不足)",
+                "warning"
+            )
+
+        # 3. 预估冲击
+        try:
+            from execution import MarketImpactModel
+            impact_model = MarketImpactModel()
+            est = impact_model.estimate_impact(order_size, avg_daily_volume,
+                                               volatility, spread)
+            if est["total_bps"] > MAX_IMPACT_BPS:
+                return RiskCheck(
+                    False,
+                    f"预估冲击 {est['total_bps']:.0f}bps > {MAX_IMPACT_BPS:.0f}bps上限",
+                    "warning"
+                )
+
+            # 4. 每片滑点 (如果是大单拆片不足)
+            slice_size = order_size / max(n_slices, 1)
+            slice_est = impact_model.estimate_impact(slice_size, avg_daily_volume,
+                                                     volatility, spread)
+            if slice_est["total_bps"] > MAX_SLIPPAGE_PER_SLICE_BPS:
+                return RiskCheck(
+                    False,
+                    f"单切片预估滑点 {slice_est['total_bps']:.0f}bps > {MAX_SLIPPAGE_PER_SLICE_BPS:.0f}bps, "
+                    f"建议增加切片数 (当前{n_slices}片)",
+                    "warning"
+                )
+        except ImportError:
+            pass  # execution 模块不可用时跳过
+
+        return RiskCheck(True, "执行层风控通过", "info")
 
     def daily_risk_report(self) -> dict:
         """每日风控报告"""
