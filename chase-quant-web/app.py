@@ -1449,6 +1449,186 @@ with tab7:
                     except Exception:
                         st.caption(f"  • {rp.name}")
 
+        # ═══════════════════════════════════════════
+        # Phase 11: Asset Graph (资产关系图)
+        # ═══════════════════════════════════════════
+        st.divider()
+        st.subheader("🔗 资产关系图 — Phase 11 🆕")
+
+        try:
+            from asset_graph import AssetGraphBuilder, CrossAssetGATPredictor
+            GRAPH_UI_AVAILABLE = True
+        except ImportError:
+            GRAPH_UI_AVAILABLE = False
+
+        if not GRAPH_UI_AVAILABLE:
+            st.warning("⚠️ Asset Graph 引擎暂不可用")
+        else:
+            st.markdown("""
+            > 🔗 **资产关系图**: 6维关系矩阵 (Pearson/Spearman/dCor/协整/Granger/波动率) → 真实邻接矩阵
+            >
+            > GATs 不再用随机图 — 而是真正的资产间信息传递网络
+            """)
+
+            # 初始化 builder
+            if "graph_builder_ui" not in st.session_state:
+                st.session_state.graph_builder_ui = AssetGraphBuilder()
+            builder = st.session_state.graph_builder_ui
+
+            graph_col1, graph_col2, graph_col3, graph_col4 = st.columns(4)
+
+            # 加载已有图快照
+            existing_snapshot = builder.load_snapshot("latest")
+
+            with graph_col1:
+                if existing_snapshot:
+                    st.metric("图快照", f"{existing_snapshot.n_assets} 资产",
+                             delta=f"v{existing_snapshot.version}")
+                else:
+                    st.metric("图快照", "未构建")
+            with graph_col2:
+                if existing_snapshot:
+                    st.metric("图密度", f"{existing_snapshot.graph_density:.4f}")
+                else:
+                    st.metric("图密度", "N/A")
+            with graph_col3:
+                if existing_snapshot:
+                    st.metric("平均度", f"{existing_snapshot.avg_degree:.1f}")
+                else:
+                    st.metric("平均度", "N/A")
+            with graph_col4:
+                if existing_snapshot:
+                    st.metric("社区数", existing_snapshot.n_communities)
+                else:
+                    st.metric("社区数", "N/A")
+
+            # 资产选择
+            graph_symbols = st.multiselect(
+                "选择资产",
+                options=["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
+                        "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT"],
+                default=["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"],
+            )
+
+            graph_action_col1, graph_action_col2, graph_action_col3 = st.columns([1, 1, 1])
+
+            with graph_action_col1:
+                if st.button("🔨 构建资产关系图", type="primary", key="build_graph_btn"):
+                    if len(graph_symbols) < 2:
+                        st.warning("至少选择2个资产")
+                    else:
+                        with st.spinner(f"计算 {len(graph_symbols)} 资产 6维关系矩阵..."):
+                            try:
+                                snapshot = builder.build(graph_symbols)
+                                builder.save_snapshot(snapshot, "latest")
+                                st.success(f"✅ 图构建完成! {snapshot.n_assets}资产 | "
+                                          f"密度={snapshot.graph_density:.3f} | "
+                                          f"{snapshot.n_communities}社区")
+                                # 刷新
+                                st.session_state.graph_snapshot_ui = snapshot
+                            except Exception as e:
+                                st.error(f"❌ 构建失败: {e}")
+
+            with graph_action_col2:
+                if st.button("🔮 多资产联合预测", key="graph_predict_btn"):
+                    if len(graph_symbols) < 2:
+                        st.warning("至少选择2个资产")
+                    else:
+                        with st.spinner("图增强多资产联合预测..."):
+                            try:
+                                g_predictor = CrossAssetGATPredictor()
+                                if existing_snapshot:
+                                    g_predictor.snapshot = existing_snapshot
+                                preds = g_predictor.predict(graph_symbols)
+                                st.session_state.graph_preds_ui = preds
+                                st.success(f"✅ {len(preds)}/{len(graph_symbols)} 资产预测完成")
+                            except Exception as e:
+                                st.error(f"❌ 预测失败: {e}")
+
+            with graph_action_col3:
+                if st.button("📉 检测图漂移", key="check_drift_btn"):
+                    with st.spinner("对比新旧图结构..."):
+                        try:
+                            drift = builder.detect_graph_drift_with_build(graph_symbols)
+                            st.session_state.graph_drift_ui = drift
+                            if drift.get("drifted"):
+                                st.warning(f"🔴 图漂移: {drift['drift_score']:.4f}")
+                            else:
+                                st.success(f"✅ 图稳定: {drift['drift_score']:.4f}")
+                        except Exception as e:
+                            st.error(f"❌ 漂移检测失败: {e}")
+
+            # 显示图预测结果
+            if "graph_preds_ui" in st.session_state and st.session_state.graph_preds_ui:
+                preds = st.session_state.graph_preds_ui
+                st.subheader("📊 图增强多资产预测")
+                pred_data = []
+                for sym, pred in sorted(preds.items(), key=lambda x: abs(x[1] or 0), reverse=True):
+                    direction = "📈 BUY" if pred and pred > 0 else "📉 SELL" if pred and pred < 0 else "➡️ HOLD"
+                    pred_data.append({
+                        "资产": sym,
+                        "预测收益": f"{pred:+.6f}" if pred else "N/A",
+                        "方向": direction,
+                        "强度": abs(pred) if pred else 0,
+                    })
+                if pred_data:
+                    st.dataframe(pd.DataFrame(pred_data), hide_index=True, use_container_width=True)
+
+            # 显示图详情
+            if existing_snapshot:
+                with st.expander(f"🔍 图详情 — {existing_snapshot.n_assets}资产", expanded=False):
+                    # Top 连边
+                    st.caption("🔗 最强连边")
+                    if existing_snapshot.top_edges:
+                        edges_data = []
+                        for e in existing_snapshot.top_edges[:10]:
+                            edges_data.append({
+                                "源资产": e["source"],
+                                "目标资产": e["target"],
+                                "权重": f"{e['weight']:.4f}",
+                            })
+                        st.dataframe(pd.DataFrame(edges_data), hide_index=True, use_container_width=True)
+
+                    # 邻接矩阵热力图
+                    st.caption("🔥 邻接矩阵热力图")
+                    import plotly.express as px
+                    adj = existing_snapshot.adj_matrix
+                    symbols = existing_snapshot.symbols
+                    fig_heat = px.imshow(
+                        adj,
+                        x=symbols,
+                        y=symbols,
+                        color_continuous_scale="RdBu_r",
+                        zmin=0, zmax=adj.max() if adj.max() > 0 else 1,
+                        title=f"资产关系邻接矩阵 (密度={existing_snapshot.graph_density:.4f})",
+                    )
+                    fig_heat.update_layout(template="plotly_dark", height=400)
+                    st.plotly_chart(fig_heat, use_container_width=True)
+
+                    # 社区结构
+                    if existing_snapshot.n_communities > 1:
+                        st.caption(f"🌐 社区结构 ({existing_snapshot.n_communities} 个社区)")
+                        comm_data = []
+                        for i, sym in enumerate(symbols):
+                            label = existing_snapshot.community_labels[i] if i < len(existing_snapshot.community_labels) else 0
+                            comm_data.append({
+                                "资产": sym,
+                                "社区": f"社区 {label}",
+                            })
+                        st.dataframe(pd.DataFrame(comm_data), hide_index=True, use_container_width=True)
+
+            # Graph Drift 结果
+            if "graph_drift_ui" in st.session_state:
+                drift = st.session_state.graph_drift_ui
+                dcol1, dcol2, dcol3 = st.columns(3)
+                with dcol1:
+                    st.metric("漂移分数", f"{drift.get('drift_score', 0):.4f}")
+                with dcol2:
+                    st.metric("共同资产", drift.get("n_common_assets", 0))
+                with dcol3:
+                    drift_action = "🔴 显著漂移" if drift.get("drifted") else "✅ 结构稳定"
+                    st.metric("判断", drift_action)
+
         # 架构对比
         st.divider()
         with st.expander("📐 与 Qlib 原框架对比", expanded=False):
@@ -1460,10 +1640,11 @@ with tab7:
             | **时序模型** | ALSTM (自实现) | ALSTM + GRU + LSTM |
             | **注意力模型** | Transformer (自实现) | Transformer + HIST |
             | **特征选择** | TabNet (自实现) | TabNet + 表达式引擎 |
-            | **图模型** | GATs (自实现) | GATs + RGCN + RSRL |
+            | **图模型** | GATs (自实现) + **真实资产关系图 🆕** | GATs + RGCN + RSRL |
             | **集成方法** | DoubleEnsemble (自实现) | DoubleEnsemble + 更多变体 |
             | **自动因子挖掘** | ❌ | ✅ Alpha Mining Pipeline |
-            | **在线学习** | ✅ **NEW! 滚动在线学习** | ✅ Rolling Training |
+            | **在线学习** | ✅ **滚动在线学习** | ✅ Rolling Training |
+            | **资产关系图** | ✅ **NEW! 6维关系+图漂移检测** | ⚠️ 研究为主 |
             | **市场覆盖** | ✅ 4市场 (Crypto+A股+美股+港股) | ❌ A股为主 |
             | **实盘交易** | ✅ 自动交易 + 五层风控 | ❌ 研究为主 |
             | **可视化** | ✅ Streamlit 仪表板 | ⚠️ Jupyter/CLI |
@@ -1476,7 +1657,7 @@ with tab7:
 # 底部
 # ═══════════════════════════════════════════
 st.divider()
-st.caption("🐾 Chase的量化策略 v2.1 | 由 Yina 为 Chase哥 打造 | Qlib增强 + 滚动在线学习 · 虚拟盘 · 风险自负")
+st.caption("🐾 Chase的量化策略 v2.2 | 由 Yina 为 Chase哥 打造 | Qlib增强 + 滚动在线学习 + 资产关系图 · 虚拟盘 · 风险自负")
 
 # 自动快照 (每60秒)
 if "last_snapshot" not in st.session_state:

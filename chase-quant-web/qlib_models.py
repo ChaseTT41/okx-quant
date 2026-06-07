@@ -850,7 +850,17 @@ MODEL_REGISTRY = {
     "transformer": TimeSeriesTransformer,
     "tabnet": TabNetModel,
     "gat": MultiHeadGAT,
+    "cross_asset_gat": None,  # 延迟加载, 见 asset_graph.py
 }
+
+# CrossAssetGAT 接入 (Phase 11)
+def _get_cross_asset_gat_class():
+    """延迟加载 CrossAssetGAT (避免循环导入)"""
+    try:
+        from asset_graph import CrossAssetGAT
+        return CrossAssetGAT
+    except ImportError:
+        return None
 
 DEFAULT_MODEL_CONFIGS = {
     "alstm": {

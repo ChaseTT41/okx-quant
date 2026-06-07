@@ -50,6 +50,13 @@ try:
 except ImportError:
     ROLLING_AVAILABLE = False
 
+# 资产关系图 (Phase 11)
+try:
+    from asset_graph import CrossAssetGATPredictor, AssetGraphBuilder
+    GRAPH_AVAILABLE = True
+except ImportError:
+    GRAPH_AVAILABLE = False
+
 
 def is_market_open(market: str) -> bool:
     """判断市场是否交易时段"""
@@ -197,21 +204,23 @@ class RollingAwareAutoTrader:
     ]
 
     def __init__(self, use_v5: bool = True, use_rolling: bool = True,
-                 auto_retrain: bool = False):
+                 auto_retrain: bool = False, use_graph: bool = True):
         """
         Args:
             use_v5: 是否使用 MLSignalEngineV5 (Qlib融合)
             use_rolling: 是否检查模型新鲜度
             auto_retrain: 模型过期时是否自动重训 (true=全自动, false=仅警告)
+            use_graph: 是否使用资产关系图增强 (Phase 11)
         """
         self.use_v5 = use_v5 and ML_V5_AVAILABLE
         self.use_rolling = use_rolling and ROLLING_AVAILABLE
         self.auto_retrain = auto_retrain
+        self.use_graph = use_graph and GRAPH_AVAILABLE
 
         # 初始化引擎
         if self.use_v5:
-            self.engine = MLSignalEngineV5(use_qlib=True, use_lgbm=True)
-            self.engine_label = "v5 (Qlib融合)"
+            self.engine = MLSignalEngineV5(use_qlib=True, use_lgbm=True, use_graph=self.use_graph)
+            self.engine_label = "v5 (Qlib融合" + (" + 图增强)" if self.use_graph else ")")
         elif ML_SIGNAL_AVAILABLE:
             self.engine = MLSignalEngineV4()
             self.engine_label = "v4 (LightGBM)"
@@ -222,6 +231,18 @@ class RollingAwareAutoTrader:
             self.rolling_registry = RollingModelRegistry()
         else:
             self.rolling_trainer = None
+
+        # 资产关系图
+        self.graph_predictor = None
+        if self.use_graph:
+            try:
+                self.graph_predictor = CrossAssetGATPredictor()
+                if self.graph_predictor.snapshot is None:
+                    print("🔨 首次运行, 构建资产关系图...")
+                    self.graph_predictor.build_graph()
+            except Exception as e:
+                print(f"⚠️ 图引擎初始化失败: {e}")
+                self.use_graph = False
 
         self._exchange = None
 
@@ -300,7 +321,9 @@ class RollingAwareAutoTrader:
 
     def scan(self, symbols: list = None) -> list[dict]:
         """
-        扫描多币种 (支持 v4 和 v5 引擎)
+        扫描多币种 (支持 v4, v5, 和 v5+Graph 引擎)
+
+        Phase 11: 使用资产关系图做多资产联合扫描, 邻居信息增强每个资产的信号
 
         Returns:
             [{"symbol": "BTC/USDT", "signal": ..., "price": ..., "action": ...}, ...]
@@ -308,6 +331,99 @@ class RollingAwareAutoTrader:
         if symbols is None:
             symbols = self.CRYPTO_WATCHLIST
 
+        # Phase 11: 跨资产图增强扫描
+        if self.use_graph and self.graph_predictor is not None:
+            return self._scan_with_graph(symbols)
+
+        # 标准扫描
+        return self._scan_standard(symbols)
+
+    def _scan_with_graph(self, symbols: list) -> list[dict]:
+        """使用资产关系图的多资产联合扫描"""
+        results = []
+        n = len(symbols)
+        print(f"🔗 图增强多资产扫描 [{len(symbols)} 个资产]")
+
+        # 获取所有资产的图增强预测
+        graph_preds = self.graph_predictor.predict(symbols)
+        print(f"  📊 图预测: {len(graph_preds)}/{len(symbols)} 个资产可用")
+
+        for i, symbol in enumerate(symbols):
+            print(f"  🔍 [{i+1}/{n}] {symbol}...", end=" ")
+
+            df = self.fetch_ohlcv(symbol)
+            if df is None or len(df) < 200:
+                print("数据不足")
+                continue
+
+            try:
+                if self.use_v5:
+                    # v5 融合信号
+                    fusion_signal = self.engine.generate_signal(df, symbol)
+
+                    # 图增强调整
+                    if symbol in graph_preds and graph_preds[symbol] is not None:
+                        graph_pred = graph_preds[symbol]
+                        # 图预测方向与融合信号一致 → 提升置信度
+                        direction_agree = (graph_pred > 0) == (fusion_signal.signal_consensus > 0)
+                        graph_bonus = 1.15 if direction_agree else 0.85
+
+                        fusion_signal.confidence = min(1.0, fusion_signal.confidence * graph_bonus)
+                        fusion_signal.signal_consensus *= graph_bonus
+
+                        # 重新判定 action
+                        if fusion_signal.signal_consensus > 0.5:
+                            fusion_signal.action = "BUY"
+                        elif fusion_signal.signal_consensus < -0.5:
+                            fusion_signal.action = "SELL"
+                        else:
+                            fusion_signal.action = "HOLD"
+
+                    price = fusion_signal.price
+                    action = fusion_signal.action
+                    signal_val = fusion_signal.signal_consensus
+                    confidence = fusion_signal.confidence
+                    consensus = fusion_signal.consensus_ratio
+                    n_active = fusion_signal.n_models_active
+                    suggested_size = fusion_signal.suggested_size_pct
+                    engine_label = self.engine_label
+                else:
+                    signal = self.engine.generate_signal(df, symbol, use_lgbm=True)
+                    price = float(df["close"].values[-1])
+                    action = signal.action
+                    signal_val = signal.signal_lgbm if signal.lgbm_available else signal.signal_ic
+                    confidence = signal.confidence
+                    consensus = signal.consensus
+                    n_active = signal.n_sub_signals_active
+                    suggested_size = signal.suggested_size_pct / 100
+                    engine_label = "v4 (LightGBM + 图增强)"
+
+                graph_info = f" | 图={'✅' if symbol in graph_preds else '❌'}"
+                results.append({
+                    "symbol": symbol,
+                    "name": symbol.replace("/USDT", ""),
+                    "price": price,
+                    "action": action,
+                    "signal_val": signal_val,
+                    "confidence": confidence,
+                    "consensus": consensus,
+                    "n_active": n_active,
+                    "suggested_size_pct": suggested_size,
+                    "engine": engine_label + graph_info,
+                })
+
+                icon = "🟢" if action == "BUY" else "🔴" if action == "SELL" else "⚪"
+                print(f"{icon} {action} | sig={signal_val:+.3f} | "
+                      f"置信={confidence:.0%} | {n_active}活跃")
+
+            except Exception as e:
+                print(f"信号生成失败: {e}")
+
+        results.sort(key=lambda r: abs(r["signal_val"]), reverse=True)
+        return results
+
+    def _scan_standard(self, symbols: list) -> list[dict]:
+        """标准扫描 (无图增强)"""
         results = []
         n = len(symbols)
 
@@ -321,7 +437,6 @@ class RollingAwareAutoTrader:
 
             try:
                 if self.use_v5:
-                    # v5: Qlib融合信号
                     fusion_signal = self.engine.generate_signal(df, symbol)
                     price = fusion_signal.price
                     action = fusion_signal.action
@@ -331,7 +446,6 @@ class RollingAwareAutoTrader:
                     n_active = fusion_signal.n_models_active
                     suggested_size = fusion_signal.suggested_size_pct
                 else:
-                    # v4: LightGBM信号
                     signal = self.engine.generate_signal(df, symbol, use_lgbm=True)
                     price = float(df["close"].values[-1])
                     action = signal.action
@@ -474,7 +588,17 @@ class RollingAwareAutoTrader:
             f"  Qlib融合: {'✅' if self.use_v5 else '❌'}",
             f"  滚动检查: {'✅' if self.use_rolling else '❌'}",
             f"  自动重训: {'✅' if self.auto_retrain else '❌ (仅警告)'}",
+            f"  资产关系图: {'✅' if self.use_graph else '❌'} (Phase 11)",
         ]
+
+        if self.use_graph and self.graph_predictor and self.graph_predictor.snapshot:
+            snap = self.graph_predictor.snapshot
+            lines.append(f"  图资产: {snap.n_assets} 个")
+            lines.append(f"  图密度: {snap.graph_density:.4f}")
+            lines.append(f"  图社区: {snap.n_communities} 个")
+            if snap.top_edges:
+                top = snap.top_edges[0]
+                lines.append(f"  最强边: {top['source']} ←→ {top['target']} (w={top['weight']:.3f})")
 
         if self.use_rolling and self.rolling_trainer:
             status = self.rolling_trainer.status()

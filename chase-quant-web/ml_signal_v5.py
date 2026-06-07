@@ -34,6 +34,13 @@ from ml_signal_v4 import (
 from feature_ts import FeatureFactoryV4
 from qlib_trainer import QlibTrainer, QlibPredictor
 
+# Asset Graph (Phase 11)
+try:
+    from asset_graph import CrossAssetGATPredictor, AssetGraphBuilder
+    GRAPH_AVAILABLE = True
+except ImportError:
+    GRAPH_AVAILABLE = False
+
 DATA_DIR = Path(__file__).parent / "data"
 
 
@@ -105,17 +112,20 @@ class MLSignalEngineV5:
 
     def __init__(self, use_qlib: bool = True, use_lgbm: bool = True,
                  qlib_models: Optional[List[str]] = None,
-                 min_models_for_consensus: int = 2):
+                 min_models_for_consensus: int = 2,
+                 use_graph: bool = True):
         """
         Args:
             use_qlib: 是否加载 Qlib 深度学习模型
             use_lgbm: 是否使用 LightGBM (基础基线)
             qlib_models: Qlib 模型列表 (None = all available)
             min_models_for_consensus: 最少模型数才计算共识
+            use_graph: 是否使用资产关系图增强 (Phase 11)
         """
         self.use_qlib = use_qlib
         self.use_lgbm = use_lgbm
         self.min_models = min_models_for_consensus
+        self.use_graph = use_graph and GRAPH_AVAILABLE
 
         # 基础引擎 (v4)
         self.v4_engine = MLSignalEngineV4()
@@ -130,6 +140,18 @@ class MLSignalEngineV5:
                 print(f"🧠 Qlib 推理器已加载")
             except Exception as e:
                 print(f"⚠️ Qlib 推理器加载失败: {e}")
+
+        # 资产关系图 (Phase 11)
+        self.graph_predictor = None
+        self.graph_builder = None
+        if self.use_graph:
+            try:
+                self.graph_predictor = CrossAssetGATPredictor()
+                self.graph_builder = AssetGraphBuilder()
+                print(f"🔗 资产关系图引擎已加载")
+            except Exception as e:
+                print(f"⚠️ 图引擎加载失败: {e}")
+                self.use_graph = False
 
         # 加载模型权重 (基于 OOS ICIR)
         self._model_weights = self._load_model_weights()
@@ -354,6 +376,92 @@ class MLSignalEngineV5:
             n_themes_active=0,
             models_available=[],
         )
+
+    def generate_cross_asset_signals(self, symbols: List[str],
+                                      force_build_graph: bool = False) -> Dict[str, FusionSignal]:
+        """
+        多资产联合预测 — 使用资产关系图增强 (Phase 11)
+
+        Args:
+            symbols: 资产列表 (如 ["BTC/USDT", "ETH/USDT", "SOL/USDT"])
+            force_build_graph: 强制重建资产关系图
+
+        Returns:
+            {symbol: FusionSignal, ...}
+        """
+        if not self.use_graph:
+            print("⚠️ 资产关系图不可用")
+            return {}
+
+        results = {}
+        try:
+            import ccxt
+            exchange = ccxt.binance({"enableRateLimit": True, "timeout": 15000})
+
+            # 1. 获取所有资产的图增强预测
+            graph_preds = self.graph_predictor.predict(symbols, force_build_graph)
+
+            # 2. 为每个资产生成基础信号 (LightGBM + Qlib)
+            for symbol in symbols:
+                try:
+                    ohlcv = exchange.fetch_ohlcv(symbol, "1d", limit=400)
+                    df = pd.DataFrame(ohlcv, columns=["date", "open", "high", "low", "close", "volume"])
+                    # 基础融合信号
+                    base_signal = self.generate_signal(df, symbol)
+
+                    # 图增强: 用邻居信息调整置信度
+                    if symbol in graph_preds and graph_preds[symbol] is not None:
+                        graph_pred = graph_preds[symbol]
+                        # 图预测与自身信号方向一致 → 提升置信度
+                        direction_agree = (graph_pred > 0) == (base_signal.signal_consensus > 0)
+                        graph_bonus = 1.15 if direction_agree else 0.85
+
+                        # 修改融合信号 (图增强版)
+                        base_signal.signal_consensus *= graph_bonus
+                        base_signal.confidence = min(1.0, base_signal.confidence * graph_bonus)
+                        base_signal.divergence *= max(0.5, 2 - graph_bonus)
+
+                        # 更新 action
+                        if base_signal.signal_consensus > self.ACTION_THRESHOLDS["BUY"]:
+                            base_signal.action = "BUY"
+                        elif base_signal.signal_consensus < self.ACTION_THRESHOLDS["SELL"]:
+                            base_signal.action = "SELL"
+                        else:
+                            base_signal.action = "HOLD"
+
+                        # 标记图增强
+                        base_signal.models_available.append("graph_enhanced")
+
+                    results[symbol] = base_signal
+
+                except Exception as e:
+                    print(f"  ⚠️ {symbol} 信号生成失败: {e}")
+
+        except ImportError:
+            print("⚠️ ccxt 未安装, 跳过跨资产预测")
+
+        return results
+
+    def get_graph_status(self) -> dict:
+        """获取资产关系图状态"""
+        if not self.use_graph or not self.graph_predictor:
+            return {"available": False, "reason": "图引擎未加载"}
+
+        snapshot = self.graph_predictor.snapshot
+        if snapshot is None:
+            return {"available": False, "reason": "图快照未构建"}
+
+        return {
+            "available": True,
+            "n_assets": snapshot.n_assets,
+            "symbols": snapshot.symbols,
+            "density": snapshot.graph_density,
+            "avg_degree": snapshot.avg_degree,
+            "n_communities": snapshot.n_communities,
+            "top_edge": snapshot.top_edges[0] if snapshot.top_edges else None,
+            "created_at": snapshot.created_at,
+            "n_days": snapshot.n_days,
+        }
 
     def get_available_models(self) -> List[str]:
         """检查哪些模型可用"""

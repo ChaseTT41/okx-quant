@@ -1,11 +1,12 @@
 """
-Rolling Trainer v1.0 — 滚动在线学习引擎
-========================================
-Chase量化策略 Phase 10: 自适应模型更新, 解决 vs Qlib 最大劣势
+Rolling Trainer v2.0 — 滚动在线学习引擎 + 图漂移监控
+========================================================
+Chase量化策略 Phase 10+11: 自适应模型更新 + 资产关系图漂移检测
 
 核心能力 (vs 静态训练):
   静态训练 (Phase 9): 训练一次 → 模型老化 → 表现退化
   滚动训练 (Phase 10): 定期自动重训 → 适应市场变化 → 持续优化
+  图漂移监控 (Phase 11): 检测资产关系变化 → 触发图重建 → GATs 持续有效
 
 设计灵感:
   - Qlib OnlineManager: 在线学习 + 模型更新
@@ -13,17 +14,22 @@ Chase量化策略 Phase 10: 自适应模型更新, 解决 vs Qlib 最大劣势
   - 西蒙斯风格: "让模型和数据一起进化"
 
 架构:
-  ┌─────────────────────────────────────────────────────┐
-  │                 RollingTrainer                       │
-  │                                                     │
-  │  ┌─────────┐   ┌──────────┐   ┌──────────────────┐ │
-  │  │ Window  │ → │ Retrain  │ → │ Model Registry   │ │
-  │  │ Manager │   │ Scheduler│   │ (versioned .pth) │ │
-  │  └─────────┘   └──────────┘   └──────────────────┘ │
-  │       │               │                │            │
-  │  expanding/      daily/weekly/      staleness       │
-  │  sliding         monthly           detection        │
-  └─────────────────────────────────────────────────────┘
+  ┌─────────────────────────────────────────────────────────────┐
+  │                 RollingTrainer v2.0                          │
+  │                                                             │
+  │  ┌─────────┐   ┌──────────┐   ┌──────────────────┐         │
+  │  │ Window  │ → │ Retrain  │ → │ Model Registry   │         │
+  │  │ Manager │   │ Scheduler│   │ (versioned .pth) │         │
+  │  └─────────┘   └──────────┘   └──────────────────┘         │
+  │       │               │                │                    │
+  │  expanding/      daily/weekly/      staleness               │
+  │  sliding         monthly           detection                │
+  │                                                             │
+  │  ┌──────────────────┐   ┌──────────────────────────┐       │
+  │  │ Asset Graph      │ → │ Graph Drift Detection    │       │
+  │  │ Builder (Phase11)│   │ → 触发图重建 → GATs更新  │       │
+  │  └──────────────────┘   └──────────────────────────┘       │
+  └─────────────────────────────────────────────────────────────┘
 
 使用方式:
   # 首次滚动训练 (全量)
@@ -64,6 +70,13 @@ from qlib_models import (
     MODEL_REGISTRY, create_model, save_model, load_model,
     DEVICE, MODEL_DIR,
 )
+
+# Asset Graph (Phase 11)
+try:
+    from asset_graph import AssetGraphBuilder, CrossAssetGATPredictor
+    GRAPH_AVAILABLE = True
+except ImportError:
+    GRAPH_AVAILABLE = False
 
 DATA_DIR = Path(__file__).parent / "data"
 ROLLING_DIR = DATA_DIR / "rolling"
@@ -653,6 +666,8 @@ class RollingTrainer:
         "use_double_ensemble": False,
         "auto_cleanup_old": True,      # 自动清理旧版本
         "keep_versions": 5,            # 每个模型保留版本数
+        "graph_check_enabled": True,   # Phase 11: 图漂移检测
+        "graph_drift_threshold": 0.3,  # 图漂移重训阈值
     }
 
     def __init__(self, config: Optional[dict] = None):
@@ -670,6 +685,15 @@ class RollingTrainer:
         self.feature_factory = FeatureFactoryV4()
         self.theme_config = SubSignalBuilder.THEME_CONFIG
 
+        # 资产关系图 (Phase 11)
+        self.graph_builder = None
+        if GRAPH_AVAILABLE and self.config.get("graph_check_enabled", True):
+            try:
+                self.graph_builder = AssetGraphBuilder()
+                print("🔗 图漂移监控已启用 (Phase 11)")
+            except Exception as e:
+                print(f"⚠️ 图引擎初始化失败: {e}")
+
     # ── 主入口 ──────────────────────────────────
 
     def run(self, df_btc: pd.DataFrame,
@@ -686,7 +710,7 @@ class RollingTrainer:
         Returns:
             运行结果摘要
         """
-        print("🔄 Rolling Trainer v1.0 — 滚动在线学习引擎")
+        print("🔄 Rolling Trainer v2.0 — 滚动在线学习引擎 + 图漂移监控")
         print(f"   模式: {mode} | 强制: {force}")
         print(f"   数据: {len(df_btc)} 天 | "
               f"{df_btc.iloc[0].get('date', '?')} → {df_btc.iloc[-1].get('date', '?')}")
@@ -694,6 +718,15 @@ class RollingTrainer:
         # 1. 检查是否需要重训
         latest_snapshots = self.registry.get_all_latest()
         should, reason = self.window_manager.should_retrain(latest_snapshots)
+
+        # Phase 11: 检查图漂移
+        graph_drift_result = None
+        if self.graph_builder and self.config.get("graph_check_enabled", True):
+            print("🔗 检查资产关系图漂移...")
+            graph_drift_result = self.check_graph_drift()
+            if graph_drift_result.get("drifted"):
+                reason += f" + 图漂移({graph_drift_result['drift_score']:.3f})"
+                should = True
 
         if not force and not should and mode != "init":
             print(f"\n✅ 无需重训: {reason}")
@@ -782,6 +815,7 @@ class RollingTrainer:
             "n_qlib_models": len(qlib_results),
             "n_lgbm_models": len(lgbm_results),
             "n_cleaned": n_cleaned,
+            "graph_drift": graph_drift_result,  # Phase 11
             "report": report,
             "timestamp": datetime.now().isoformat(),
         }
@@ -1008,6 +1042,9 @@ class RollingTrainer:
 
         should_retrain, reason = self.window_manager.should_retrain(snapshots)
 
+        # Phase 11: 图状态
+        graph_status = self._get_graph_status()
+
         return {
             "n_snapshots": len(snapshots),
             "n_models": len(set(s.model_name for s in snapshots)),
@@ -1019,7 +1056,99 @@ class RollingTrainer:
             "retrain_reason": reason,
             "window_config": self.window_manager.config,
             "registry_path": str(self.registry.registry_path),
+            "graph_status": graph_status,  # Phase 11
         }
+
+    def _get_graph_status(self) -> dict:
+        """获取资产关系图状态 (Phase 11)"""
+        if not self.graph_builder:
+            return {"available": False, "reason": "图引擎未初始化"}
+
+        try:
+            snapshot = self.graph_builder.load_snapshot("latest")
+            if snapshot is None:
+                return {"available": False, "reason": "图快照未构建"}
+
+            # 图年龄
+            if snapshot.created_at:
+                created = datetime.fromisoformat(snapshot.created_at)
+                age_days = (datetime.now() - created).days
+            else:
+                age_days = 999
+
+            return {
+                "available": True,
+                "n_assets": snapshot.n_assets,
+                "symbols": snapshot.symbols,
+                "density": snapshot.graph_density,
+                "avg_degree": snapshot.avg_degree,
+                "n_communities": snapshot.n_communities,
+                "age_days": age_days,
+                "top_edge": snapshot.top_edges[0] if snapshot.top_edges else None,
+                "stale": age_days > 7,  # 图超过7天认为过时
+            }
+        except Exception as e:
+            return {"available": False, "reason": str(e)}
+
+    def check_graph_drift(self, symbols: List[str] = None) -> dict:
+        """
+        检测资产关系图漂移 — 市场结构是否变了 (Phase 11)
+
+        Returns:
+            {"drifted": bool, "drift_score": float, "action": str}
+        """
+        if not self.graph_builder:
+            return {"drifted": False, "drift_score": 0.0, "action": "graph_unavailable"}
+
+        if symbols is None:
+            symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
+
+        try:
+            # 加载旧图
+            old_snapshot = self.graph_builder.load_snapshot("latest")
+
+            # 构建新图
+            new_snapshot = self.graph_builder.build(symbols, lookback_days=90)
+
+            if old_snapshot is None:
+                # 第一次构建
+                self.graph_builder.save_snapshot(new_snapshot, "latest")
+                return {"drifted": False, "drift_score": 0.0, "action": "first_build"}
+
+            # 计算漂移
+            # 需要对齐资产
+            common_symbols = list(set(old_snapshot.symbols) & set(new_snapshot.symbols))
+            if len(common_symbols) < 3:
+                return {"drifted": False, "drift_score": 0.0, "action": "insufficient_overlap"}
+
+            old_idx = [old_snapshot.symbols.index(s) for s in common_symbols]
+            new_idx = [new_snapshot.symbols.index(s) for s in common_symbols]
+
+            old_adj = old_snapshot.adj_matrix[np.ix_(old_idx, old_idx)]
+            new_adj = new_snapshot.adj_matrix[np.ix_(new_idx, new_idx)]
+
+            drift_score = self.graph_builder.detect_graph_drift(old_adj, new_adj)
+            threshold = self.config.get("graph_drift_threshold", 0.3)
+            drifted = drift_score > threshold
+
+            if drifted:
+                # 保存新图
+                self.graph_builder.save_snapshot(new_snapshot, "latest")
+                print(f"🔴 图漂移检测: {drift_score:.4f} > {threshold} → 图已更新!")
+            else:
+                print(f"✅ 图结构稳定: {drift_score:.4f} ≤ {threshold}")
+
+            return {
+                "drifted": drifted,
+                "drift_score": drift_score,
+                "threshold": threshold,
+                "action": "graph_rebuilt" if drifted else "graph_stable",
+                "n_common_assets": len(common_symbols),
+                "old_density": old_snapshot.graph_density,
+                "new_density": new_snapshot.graph_density,
+            }
+        except Exception as e:
+            return {"drifted": False, "drift_score": 0.0, "action": f"error: {e}"}
 
     def backtest_windows(self, df_btc: pd.DataFrame,
                          n_windows: int = 5) -> pd.DataFrame:
@@ -1113,10 +1242,23 @@ def auto_rolling_check(df_btc: pd.DataFrame = None) -> dict:
     trainer = RollingTrainer()
     status = trainer.status()
 
+    # Phase 11: 同时检查图漂移
+    graph_status = status.get("graph_status", {})
+    graph_drift = None
+    if graph_status.get("available") and graph_status.get("stale"):
+        print("🔗 资产关系图过期, 检测漂移...")
+        graph_drift = trainer.check_graph_drift()
+        if graph_drift.get("drifted"):
+            print(f"🔴 图漂移: {graph_drift['drift_score']:.4f}")
+            status["should_retrain"] = True
+            status["retrain_reason"] = (status.get("retrain_reason", "") +
+                                       f" + 图漂移({graph_drift['drift_score']:.3f})")
+
     if status["should_retrain"]:
         print(f"🔄 触发自动重训: {status['retrain_reason']}")
         result = trainer.run(df_btc, force=False, mode="update")
         result["pre_check"] = status
+        result["graph_drift"] = graph_drift
         return result
     else:
         print(f"✅ 模型健康, 跳过: {status['retrain_reason']}")
@@ -1124,6 +1266,8 @@ def auto_rolling_check(df_btc: pd.DataFrame = None) -> dict:
             "action": "skip",
             "reason": status["retrain_reason"],
             "max_age_days": status["max_age_days"],
+            "graph_status": graph_status,
+            "graph_drift": graph_drift,
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -1136,7 +1280,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="🔄 Rolling Trainer — 滚动在线学习引擎"
+        description="🔄 Rolling Trainer v2.0 — 滚动在线学习引擎 + 图漂移监控"
     )
     parser.add_argument("--init", action="store_true",
                         help="首次全量训练")
@@ -1148,6 +1292,10 @@ if __name__ == "__main__":
                         help="查看滚动训练状态")
     parser.add_argument("--backtest", action="store_true",
                         help="回测滚动窗口性能")
+    parser.add_argument("--check-graph", action="store_true",
+                        help="检查资产关系图漂移 (Phase 11)")
+    parser.add_argument("--build-graph", action="store_true",
+                        help="构建/重建资产关系图 (Phase 11)")
     parser.add_argument("--n-windows", type=int, default=5,
                         help="回测窗口数 (default: 5)")
     parser.add_argument("--mode", type=str, default="hybrid",
@@ -1199,6 +1347,22 @@ if __name__ == "__main__":
         print(f"   最近训练: {status['latest_training'][:19] if status['latest_training'] != 'never' else '从未'}")
         print(f"   最大年龄: {status['max_age_days']} 天")
         print(f"   需要重训: {'是' if status['should_retrain'] else '否'} — {status['retrain_reason']}")
+
+        # Phase 11: 图状态
+        gs = status.get("graph_status", {})
+        if gs.get("available"):
+            print(f"\n🔗 资产关系图 (Phase 11):")
+            print(f"   资产数: {gs['n_assets']}")
+            print(f"   图密度: {gs['graph_density']:.4f}")
+            print(f"   平均度: {gs['avg_degree']:.2f}")
+            print(f"   社区数: {gs['n_communities']}")
+            print(f"   图年龄: {gs['age_days']} 天 {'⚠️ 需更新' if gs.get('stale') else '✅ 新鲜'}")
+            if gs.get('top_edge'):
+                e = gs['top_edge']
+                print(f"   最强边: {e['source']} ←→ {e['target']} (w={e['weight']:.3f})")
+        else:
+            print(f"\n🔗 资产关系图: ❌ {gs.get('reason', '未初始化')}")
+
         print(f"\n📋 模型新鲜度:")
         for s in status["staleness_summary"]:
             print(f"   {s['staleness']:16s} | {s['model']:15s} | {s['theme']:10s} | "
@@ -1219,6 +1383,36 @@ if __name__ == "__main__":
             print(f"   训练模型: {r['n_models_trained']} 个")
             print(f"   改善/稳定/退化: {r['n_improved']}/{r['n_stable']}/{r['n_degraded']}")
             print(f"   平均ICIR: {r['mean_icir']}")
+
+    elif args.check_graph:
+        print("🔗 检查资产关系图漂移...")
+        result = trainer.check_graph_drift()
+        print(f"\n📊 图漂移检测结果:")
+        print(f"   漂移分数: {result.get('drift_score', 0):.4f}")
+        print(f"   阈值: {result.get('threshold', 0.3)}")
+        print(f"   是否漂移: {'🔴 是' if result.get('drifted') else '✅ 否'}")
+        print(f"   动作: {result.get('action', 'unknown')}")
+        if result.get('n_common_assets'):
+            print(f"   对齐资产: {result['n_common_assets']} 个")
+            print(f"   旧密度: {result.get('old_density', 0):.4f}")
+            print(f"   新密度: {result.get('new_density', 0):.4f}")
+
+    elif args.build_graph:
+        print("🔨 构建资产关系图...")
+        try:
+            builder = AssetGraphBuilder()
+            symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
+            snapshot = builder.build(symbols)
+            builder.save_snapshot(snapshot)
+            print(f"\n✅ 图构建完成!")
+            print(f"   资产: {snapshot.n_assets}")
+            print(f"   密度: {snapshot.graph_density:.4f}")
+            print(f"   社区: {snapshot.n_communities}")
+            print(f"\n🔗 Top 5 最强连边:")
+            for e in snapshot.top_edges[:5]:
+                print(f"   {e['source']:12s} ←→ {e['target']:12s}  w={e['weight']:.3f}")
+        except Exception as e:
+            print(f"❌ 图构建失败: {e}")
 
     elif args.update:
         print("🔍 检查并增量更新...")

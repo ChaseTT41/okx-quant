@@ -23,6 +23,7 @@
 | **🧠 Qlib DL模型** | ✅ **NEW** | ALSTM + Transformer + TabNet + GATs 深度学习 |
 | **模型融合 v5.0** | ✅ **NEW** | LightGBM + Qlib模型 ICIR加权融合 + 共识投票 |
 | **🔄 滚动在线学习** | ✅ **NEW** | 自适应模型更新 · 特征漂移检测 · 自动重训调度 |
+| **🔗 资产关系图** | ✅ **NEW** | 6维关系矩阵 · CrossAssetGAT · 图漂移检测 · 多资产联合预测 |
 | **自动交易** | ✅ | auto_trade.py · ML驱动 · 多币种扫描 |
 | **五层风控** | ✅ | 事前→订单→持仓→组合→异常 · 硬止损-8% |
 | **Walk-Forward** | ✅ | 滚动窗口OOS验证 · 参数稳定性评分 |
@@ -42,7 +43,8 @@
 | 自动Alpha挖掘 | ❌ | ✅ |
 | 实盘交易 | ✅ | ❌ |
 | 风控体系 | **五层铁律** | 薄弱 |
-| 在线学习 | ❌ | ✅ |
+| 在线学习 | ✅ **滚动在线学习** | ✅ |
+| 资产关系图 | ✅ **6维关系+图漂移** | ⚠️ 研究为主 |
 | **我们的策略** | **用Qlib的AI + 我们的实盘 = 🚀** | |
 
 ---
@@ -66,6 +68,7 @@ yina-app/
 │   ├── qlib_models.py           # 🆕 Qlib DL模型 (ALSTM/Transformer/TabNet/GATs)
 │   ├── qlib_trainer.py          # 🆕 Qlib模型训练器 + PurgedKFold
 │   ├── rolling_trainer.py       # 🆕 滚动在线学习引擎 (Phase 10)
+│   ├── asset_graph.py           # 🆕 资产关系图引擎 (Phase 11)
 │   │
 │   ├── ml_cross_market.py       # 跨市场数据 (ETH/SPY/DXY/VIX/F&G)
 │   ├── strategy_backtest.py     # 策略回测引擎
@@ -136,6 +139,14 @@ python3 rolling_trainer.py --init      # 首次全量训练
 python3 rolling_trainer.py --update    # 增量更新 (自动检查是否需要)
 python3 rolling_trainer.py --status    # 查看模型新鲜度
 python3 rolling_trainer.py --backtest  # 回测滚动窗口性能
+
+# 🔗 资产关系图 (NEW! Phase 11)
+python3 asset_graph.py --build          # 构建6维资产关系图
+python3 asset_graph.py --build --predict # 构建并多资产联合预测
+python3 asset_graph.py --rolling        # 滚动窗口动态图
+python3 asset_graph.py --train --epochs 100  # 训练 CrossAssetGAT
+python3 rolling_trainer.py --check-graph  # 检查图漂移
+python3 rolling_trainer.py --build-graph  # 重建资产关系图
 
 # 策略回测
 python3 strategy_backtest.py
@@ -211,6 +222,28 @@ python3 walk_forward_validator.py
 └─────────────────────────────────────────────────────────┘
 ```
 
+### 资产关系图 (Phase 11) 🆕
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    Asset Graph Engine                         │
+│                                                              │
+│  6维关系矩阵                  多资产GAT预测                    │
+│  ┌────────────────┐         ┌──────────────────────┐         │
+│  │ 1. Pearson 相关│         │                      │         │
+│  │ 2. Spearman 秩 │  融合   │  N个资产 → N个节点     │         │
+│  │ 3. 距离相关dCor│ ────→  │  N×N 邻接矩阵        │         │
+│  │ 4. 协整关系    │         │  GAT 聚合邻居信息     │         │
+│  │ 5. Granger因果 │         │  → N个联合预测       │         │
+│  │ 6. 波动率相关  │         │                      │         │
+│  └────────────────┘         └──────────────────────┘         │
+│                                                              │
+│  图漂移监控:                                                  │
+│  🔴 漂移 > 0.3  →  自动重建图 →  GATs 重新训练                │
+│  🟢 图结构稳定   →  继续使用现有图                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## 🛡️ 风控铁律 (5层防御)
@@ -262,7 +295,7 @@ python3 hk_momentum_rotation.py
 - [x] **模型融合 v5.0 (LightGBM + Qlib DL)**
 - [x] 模型版本管理 (自动老化监控)
 - [x] **🔄 滚动在线学习 (Rolling Training)** — 自适应模型更新
-- [ ] GATs 真实资产关系图 + 多资产联合预测
+- [x] **🔗 GATs 真实资产关系图 + 多资产联合预测** — 6维关系矩阵 + CrossAssetGAT
 - [ ] 自动Alpha挖掘 (表达式引擎)
 - [ ] 企业微信日报自动推送
 - [ ] 订单执行优化 (拆单算法)
@@ -276,7 +309,7 @@ MIT License — 欢迎 Star ⭐ & Fork
 ---
 
 <p align="center">
-  <b>🐾 Chase的量化策略 v2.1 — Qlib增强 + 滚动在线学习</b><br>
+  <b>🐾 Chase的量化策略 v2.2 — Qlib增强 + 滚动在线学习 + 资产关系图</b><br>
   <i>Built with ❤️ by Yina for Chase哥</i><br>
-  <sub>用Qlib的AI大脑 + 我们的实盘肌肉 = 无敌组合 🚀</sub>
+  <sub>用Qlib的AI大脑 + 我们的实盘肌肉 + 资产之间的关系网 = 无敌组合 🚀</sub>
 </p>
