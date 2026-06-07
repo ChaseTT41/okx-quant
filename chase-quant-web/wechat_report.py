@@ -299,35 +299,23 @@ class DataCollector:
         insights = []
         try:
             from ml_signal_v5 import MLSignalEngineV5
-            from feature_ts import FeatureFactoryV4
             import pandas as pd
             import ccxt
 
             engine = MLSignalEngineV5()
-            factory = FeatureFactoryV4()
             exchange = ccxt.binance({"enableRateLimit": True, "timeout": 15000})
 
             for sym in WATCHLIST[:6]:  # Top 6 to avoid rate limits
                 try:
-                    # 获取OHLCV (需要足够的历史数据来计算特征)
+                    # 获取OHLCV (generate_signal 内部会自己计算特征)
                     ohlcv = exchange.fetch_ohlcv(sym, "1h", limit=300)
                     df = pd.DataFrame(
                         ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
                     )
                     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
 
-                    # 用 compute_latest 生成特征 (单值特征, 返回 dict)
-                    features_dict = factory.compute_latest(df, categories=None)
-                    if not features_dict:
-                        continue
-
-                    # 转为 DataFrame 行 → 适合 generate_signal
-                    df_feat = pd.DataFrame([features_dict])
-                    df_feat["timestamp"] = df["timestamp"].iloc[-1]
-                    df_feat["close"] = float(df["close"].iloc[-1])
-                    df_feat["symbol"] = sym
-
-                    signal = engine.generate_signal(df_feat, sym)
+                    # 直接传 OHLCV 给 generate_signal, 它内部调用 FeatureFactory
+                    signal = engine.generate_signal(df, sym)
 
                     if signal:
                         # 构建推算逻辑
