@@ -112,10 +112,10 @@ class MLSignalEngineV5:
       5. 输出最终交易信号
     """
 
-    # 信号 → 操作阈值
+    # 信号 → 操作阈值 (动态调整，平衡信号频率与质量)
     ACTION_THRESHOLDS = {
-        "BUY": 0.5,
-        "SELL": -0.5,
+        "BUY": 0.12,
+        "SELL": -0.12,
     }
 
     def __init__(self, use_qlib: bool = True, use_lgbm: bool = True,
@@ -452,13 +452,13 @@ class MLSignalEngineV5:
         pred_values = [p.prediction for p in all_predictions]
         divergence = np.std(pred_values) if len(pred_values) > 1 else 0.0
 
-        # 最终信号
+        # 最终信号 (保留分歧惩罚用于仓位大小)
         final_signal = signal_consensus * (1.0 - min(divergence * 2, 0.5))  # 分歧惩罚
 
-        # 确定操作
-        if final_signal > self.ACTION_THRESHOLDS["BUY"]:
+        # 确定操作 — 用信号加权值 (不受分歧惩罚衰减)
+        if signal_weighted > self.ACTION_THRESHOLDS["BUY"]:
             action = "BUY"
-        elif final_signal < self.ACTION_THRESHOLDS["SELL"]:
+        elif signal_weighted < self.ACTION_THRESHOLDS["SELL"]:
             action = "SELL"
         else:
             action = "HOLD"

@@ -320,7 +320,7 @@ class RollingWindowManager:
             (是否需要重训, 原因)
         """
         if not snapshots:
-            return True, "首次训练 (无现有模型)"
+            return True, "⚠️ 首次训练 (无现有模型)"
 
         # 检查过期
         max_age = max(s.age_days for s in snapshots)

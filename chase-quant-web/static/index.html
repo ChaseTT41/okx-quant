@@ -1,0 +1,4024 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chase量化策略 🐾 · AI模拟交易平台</title>
+<link rel="stylesheet" href="/static/tailwind.css">
+<script src="/static/lightweight-charts.standalone.production.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: #0a0e14; color: #e6edf3; min-height: 100vh; overflow-x: hidden;
+  }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: #0a0e14; }
+  ::-webkit-scrollbar-thumb { background: #1e2430; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #30363d; }
+
+  /* ── Layout ── */
+  .app-layout { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 220px; min-width: 220px; background: #0d1117;
+    border-right: 1px solid #1e2430; display: flex; flex-direction: column;
+    transition: transform 0.25s ease, width 0.25s ease;
+    z-index: 40; position: fixed; top: 0; left: 0; bottom: 0;
+  }
+  .main-wrap { margin-left: 220px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+  .topbar {
+    height: 52px; min-height: 52px; background: #0d1117;
+    border-bottom: 1px solid #1e2430; display: flex; align-items: center;
+    padding: 0 20px; position: sticky; top: 0; z-index: 30;
+  }
+  .content-area { flex: 1; padding: 20px; overflow-y: auto; }
+
+  /* ── Sidebar ── */
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px; margin: 2px 8px; border-radius: 8px;
+    color: #8b949e; font-size: 14px; cursor: pointer; transition: all 0.15s;
+    text-decoration: none; white-space: nowrap;
+  }
+  .nav-item:hover { background: #1c2129; color: #e6edf3; }
+  .nav-item.active { background: rgba(0,212,170,0.1); color: #00d4aa; font-weight: 600; }
+  .nav-icon { font-size: 18px; width: 24px; text-align: center; flex-shrink: 0; }
+  .nav-badge {
+    margin-left: auto; font-size: 10px; padding: 2px 6px; border-radius: 10px;
+    background: rgba(240,71,112,0.15); color: #f04770; font-weight: 600;
+  }
+
+  /* ── Cards & Panels ── */
+  .card {
+    background: #141920; border: 1px solid #1e2430; border-radius: 12px;
+    padding: 16px; transition: border-color 0.2s;
+  }
+  .card:hover { border-color: #30363d; }
+  .panel {
+    background: #141920; border: 1px solid #1e2430; border-radius: 12px; overflow: hidden;
+  }
+  .panel-hd {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid #1e2430;
+    font-size: 14px; font-weight: 600;
+  }
+
+  /* ── Badges ── */
+  .badge-buy  { color:#00d4aa; background:rgba(0,212,170,0.1); padding:2px 8px; border-radius:4px; font-weight:600; font-size:12px; }
+  .badge-sell { color:#f04770; background:rgba(240,71,112,0.1); padding:2px 8px; border-radius:4px; font-weight:600; font-size:12px; }
+  .badge-hold { color:#8b949e; background:rgba(139,148,158,0.1); padding:2px 8px; border-radius:4px; font-weight:600; font-size:12px; }
+  .badge-info { color:#3b82f6; background:rgba(59,130,246,0.1); padding:2px 8px; border-radius:4px; font-weight:600; font-size:12px; }
+
+  /* ── Form Elements ── */
+  .input-field {
+    background: #0d1117; border: 1px solid #1e2430; border-radius: 8px;
+    padding: 8px 12px; color: #e6edf3; font-size: 13px; width: 100%;
+    transition: border-color 0.15s; outline: none;
+  }
+  .input-field:focus { border-color: #00d4aa; }
+  .input-field::placeholder { color: #484f58; }
+  select.input-field { cursor: pointer; appearance: none; }
+  .btn {
+    padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+    cursor: pointer; border: none; transition: all 0.15s; white-space: nowrap;
+  }
+  .btn-accent { background: #00d4aa; color: #0a0e14; }
+  .btn-accent:hover { background: #00e8bb; }
+  .btn-outline { background: transparent; border: 1px solid #1e2430; color: #e6edf3; }
+  .btn-outline:hover { border-color: #00d4aa; color: #00d4aa; }
+  .btn-danger { background: rgba(240,71,112,0.15); color: #f04770; border: 1px solid rgba(240,71,112,0.3); }
+  .btn-danger:hover { background: rgba(240,71,112,0.25); }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+  /* ── Page visibility ── */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ── Mobile ── */
+  .menu-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 35; }
+  @media (max-width: 768px) {
+    .sidebar { transform: translateX(-100%); }
+    .sidebar.open { transform: translateX(0); }
+    .main-wrap { margin-left: 0; }
+    .menu-overlay.show { display: block; }
+    .content-area { padding: 12px; }
+    .topbar { padding: 0 12px; }
+    .hide-mobile { display: none !important; }
+  }
+  @media (min-width: 769px) {
+    .show-mobile { display: none !important; }
+  }
+
+  /* ── Animations ── */
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .fade-in { animation: fadeIn 0.3s ease; }
+  .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: #00d4aa; animation: pulse 2s infinite; display: inline-block; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  /* ── Table ── */
+  .data-table { width: 100%; font-size: 13px; border-collapse: collapse; }
+  .data-table th { text-align: left; padding: 10px 12px; color: #8b949e; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #1e2430; }
+  .data-table td { padding: 10px 12px; border-bottom: 1px solid #0d1117; }
+  .data-table tr:hover td { background: #1c2129; }
+
+  /* ── Toast Notifications ── */
+  #toast-container { position: fixed; top: 16px; right: 16px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; max-width: 380px; }
+  .toast {
+    display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 10px;
+    background: #141920; border: 1px solid #1e2430; color: #e6edf3; font-size: 13px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4); animation: slideInRight 0.3s ease;
+    pointer-events: auto;
+  }
+  .toast.success { border-left: 3px solid #00d4aa; }
+  .toast.error   { border-left: 3px solid #f04770; }
+  .toast.info    { border-left: 3px solid #3b82f6; }
+  .toast.warning { border-left: 3px solid #f0b90b; }
+  .toast-icon { font-size: 16px; flex-shrink: 0; }
+  .toast-msg  { flex: 1; line-height: 1.4; }
+  @keyframes slideInRight { from { opacity: 0; transform: translateX(100px); } to { opacity: 1; transform: translateX(0); } }
+
+  /* ── Loading Spinner ── */
+  .loading-spinner {
+    display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: currentColor; border-radius: 50%; animation: spin 0.6s linear infinite; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .chart-loader {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(20,25,32,0.85); color: #8b949e; font-size: 13px; z-index: 10;
+    border-radius: 0 0 12px 12px; gap: 8px;
+  }
+  .chart-loader.hidden { display: none; }
+  .btn:disabled { opacity: 0.6; cursor: not-allowed; pointer-events: none; }
+
+  /* ── Leverage Slider ── */
+  .leverage-slider {
+    -webkit-appearance: none; width: 100%; height: 6px; border-radius: 3px;
+    background: linear-gradient(to right, #00d4aa 0%, #f0b90b 50%, #f04770 100%); outline: none;
+  }
+  .leverage-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%;
+    background: #fff; border: 2px solid #00d4aa; cursor: pointer; box-shadow: 0 0 8px rgba(0,212,170,0.3);
+  }
+  .leverage-badge {
+    display: inline-block; padding: 2px 10px; border-radius: 4px; font-weight: 700; font-size: 13px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  /* ── Order Type Segmented Control ── */
+  .segmented { display: flex; background: #0d1117; border-radius: 8px; padding: 2px; }
+  .seg-btn {
+    flex: 1; padding: 6px 10px; border-radius: 6px; font-size: 12px; font-weight: 600;
+    cursor: pointer; border: none; background: transparent; color: #8b949e; transition: all 0.15s; text-align: center;
+  }
+  .seg-btn.active { background: #1e2430; color: #e6edf3; }
+
+  /* ── Quick % Buttons ── */
+  .qty-pct { padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; border: 1px solid #1e2430; background: transparent; color: #8b949e; transition: all 0.15s; }
+  .qty-pct:hover { border-color: #00d4aa; color: #00d4aa; }
+
+  /* ── Price Ticker ── */
+  .price-ticker { font-family: 'SF Mono', 'Fira Code', 'Menlo', monospace; }
+  .price-flash { animation: flashGreen 0.6s ease; }
+  @keyframes flashGreen { 0% { background: rgba(0,212,170,0.15); } 100% { background: transparent; } }
+
+  /* ── Scrollable log ── */
+  .trade-log-item { padding: 6px 12px; border-bottom: 1px solid #0d1117; font-size: 12px; transition: background 0.15s; }
+  .trade-log-item:hover { background: #1c2129; }
+
+  /* ── AI Decision Panel ── */
+  .ai-decision-card {
+    background: #0d1117; border: 1px solid #1e2430; border-radius: 10px; padding: 14px;
+    transition: border-color 0.2s;
+  }
+  .ai-decision-card:hover { border-color: #30363d; }
+  .signal-indicator {
+    display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px;
+    border-radius: 20px; font-weight: 700; font-size: 14px;
+  }
+  .signal-buy  { background: rgba(0,212,170,0.12); color: #00d4aa; border: 1px solid rgba(0,212,170,0.3); }
+  .signal-sell { background: rgba(240,71,112,0.12); color: #f04770; border: 1px solid rgba(240,71,112,0.3); }
+  .signal-hold { background: rgba(139,148,158,0.1); color: #8b949e; border: 1px solid rgba(139,148,158,0.25); }
+  .pulse-ring {
+    width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+    animation: pulse 2s infinite;
+  }
+  .pulse-ring.buy-ring  { background: #00d4aa; }
+  .pulse-ring.sell-ring { background: #f04770; }
+  .pulse-ring.hold-ring { background: #8b949e; }
+
+  /* ── Confidence Bar ── */
+  .confidence-bar-track { height: 6px; background: #1e2430; border-radius: 3px; overflow: hidden; }
+  .confidence-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+  .confidence-bar-fill.high   { background: linear-gradient(90deg, #00d4aa, #00e8bb); }
+  .confidence-bar-fill.medium { background: linear-gradient(90deg, #f0b90b, #f7c948); }
+  .confidence-bar-fill.low    { background: linear-gradient(90deg, #f04770, #f06a8a); }
+
+  /* ── Strategy Cards ── */
+  .strategy-card {
+    background: #141920; border: 1px solid #1e2430; border-radius: 12px;
+    padding: 16px; transition: all 0.2s;
+  }
+  .strategy-card:hover { border-color: #30363d; }
+  .strategy-card.running { border-left: 3px solid #00d4aa; }
+  .strategy-card.stopped { border-left: 3px solid #8b949e; opacity: 0.75; }
+  .strategy-card.error { border-left: 3px solid #f04770; }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+  }
+  .status-dot.running { background: #00d4aa; box-shadow: 0 0 6px rgba(0,212,170,0.5); }
+  .status-dot.stopped { background: #8b949e; }
+  .status-dot.error   { background: #f04770; box-shadow: 0 0 6px rgba(240,71,112,0.5); }
+  .param-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    background: #0d1117; color: #8b949e; font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace;
+    margin: 1px 2px;
+  }
+  .param-tag-key { color: #484f58; }
+
+  /* ── Confirmation Modal ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    z-index: 100; align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-box {
+    background: #141920; border: 1px solid #1e2430; border-radius: 16px;
+    padding: 24px; max-width: 440px; width: 90%; box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+    animation: modalIn 0.2s ease;
+  }
+  @keyframes modalIn { from { opacity: 0; transform: scale(0.95) translateY(-10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+
+  /* ── Delete Strategy Modal ── */
+  .danger-modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 110;
+    background: rgba(0,0,0,0.78); align-items: center; justify-content: center;
+  }
+  .danger-modal-overlay.show { display: flex; }
+  .danger-modal {
+    background: #141920; border: 1px solid rgba(240,71,112,0.35); border-radius: 16px;
+    width: 520px; max-width: 94vw; max-height: 88vh; overflow-y: auto;
+    box-shadow: 0 0 80px rgba(240,71,112,0.1), 0 20px 56px rgba(0,0,0,0.55);
+    animation: modalIn 0.2s ease;
+  }
+  .danger-modal-hd {
+    display: flex; align-items: center; gap: 14px;
+    padding: 22px 28px 18px; border-bottom: 1px solid rgba(240,71,112,0.12);
+    background: linear-gradient(180deg, rgba(240,71,112,0.04) 0%, transparent 100%);
+  }
+  .danger-modal-body { padding: 20px 28px; }
+  .danger-modal-footer {
+    display: flex; gap: 12px; justify-content: flex-end;
+    padding: 16px 28px 22px; border-top: 1px solid #1e2430;
+  }
+  .danger-info-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    background: #0d1117; border: 1px solid #1e2430; border-radius: 10px;
+    padding: 14px; margin-bottom: 16px;
+  }
+  .danger-info-label { font-size: 10px; color: #484f58; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 3px; font-weight: 600; }
+  .danger-info-value { font-size: 13px; color: #e6edf3; font-weight: 600; font-family: 'SF Mono', 'Fira Code', 'Menlo', monospace; }
+  .danger-info-value.status-running { color: #00d4aa; }
+  .danger-info-value.status-stopped { color: #8b949e; }
+  .danger-info-value.status-error   { color: #f04770; }
+
+  /* Risk Alert Items */
+  .risk-alert-list { margin-bottom: 16px; }
+  .risk-alert-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 14px; border-radius: 8px; margin-bottom: 6px;
+    font-size: 12px; line-height: 1.55; color: #c9d1d9;
+  }
+  .risk-alert-item.critical {
+    background: rgba(240,71,112,0.07); border: 1px solid rgba(240,71,112,0.18); color: #f04770;
+  }
+  .risk-alert-item.warning {
+    background: rgba(240,185,11,0.05); border: 1px solid rgba(240,185,11,0.14); color: #f0b90b;
+  }
+  .risk-alert-item.info {
+    background: rgba(59,130,246,0.04); border: 1px solid rgba(59,130,246,0.1); color: #8b949e;
+  }
+  .risk-alert-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; line-height: 1; }
+
+  /* Verify Input */
+  .verify-group { margin-bottom: 8px; }
+  .verify-label { font-size: 12px; color: #e6edf3; margin-bottom: 8px; display: block; font-weight: 500; }
+  .verify-label .hl { color: #f04770; font-weight: 700; }
+  .verify-input {
+    width: 100%; padding: 10px 14px; border-radius: 8px; font-size: 14px;
+    font-family: 'SF Mono', 'Fira Code', 'Menlo', monospace;
+    background: #0d1117; border: 1px solid #1e2430; color: #e6edf3;
+    transition: border-color 0.2s, box-shadow 0.2s; outline: none; caret-color: #f04770;
+  }
+  .verify-input:focus { border-color: #f04770; box-shadow: 0 0 0 3px rgba(240,71,112,0.12); }
+  .verify-input.mismatch { border-color: #f04770; background: rgba(240,71,112,0.04); }
+  .verify-input.match { border-color: #00d4aa; }
+  .verify-hint { font-size: 11px; color: #484f58; margin-top: 5px; transition: color 0.2s; min-height: 16px; }
+  .verify-hint.error { color: #f04770; }
+
+  /* Undo Toast */
+  .toast.undo-toast { border-left: 3px solid #f0b90b; padding-right: 8px; }
+  .toast .undo-btn {
+    padding: 5px 14px; border-radius: 6px; font-size: 12px; font-weight: 600;
+    background: rgba(240,185,11,0.12); color: #f0b90b; border: 1px solid rgba(240,185,11,0.25);
+    cursor: pointer; transition: all 0.15s; white-space: nowrap; flex-shrink: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+  }
+  .toast .undo-btn:hover { background: rgba(240,185,11,0.22); border-color: #f0b90b; }
+
+  /* ── Strategy Edit Modal ── */
+  .strat-modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0.7); align-items: center; justify-content: center;
+  }
+  .strat-modal-overlay.show { display: flex; }
+  .strat-modal {
+    background: #141920; border: 1px solid #1e2430; border-radius: 14px;
+    width: 720px; max-width: 95vw; max-height: 85vh; overflow-y: auto;
+    animation: modalIn 0.2s ease;
+  }
+  .strat-modal-hd {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid #1e2430;
+    position: sticky; top: 0; background: #141920; z-index: 2;
+    border-radius: 14px 14px 0 0;
+  }
+  .strat-modal-body { padding: 20px; }
+  .strat-section {
+    background: #0d1117; border: 1px solid #1e2430; border-radius: 10px;
+    padding: 14px; margin-bottom: 14px;
+  }
+  .strat-section-title {
+    font-size: 13px; font-weight: 600; color: #00d4aa; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .strat-logic-block {
+    font-size: 12px; color: #c9d1d9; line-height: 1.7; white-space: pre-line;
+  }
+  .strat-param-row {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 10px 0; border-bottom: 1px solid #1e2430;
+  }
+  .strat-param-row:last-child { border-bottom: none; }
+  .strat-param-input {
+    background: #0d1117; border: 1px solid #1e2430; border-radius: 6px;
+    padding: 6px 10px; color: #e6edf3; font-size: 12px; width: 110px;
+    flex-shrink: 0; text-align: right; outline: none;
+  }
+  .strat-param-input:focus { border-color: #00d4aa; }
+  .strat-param-select {
+    background: #0d1117; border: 1px solid #1e2430; border-radius: 6px;
+    padding: 6px 10px; color: #e6edf3; font-size: 12px; width: 110px;
+    flex-shrink: 0; outline: none;
+  }
+  .strat-param-select:focus { border-color: #00d4aa; }
+  .strat-param-info { flex: 1; min-width: 0; }
+  .strat-param-label { font-size: 12px; font-weight: 600; color: #e6edf3; }
+  .strat-param-desc { font-size: 10px; color: #8b949e; margin-top: 2px; line-height: 1.4; }
+  .strat-param-key { font-size: 10px; color: #484f58; font-family: monospace; }
+  .strat-modal-footer {
+    display: flex; gap: 10px; justify-content: flex-end;
+    padding: 14px 20px; border-top: 1px solid #1e2430;
+    position: sticky; bottom: 0; background: #141920; border-radius: 0 0 14px 14px;
+  }
+  .tab-nav-btn {
+    padding: 6px 14px; border-radius: 8px 8px 0 0;
+    font-size: 12px; font-weight: 500; cursor: pointer; color: #8b949e;
+    background: transparent; border: 1px solid transparent; transition: all 0.15s;
+  }
+  .tab-nav-btn.active { color: #00d4aa; background: #0d1117; border-color: #1e2430; border-bottom-color: #0d1117; }
+  .tab-nav-btn:hover:not(.active) { color: #c9d1d9; }
+
+  /* ── AI Thinking Indicator ── */
+  .ai-thinking {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2);
+    border-radius: 8px; font-size: 12px; color: #3b82f6;
+  }
+  .ai-dot-pulse { display: flex; gap: 3px; }
+  .ai-dot-pulse span {
+    width: 5px; height: 5px; border-radius: 50%; background: #3b82f6;
+    animation: aiDotBounce 1.4s infinite ease-in-out both;
+  }
+  .ai-dot-pulse span:nth-child(1) { animation-delay: -0.32s; }
+  .ai-dot-pulse span:nth-child(2) { animation-delay: -0.16s; }
+  @keyframes aiDotBounce { 0%,80%,100%{transform:scale(0)}40%{transform:scale(1)} }
+
+  /* ── Refined Info Card ── */
+  .info-card-value {
+    font-family: 'SF Mono', 'Fira Code', 'Menlo', monospace;
+  }
+
+  /* ── Dashboard v2 Specific ── */
+  .dash-metric-card {
+    background: #141920; border: 1px solid #1e2430; border-radius: 10px;
+    padding: 14px 16px; transition: all 0.2s; position: relative; overflow: hidden;
+  }
+  .dash-metric-card:hover { border-color: #30363d; transform: translateY(-1px); }
+  .dash-metric-card .metric-glow {
+    position: absolute; top: -20px; right: -20px; width: 60px; height: 60px;
+    border-radius: 50%; opacity: 0.06; pointer-events: none;
+  }
+  .dash-metric-label { font-size: 11px; color: #8b949e; margin-bottom: 4px; letter-spacing: 0.3px; }
+  .dash-metric-value {
+    font-family: 'SF Mono', 'Fira Code', 'Menlo', monospace;
+    font-size: 22px; font-weight: 700; line-height: 1.1;
+  }
+  .dash-metric-sub {
+    font-size: 11px; margin-top: 3px; display: flex; align-items: center; gap: 4px;
+  }
+
+  /* Strategy status row */
+  .dash-strat-row {
+    display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px;
+    scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+  }
+  .dash-strat-row::-webkit-scrollbar { height: 3px; }
+  .dash-strat-row::-webkit-scrollbar-thumb { background: #1e2430; border-radius: 3px; }
+  .dash-strat-card {
+    background: #141920; border: 1px solid #1e2430; border-radius: 10px;
+    padding: 14px 16px; min-width: 260px; flex-shrink: 0;
+    scroll-snap-align: start; transition: all 0.2s; cursor: default;
+  }
+  .dash-strat-card:hover { border-color: #30363d; }
+  .dash-strat-card.running { border-left: 3px solid #00d4aa; }
+  .dash-strat-card.stopped { border-left: 3px solid #8b949e; opacity: 0.7; }
+
+  /* Section header */
+  .dash-section-hd {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .dash-section-title {
+    font-size: 14px; font-weight: 600; color: #e6edf3;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .dash-section-badge {
+    font-size: 10px; padding: 2px 8px; border-radius: 10px;
+    background: rgba(0,212,170,0.1); color: #00d4aa; font-weight: 600;
+  }
+
+  /* PnL indicator arrows */
+  .pnl-up { color: #00d4aa; }
+  .pnl-down { color: #f04770; }
+
+  /* Refresh indicator */
+  .refresh-indicator {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10px; color: #484f58; transition: color 0.3s;
+  }
+  .refresh-indicator.refreshing { color: #3b82f6; }
+
+  /* Empty state */
+  .dash-empty {
+    text-align: center; padding: 24px; color: #8b949e; font-size: 13px;
+  }
+
+  /* ── Admin Lock ── */
+  .admin-lock-btn {
+    display: flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;
+    cursor: pointer; border: 1px solid #1e2430; background: transparent;
+    color: #8b949e; transition: all 0.15s; white-space: nowrap;
+  }
+  .admin-lock-btn:hover { border-color: #f0b90b; color: #f0b90b; }
+  .admin-lock-btn.locked { border-color: rgba(240,71,112,0.4); color: #f04770; }
+  .admin-lock-btn.unlocked { border-color: rgba(0,212,170,0.4); color: #00d4aa; }
+  .admin-lock-icon { font-size: 14px; line-height: 1; }
+
+  /* Admin Login Modal */
+  .admin-modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 120;
+    background: rgba(0,0,0,0.78); align-items: center; justify-content: center;
+  }
+  .admin-modal-overlay.show { display: flex; }
+  .admin-modal {
+    background: #141920; border: 1px solid #1e2430; border-radius: 14px;
+    width: 400px; max-width: 94vw; animation: modalIn 0.2s ease;
+  }
+  .admin-modal-hd {
+    display: flex; align-items: center; gap: 12px;
+    padding: 20px 24px 14px; border-bottom: 1px solid #1e2430;
+  }
+  .admin-modal-body { padding: 18px 24px; }
+  .admin-modal-footer {
+    display: flex; gap: 10px; justify-content: flex-end;
+    padding: 12px 24px 18px; border-top: 1px solid #1e2430;
+  }
+  .admin-token-input {
+    width: 100%; padding: 12px 14px; border-radius: 8px; font-size: 14px;
+    font-family: 'SF Mono', 'Fira Code', 'Menlo', monospace;
+    background: #0d1117; border: 1px solid #1e2430; color: #e6edf3;
+    transition: border-color 0.2s, box-shadow 0.2s; outline: none;
+  }
+  .admin-token-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.12); }
+  .admin-token-input.error { border-color: #f04770; }
+  .admin-hint { font-size: 11px; color: #484f58; margin-top: 6px; line-height: 1.5; }
+  .admin-hint.error { color: #f04770; }
+
+  /* Locked action button style */
+  .btn-locked {
+    opacity: 0.4 !important; cursor: not-allowed !important; position: relative;
+  }
+  .btn-locked::after {
+    content: '🔒'; position: absolute; top: -6px; right: -6px; font-size: 10px;
+  }
+</style>
+</head>
+<body>
+
+<!-- Toast notification container -->
+<div id="toast-container"></div>
+
+<!-- Confirmation Modal -->
+<div id="confirm-modal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="flex items-center gap-3 mb-4">
+      <span class="text-2xl">⚠️</span>
+      <h3 id="modal-title" class="text-base font-bold text-white">确认操作</h3>
+    </div>
+    <p id="modal-message" class="text-sm text-[#8b949e] mb-2 leading-relaxed"></p>
+    <p id="modal-detail" class="text-xs text-[#484f58] mb-5"></p>
+    <div class="flex gap-3 justify-end">
+      <button class="btn-outline" onclick="closeModal()">取消</button>
+      <button id="modal-confirm-btn" class="btn-danger" onclick="">确认操作</button>
+    </div>
+  </div>
+</div>
+
+<!-- Strategy Edit Modal -->
+<div id="strat-edit-modal" class="strat-modal-overlay">
+  <div class="strat-modal" id="strat-modal-inner">
+    <div class="strat-modal-hd">
+      <div>
+        <h3 id="strat-edit-name" class="text-base font-bold text-white">策略配置</h3>
+        <p id="strat-edit-version" class="text-xs text-[#484f58]"></p>
+      </div>
+      <button class="text-[#8b949e] hover:text-white text-lg leading-none px-2" onclick="closeStratEditModal()">✕</button>
+    </div>
+    <div class="strat-modal-body">
+      <!-- Tab Navigation -->
+      <div class="flex gap-1 mb-3" style="border-bottom:1px solid #1e2430">
+        <button class="tab-nav-btn active" data-tab="logic" onclick="switchStratTab('logic')">🧠 策略逻辑</button>
+        <button class="tab-nav-btn" data-tab="params" onclick="switchStratTab('params')">⚙️ 参数配置</button>
+        <button class="tab-nav-btn" data-tab="raw" onclick="switchStratTab('raw')">📋 完整说明</button>
+      </div>
+
+      <!-- Tab: 策略逻辑 -->
+      <div id="strat-tab-logic" class="strat-tab-content">
+        <div class="strat-section">
+          <div class="strat-section-title">🧠 核心逻辑</div>
+          <div id="strat-logic-explanation" class="strat-logic-block">加载中...</div>
+        </div>
+        <div class="strat-section">
+          <div class="strat-section-title">🚪 入场条件</div>
+          <div id="strat-entry-conditions" class="strat-logic-block">--</div>
+        </div>
+        <div class="strat-section">
+          <div class="strat-section-title">🏃 出场条件</div>
+          <div id="strat-exit-conditions" class="strat-logic-block">--</div>
+        </div>
+        <div class="strat-section">
+          <div class="strat-section-title">⚖️ 仓位管理</div>
+          <div id="strat-position-sizing" class="strat-logic-block">--</div>
+        </div>
+        <div class="strat-section">
+          <div class="strat-section-title">🛡️ 风险管理</div>
+          <div id="strat-risk-management" class="strat-logic-block">--</div>
+        </div>
+      </div>
+
+      <!-- Tab: 参数配置 -->
+      <div id="strat-tab-params" class="strat-tab-content" style="display:none">
+        <p class="text-xs text-[#8b949e] mb-4">调整策略参数后点击「💾 保存修改」生效。带 ⚠️ 标记的参数修改需谨慎。</p>
+        <div id="strat-params-list"></div>
+      </div>
+
+      <!-- Tab: 完整说明 -->
+      <div id="strat-tab-raw" class="strat-tab-content" style="display:none">
+        <pre id="strat-describe-text" class="strat-logic-block" style="font-size:11px; line-height:1.6;"></pre>
+      </div>
+    </div>
+    <div class="strat-modal-footer">
+      <button class="btn-outline" onclick="closeStratEditModal()">取消</button>
+      <button id="strat-save-btn" class="btn-accent" onclick="saveStrategyParams()">💾 保存修改</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Strategy Modal -->
+<div id="delete-strat-modal" class="danger-modal-overlay" role="dialog" aria-labelledby="delete-strat-title" aria-describedby="delete-strat-desc" aria-modal="true">
+  <div class="danger-modal">
+    <div class="danger-modal-hd">
+      <span class="text-3xl" aria-hidden="true">⚠️</span>
+      <div>
+        <h3 id="delete-strat-title" class="text-lg font-bold text-[#f04770]">删除AI策略</h3>
+        <p id="delete-strat-desc" class="text-xs text-[#484f58] mt-0.5">此操作涉及策略数据和交易记录，请仔细确认</p>
+      </div>
+    </div>
+    <div class="danger-modal-body">
+      <!-- Strategy Info -->
+      <div class="danger-info-grid" id="delete-strat-info">
+        <div class="danger-info-item">
+          <p class="danger-info-label">策略名称</p>
+          <p class="danger-info-value text-white">--</p>
+        </div>
+        <div class="danger-info-item">
+          <p class="danger-info-label">当前状态</p>
+          <p class="danger-info-value">--</p>
+        </div>
+        <div class="danger-info-item">
+          <p class="danger-info-label">版本</p>
+          <p class="danger-info-value" style="font-size:11px;">--</p>
+        </div>
+        <div class="danger-info-item">
+          <p class="danger-info-label">交易标的</p>
+          <p class="danger-info-value" style="font-size:11px;">--</p>
+        </div>
+        <div class="danger-info-item">
+          <p class="danger-info-label">Sharpe / 胜率</p>
+          <p class="danger-info-value">--</p>
+        </div>
+        <div class="danger-info-item">
+          <p class="danger-info-label">年化收益 / 交易笔数</p>
+          <p class="danger-info-value">--</p>
+        </div>
+      </div>
+
+      <!-- Risk Alerts -->
+      <div class="risk-alert-list" id="delete-strat-risks" role="alert" aria-live="polite">
+        <!-- Filled by JS -->
+      </div>
+
+      <!-- Name Verification -->
+      <div class="verify-group">
+        <label class="verify-label" for="delete-verify-input">
+          请输入策略名称 <span class="hl" id="delete-verify-name">--</span> 以确认删除
+        </label>
+        <input
+          type="text"
+          id="delete-verify-input"
+          class="verify-input"
+          placeholder="在此输入策略名称以确认..."
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="输入策略名称以确认删除"
+          aria-describedby="delete-verify-hint"
+          aria-required="true"
+        >
+        <p id="delete-verify-hint" class="verify-hint" aria-live="assertive">输入完整名称以解锁删除按钮</p>
+      </div>
+
+      <!-- Position Warning (if applicable) -->
+      <div id="delete-positions-warn" style="display:none;" class="mb-3">
+        <div class="risk-alert-item critical">
+          <span class="risk-alert-icon" aria-hidden="true">💼</span>
+          <span id="delete-positions-text">该策略关联的持仓将变为孤立持仓</span>
+        </div>
+      </div>
+    </div>
+    <div class="danger-modal-footer">
+      <button class="btn-outline" onclick="closeDeleteStrategyModal()" aria-label="取消删除">取消</button>
+      <button id="delete-confirm-btn" class="btn-danger" disabled aria-label="确认删除策略" style="opacity:0.4; cursor:not-allowed;">
+        🗑 确认删除
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Admin Login Modal -->
+<div id="admin-login-modal" class="admin-modal-overlay" role="dialog" aria-labelledby="admin-modal-title" aria-modal="true">
+  <div class="admin-modal">
+    <div class="admin-modal-hd">
+      <span class="text-2xl">🔑</span>
+      <div>
+        <h3 id="admin-modal-title" class="text-base font-bold text-white">管理员验证</h3>
+        <p class="text-xs text-[#484f58] mt-0.5">输入管理员密钥以解锁操作权限</p>
+      </div>
+    </div>
+    <div class="admin-modal-body">
+      <input
+        type="password"
+        id="admin-token-input"
+        class="admin-token-input"
+        placeholder="请输入管理员密钥..."
+        autocomplete="off"
+        spellcheck="false"
+        aria-label="管理员密钥"
+        aria-describedby="admin-hint"
+      >
+      <p id="admin-hint" class="admin-hint" aria-live="polite">
+        💡 仅限管理员操作策略编辑、启停、删除和手动交易
+      </p>
+    </div>
+    <div class="admin-modal-footer">
+      <button class="btn-outline btn-sm" onclick="closeAdminLoginModal()">取消</button>
+      <button id="admin-verify-btn" class="btn-accent btn-sm" onclick="verifyAdminLogin()">🔓 解锁</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ MOBILE OVERLAY ═══════════════ -->
+<div id="menu-overlay" class="menu-overlay" onclick="closeSidebar()"></div>
+
+<!-- ═══════════════ SIDEBAR ═══════════════ -->
+<aside id="sidebar" class="sidebar">
+  <!-- Logo -->
+  <div class="px-4 py-4 border-b border-[#1e2430] flex items-center gap-3">
+    <span class="text-2xl">🐾</span>
+    <div>
+      <p class="text-sm font-bold text-[#e6edf3]">Chase量化</p>
+      <p class="text-[10px] text-[#484f58]">AI Trading Platform</p>
+    </div>
+  </div>
+
+  <!-- Nav -->
+  <nav class="flex-1 py-3 space-y-0.5 overflow-y-auto">
+    <div class="px-4 py-1 text-[10px] text-[#484f58] uppercase tracking-wider font-semibold">主菜单</div>
+    <a class="nav-item active" data-page="dashboard" onclick="navTo('dashboard', this)">
+      <span class="nav-icon">📊</span> 仪表盘
+    </a>
+    <a class="nav-item" data-page="strategy" onclick="navTo('strategy', this)">
+      <span class="nav-icon">🧠</span> 策略管理
+      <span class="nav-badge">3</span>
+    </a>
+    <a class="nav-item" data-page="trading" onclick="navTo('trading', this)">
+      <span class="nav-icon">📈</span> 模拟交易
+    </a>
+    <a class="nav-item" data-page="backtest" onclick="navTo('backtest', this)">
+      <span class="nav-icon">📋</span> 回测分析
+    </a>
+    <a class="nav-item" data-page="equity" onclick="navTo('equity', this)">
+      <span class="nav-icon">📉</span> 资金曲线
+    </a>
+    <a class="nav-item" data-page="sentiment" onclick="navTo('sentiment', this)">
+      <span class="nav-icon">🎭</span> 市场情绪
+      <span class="nav-badge" style="background:#f59e0b">AI</span>
+    </a>
+
+    <div id="nav-system-divider" class="px-4 py-1 mt-2 text-[10px] text-[#484f58] uppercase tracking-wider font-semibold hidden">系统</div>
+    <a id="nav-settings" class="nav-item hidden" data-page="settings" onclick="navTo('settings', this)">
+      <span class="nav-icon">⚙️</span> 系统设置
+    </a>
+    <a id="nav-api-docs" class="nav-item hidden" href="/docs" target="_blank">
+      <span class="nav-icon">📖</span> API文档
+    </a>
+  </nav>
+
+  <!-- Footer -->
+  <div class="border-t border-[#1e2430] p-3">
+    <div class="flex items-center gap-2">
+      <span class="pulse-dot"></span>
+      <span class="text-xs text-[#8b949e]">系统运行中</span>
+    </div>
+    <p class="text-[10px] text-[#484f58] mt-1">v2.5.0 · 虚拟盘模式</p>
+  </div>
+</aside>
+
+<!-- ═══════════════ MAIN ═══════════════ -->
+<div class="main-wrap">
+
+<!-- TOP BAR -->
+<header class="topbar">
+  <button class="show-mobile btn-outline btn-sm mr-3" onclick="toggleSidebar()">☰</button>
+  <div class="flex items-center gap-4 md:gap-6 flex-1 flex-wrap">
+    <div>
+      <p class="text-[10px] text-[#484f58] uppercase">总资产</p>
+      <p id="tb-total" class="text-sm font-bold text-white">¥--</p>
+    </div>
+    <div class="hide-mobile">
+      <p class="text-[10px] text-[#484f58] uppercase">今日盈亏</p>
+      <p id="tb-pnl" class="text-sm font-bold">--</p>
+    </div>
+    <div class="hide-mobile">
+      <p class="text-[10px] text-[#484f58] uppercase">持仓</p>
+      <p id="tb-pos" class="text-sm font-bold text-white">--</p>
+    </div>
+    <div class="hide-mobile">
+      <p class="text-[10px] text-[#484f58] uppercase">胜率</p>
+      <p id="tb-winrate" class="text-sm font-bold text-white">--</p>
+    </div>
+    <div class="ml-auto flex items-center gap-2">
+      <button id="admin-lock-btn" class="admin-lock-btn locked" onclick="handleAdminLockClick()" title="管理员操作已锁定">
+        <span class="admin-lock-icon">🔒</span>
+        <span id="admin-lock-label" class="hide-mobile">已锁定</span>
+      </button>
+      <span id="tb-status" class="text-xs text-[#00d4aa] flex items-center gap-1"><span class="pulse-dot"></span>实时</span>
+      <button onclick="refreshAll()" class="btn-outline btn-sm">🔄</button>
+    </div>
+  </div>
+</header>
+
+<!-- CONTENT -->
+<main class="content-area">
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- PAGE 1: 首页仪表盘 (AI量化监控中心) -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="page-dashboard" class="page active fade-in">
+
+    <!-- ━━━━━ Row 0: Refresh indicator ━━━━━ -->
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <h2 class="text-base font-bold text-white">🤖 AI量化监控中心</h2>
+        <p class="text-[10px] text-[#484f58] mt-0.5">实时追踪AI策略表现 · 全自动虚拟盘交易</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="dash-refresh-indicator" class="refresh-indicator">
+          <span class="pulse-dot" style="width:6px;height:6px;"></span>
+          <span id="dash-refresh-time">实时</span>
+        </span>
+        <button onclick="loadDashboardData()" class="btn-outline btn-sm" id="dash-refresh-btn">🔄 刷新</button>
+      </div>
+    </div>
+
+    <!-- ━━━━━ Row 1: Metric Cards (8 cards) ━━━━━ -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-3">
+      <!-- 总资产 -->
+      <div class="dash-metric-card">
+        <div class="metric-glow" style="background:#00d4aa;"></div>
+        <p class="dash-metric-label">💰 总资产</p>
+        <p id="dash-total-value" class="dash-metric-value text-white">¥--</p>
+        <p id="dash-total-pnl-pct" class="dash-metric-sub">--</p>
+      </div>
+      <!-- 累计盈亏 -->
+      <div class="dash-metric-card">
+        <div class="metric-glow" style="background:#00d4aa;"></div>
+        <p class="dash-metric-label">📊 累计盈亏</p>
+        <p id="dash-cumulative-pnl" class="dash-metric-value text-white">¥--</p>
+        <p id="dash-cumulative-pnl-pct" class="dash-metric-sub">--</p>
+      </div>
+      <!-- 当日收益 -->
+      <div class="dash-metric-card">
+        <div class="metric-glow" style="background:#3b82f6;"></div>
+        <p class="dash-metric-label">📅 当日收益</p>
+        <p id="dash-daily-pnl" class="dash-metric-value text-white">¥--</p>
+        <p id="dash-daily-pnl-pct" class="dash-metric-sub">--</p>
+      </div>
+      <!-- 胜率 -->
+      <div class="dash-metric-card">
+        <div class="metric-glow" style="background:#f0b90b;"></div>
+        <p class="dash-metric-label">🎯 胜率</p>
+        <p id="dash-winrate" class="dash-metric-value text-white">--%</p>
+        <p id="dash-trades-count" class="dash-metric-sub text-[#8b949e]">--</p>
+      </div>
+      <!-- 最大回撤 -->
+      <div class="dash-metric-card">
+        <div class="metric-glow" style="background:#f04770;"></div>
+        <p class="dash-metric-label">📉 最大回撤</p>
+        <p id="dash-max-dd" class="dash-metric-value text-[#f04770]">--%</p>
+        <p id="dash-calmar" class="dash-metric-sub text-[#8b949e]">--</p>
+      </div>
+      <!-- Sharpe -->
+      <div class="dash-metric-card">
+        <div class="metric-glow" style="background:#00d4aa;"></div>
+        <p class="dash-metric-label">📐 Sharpe 比率</p>
+        <p id="dash-sharpe" class="dash-metric-value text-white">--</p>
+        <p id="dash-annualized" class="dash-metric-sub text-[#8b949e]">--</p>
+      </div>
+      <!-- 持仓 -->
+      <div class="dash-metric-card">
+        <div class="metric-glow" style="background:#3b82f6;"></div>
+        <p class="dash-metric-label">💼 持仓市值</p>
+        <p id="dash-pos-value" class="dash-metric-value text-white">¥--</p>
+        <p id="dash-pos-count" class="dash-metric-sub text-[#8b949e]">--</p>
+      </div>
+      <!-- 风控评分 -->
+      <div class="dash-metric-card">
+        <div class="metric-glow" style="background:#00d4aa;"></div>
+        <p class="dash-metric-label">🛡️ AI风控评分</p>
+        <p id="dash-risk-score" class="dash-metric-value text-[#00d4aa]">--</p>
+        <p id="dash-risk-label" class="dash-metric-sub">--</p>
+      </div>
+    </div>
+
+    <!-- ━━━━━ Row 2: Equity Chart + Asset Allocation ━━━━━ -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 mb-3">
+      <!-- Equity Chart -->
+      <div class="panel lg:col-span-8">
+        <div class="panel-hd">
+          <span>📈 资金曲线</span>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-[#8b949e]">初始本金 ¥10,000 · 目标月收益 30%</span>
+            <span id="dash-equity-latest" class="text-xs font-bold text-white">--</span>
+          </div>
+        </div>
+        <div id="dash-equity-chart" style="height:320px; position:relative"><div class="chart-loader" id="dash-chart-loader"><span class="loading-spinner"></span> 图表加载中...</div></div>
+      </div>
+      <!-- Asset Allocation -->
+      <div class="panel lg:col-span-4">
+        <div class="panel-hd">
+          <span>🥧 资产分布</span>
+          <span id="dash-alloc-total" class="text-xs text-[#8b949e]">--</span>
+        </div>
+        <div id="dash-allocation" class="p-3 space-y-1.5" style="max-height:320px; overflow-y:auto;"></div>
+      </div>
+    </div>
+
+    <!-- ━━━━━ Row 3: AI Strategy Status Cards ━━━━━ -->
+    <div class="dash-section-hd">
+      <div class="dash-section-title">
+        🧠 AI策略运行状态
+        <span id="dash-strat-badge" class="dash-section-badge">--</span>
+      </div>
+      <button class="btn-outline btn-sm" onclick="navTo('strategy', document.querySelector('[data-page=strategy]'))">管理策略 →</button>
+    </div>
+    <div id="dash-strategies-row" class="dash-strat-row mb-3">
+      <div class="dash-empty" style="min-width:100%;">加载AI策略状态中...</div>
+    </div>
+
+    <!-- ━━━━━ Row 4: Positions + AI Trade Log ━━━━━ -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
+      <!-- Current Positions -->
+      <div class="panel lg:col-span-5">
+        <div class="panel-hd">
+          <span>💼 AI当前持仓 <span id="dash-pos-table-count" class="text-[#8b949e] font-normal text-xs">(0)</span></span>
+          <button class="btn-outline btn-sm" onclick="navTo('trading', document.querySelector('[data-page=trading]'))">交易页 →</button>
+        </div>
+        <div class="overflow-auto" style="max-height:320px">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>标的</th>
+                <th>入场价</th>
+                <th>现价</th>
+                <th>数量</th>
+                <th>市值</th>
+                <th>盈亏</th>
+                <th>盈亏%</th>
+              </tr>
+            </thead>
+            <tbody id="dash-positions-tbody">
+              <tr><td colspan="7" class="p-6 text-center text-[#8b949e] text-sm">📭 暂无AI持仓</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <!-- AI Trade Log -->
+      <div class="panel lg:col-span-7">
+        <div class="panel-hd">
+          <span>📜 AI交易日志</span>
+          <div class="flex items-center gap-2">
+            <span id="dash-trade-count" class="text-xs text-[#8b949e]">共 0 笔</span>
+            <button class="btn-outline btn-sm" onclick="navTo('equity', document.querySelector('[data-page=equity]'))">全部 →</button>
+          </div>
+        </div>
+        <div class="overflow-auto" style="max-height:320px">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>标的</th>
+                <th>方向</th>
+                <th>价格</th>
+                <th>数量</th>
+                <th>金额</th>
+                <th>盈亏</th>
+                <th>AI理由</th>
+              </tr>
+            </thead>
+            <tbody id="dash-trades-tbody">
+              <tr><td colspan="8" class="p-6 text-center text-[#8b949e] text-sm">📭 暂无AI交易记录</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- PAGE 2: 策略管理 -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="page-strategy" class="page fade-in">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-lg font-bold">🧠 AI量化策略管理</h2>
+        <p class="text-xs text-[#8b949e] mt-1">创建、编辑和部署AI驱动的交易策略</p>
+      </div>
+      <button class="btn-accent btn-sm" id="new-strategy-btn" onclick="handleNewStrategy()">＋ 新建策略</button>
+    </div>
+
+    <!-- Strategy Cards (Dynamic from API) -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4" id="strategy-page-grid">
+      <div class="p-6 text-center text-[#8b949e] text-sm col-span-full">加载策略中...</div>
+    </div>
+
+    <!-- Backtest Quick Runner -->
+    <div class="panel">
+      <div class="panel-hd">
+        <span>⚡ 快速回测</span>
+        <span class="text-xs text-[#8b949e]">选择策略 → 一键回测</span>
+      </div>
+      <div class="p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+        <div>
+          <label class="text-xs text-[#8b949e] block mb-1">选择策略</label>
+          <select class="input-field" id="bt-strategy-select"><option>加载中...</option></select>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b949e] block mb-1">回测区间</label>
+          <select class="input-field"><option>最近3个月</option><option>最近6个月</option><option>最近1年</option><option>全部历史</option></select>
+        </div>
+        <div>
+          <label class="text-xs text-[#8b949e] block mb-1">初始资金</label>
+          <input class="input-field" value="¥10,000" type="text">
+        </div>
+        <button class="btn-accent" onclick="runQuickBacktest()">▶ 运行回测</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- PAGE 3: 模拟交易（AI监控视角） -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="page-trading" class="page fade-in">
+
+    <!-- Row 1: Account Info Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+      <div class="card">
+        <p class="text-xs text-[#8b949e] mb-1">💵 可用资金</p>
+        <p id="trade-avail-cash" class="text-lg font-bold text-white info-card-value">¥--</p>
+      </div>
+      <div class="card">
+        <p class="text-xs text-[#8b949e] mb-1">🏦 总权益</p>
+        <p id="trade-equity" class="text-lg font-bold text-white info-card-value">¥--</p>
+        <p id="trade-equity-change" class="text-xs mt-1">--</p>
+      </div>
+      <div class="card">
+        <p class="text-xs text-[#8b949e] mb-1">📊 浮动盈亏</p>
+        <p id="trade-float-pnl" class="text-lg font-bold info-card-value">--</p>
+        <p id="trade-float-pnl-pct" class="text-xs mt-1">--</p>
+      </div>
+      <div class="card">
+        <p class="text-xs text-[#8b949e] mb-1">📅 当日收益</p>
+        <p id="trade-daily-return" class="text-lg font-bold info-card-value">--</p>
+        <p id="trade-daily-return-label" class="text-xs text-[#8b949e] mt-1">--</p>
+      </div>
+    </div>
+
+    <!-- Row 2: K-line Chart + AI Decision Panel -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 mb-3">
+      <!-- Left: K-line Chart (8/12) -->
+      <div class="panel lg:col-span-8">
+        <div class="panel-hd">
+          <div class="flex items-center gap-2">
+            <span>📈 K线图</span>
+            <span id="trade-symbol-label" class="text-[#8b949e] font-normal text-xs">BTC/USDT · 1h</span>
+            <span id="trade-live-price" class="price-ticker text-sm font-bold ml-2">--</span>
+            <span id="trade-live-change" class="text-xs ml-1">--</span>
+          </div>
+          <div class="flex items-center gap-1 flex-wrap">
+            <div id="trade-symbol-chips" class="flex gap-1 mr-2"></div>
+            <select id="trade-tf" onchange="switchTradeTF()" class="input-field w-auto text-xs py-1">
+              <option value="5m">5m</option><option value="15m">15m</option>
+              <option value="1h" selected>1h</option><option value="4h">4h</option><option value="1d">1d</option>
+            </select>
+          </div>
+        </div>
+        <div id="trade-kline-chart" style="height:460px; position:relative"><div class="chart-loader" id="trade-chart-loader"><span class="loading-spinner"></span> K线加载中...</div></div>
+      </div>
+
+      <!-- Right: AI Decision Panel (4/12) -->
+      <div class="lg:col-span-4 space-y-3">
+        <!-- AI Signal Card -->
+        <div class="panel">
+          <div class="panel-hd">
+            <span>🤖 AI 决策面板</span>
+            <span id="ai-update-time" class="text-[10px] text-[#484f58]">实时</span>
+          </div>
+          <div class="p-3 space-y-3">
+
+            <!-- AI Signal for Selected Symbol -->
+            <div class="ai-decision-card">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs text-[#8b949e]">当前信号 · <span id="ai-signal-symbol">BTC/USDT</span></span>
+                <span id="ai-signal-time" class="text-[10px] text-[#484f58]">--</span>
+              </div>
+              <div id="ai-signal-indicator" class="flex items-center gap-2 mb-2">
+                <span class="pulse-ring hold-ring"></span>
+                <span class="signal-indicator signal-hold">⏸ 观望</span>
+              </div>
+              <div id="ai-signal-score" class="flex items-center gap-2 text-xs text-[#8b949e] mb-2">
+                <span>评分: --</span>
+                <span>置信度: --</span>
+              </div>
+              <div id="ai-signal-reason" class="text-xs text-[#8b949e] leading-relaxed">
+                等待数据加载...
+              </div>
+            </div>
+
+            <!-- ML Consensus -->
+            <div class="ai-decision-card">
+              <p class="text-xs text-[#8b949e] mb-2">🧬 ML 模型共识</p>
+              <div id="ai-ml-consensus" class="space-y-2">
+                <div class="flex justify-between text-xs">
+                  <span class="text-[#8b949e]">ALSTM</span>
+                  <span class="text-[#484f58]">--</span>
+                </div>
+                <div class="flex justify-between text-xs">
+                  <span class="text-[#8b949e]">LightGBM</span>
+                  <span class="text-[#484f58]">--</span>
+                </div>
+                <div class="flex justify-between text-xs">
+                  <span class="text-[#8b949e]">Transformer</span>
+                  <span class="text-[#484f58]">--</span>
+                </div>
+                <div class="confidence-bar-track mt-1">
+                  <div id="ai-confidence-bar" class="confidence-bar-fill medium" style="width:50%"></div>
+                </div>
+                <p class="text-[10px] text-[#484f58] text-right">综合置信度 <span id="ai-confidence-pct">50%</span></p>
+              </div>
+            </div>
+
+            <!-- Last AI Action -->
+            <div class="ai-decision-card">
+              <p class="text-xs text-[#8b949e] mb-2">📋 最近AI操作</p>
+              <div id="ai-last-action" class="text-xs text-[#8b949e]">
+                <p>暂无操作记录</p>
+              </div>
+            </div>
+
+            <!-- Risk Status -->
+            <div class="ai-decision-card">
+              <p class="text-xs text-[#8b949e] mb-2">🛡️ 风控状态</p>
+              <div id="ai-risk-status" class="text-xs">
+                <div class="flex justify-between mb-1">
+                  <span class="text-[#8b949e]">生存评分</span>
+                  <span id="ai-risk-score" class="font-bold text-[#00d4aa]">--/100</span>
+                </div>
+                <div id="ai-risk-alerts" class="text-[10px] text-[#484f58]">无警报</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 3: Strategy Management (Full Width) -->
+    <div class="panel mb-3">
+      <div class="panel-hd">
+        <span>🧠 AI策略管理</span>
+        <div class="flex items-center gap-2">
+          <span id="strat-summary" class="text-xs text-[#8b949e]">--</span>
+          <button class="btn-outline btn-sm" onclick="loadStrategies()">🔄 刷新</button>
+        </div>
+      </div>
+      <div id="strategy-cards-container" class="p-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3" id="strategy-cards-grid">
+          <div class="p-6 text-center text-[#8b949e] text-sm col-span-full">加载策略中...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 4: Positions Table + Trade Log -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
+      <!-- Positions Table (7/12) -->
+      <div class="panel lg:col-span-7">
+        <div class="panel-hd">
+          <span>💼 AI持仓 <span id="trade-pos-count" class="text-[#8b949e] font-normal text-xs">(0)</span></span>
+          <button class="btn-outline btn-sm" onclick="loadTradePositions()">🔄 刷新</button>
+        </div>
+        <div class="overflow-auto" style="max-height:320px">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>标的</th>
+                <th>入场价</th>
+                <th>现价</th>
+                <th>数量</th>
+                <th>市值</th>
+                <th>盈亏</th>
+                <th>盈亏%</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="trade-positions-tbody">
+              <tr><td colspan="8" class="p-6 text-center text-[#8b949e] text-sm">📭 暂无AI持仓</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Trade Log (5/12) -->
+      <div class="panel lg:col-span-5">
+        <div class="panel-hd">
+          <span>📜 AI交易日志</span>
+          <button class="btn-outline btn-sm" onclick="loadTradeLog()">🔄 刷新</button>
+        </div>
+        <div id="trade-log-container" class="overflow-auto" style="max-height:320px">
+          <div class="p-6 text-center text-[#8b949e] text-sm">📭 暂无AI交易记录</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- PAGE 4: 回测分析 -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="page-backtest" class="page fade-in">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-lg font-bold">📋 历史回测与绩效分析</h2>
+        <p class="text-xs text-[#8b949e] mt-1">策略历史表现 · 风险指标 · 归因分析</p>
+      </div>
+      <div class="flex gap-2">
+        <select class="input-field w-auto" id="bt-page-strategy-select"><option>加载中...</option></select>
+        <button class="btn-outline btn-sm" onclick="exportBacktestReport()">导出报告</button>
+      </div>
+    </div>
+
+    <!-- Performance Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4" id="bt-perf-cards">
+      <div class="card"><p class="text-xs text-[#8b949e]">累计收益</p><p class="text-xl font-bold text-[#00d4aa]" id="bt-cum-return">--</p></div>
+      <div class="card"><p class="text-xs text-[#8b949e]">年化收益</p><p class="text-xl font-bold text-[#00d4aa]" id="bt-ann-return">--</p></div>
+      <div class="card"><p class="text-xs text-[#8b949e]">Sharpe比率</p><p class="text-xl font-bold text-white" id="bt-sharpe">--</p></div>
+      <div class="card"><p class="text-xs text-[#8b949e]">最大回撤</p><p class="text-xl font-bold text-[#f04770]" id="bt-max-dd">--</p></div>
+      <div class="card"><p class="text-xs text-[#8b949e]">胜率</p><p class="text-xl font-bold text-white" id="bt-winrate">--</p></div>
+      <div class="card"><p class="text-xs text-[#8b949e]">盈亏比</p><p class="text-xl font-bold text-white" id="bt-profit-factor">--</p></div>
+      <div class="card"><p class="text-xs text-[#8b949e]">Calmar比率</p><p class="text-xl font-bold text-white" id="bt-calmar">--</p></div>
+      <div class="card"><p class="text-xs text-[#8b949e]">总交易次数</p><p class="text-xl font-bold text-white" id="bt-total-trades">--</p></div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
+      <div class="panel">
+        <div class="panel-hd"><span>📈 回测净值曲线</span></div>
+        <div id="bt-equity-chart" style="height:280px; position:relative"><div class="chart-loader" id="bt-chart-loader"><span class="loading-spinner"></span> 图表加载中...</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-hd"><span>📊 月度收益热力图</span></div>
+        <div id="bt-monthly" class="p-4 overflow-auto">
+          <table class="data-table text-center">
+            <thead><tr><th>月</th><th>1月</th><th>2月</th><th>3月</th><th>4月</th><th>5月</th><th>6月</th></tr></thead>
+            <tbody>
+              <tr><td class="text-[#8b949e]">2026</td>
+                <td class="text-[#00d4aa]">+5.2%</td><td class="text-[#00d4aa]">+3.1%</td>
+                <td class="text-[#f04770]">-2.4%</td><td class="text-[#00d4aa]">+8.7%</td>
+                <td class="text-[#00d4aa]">+12.3%</td><td class="text-[#f0b90b]">+1.5%</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trade Analysis -->
+    <div class="panel">
+      <div class="panel-hd"><span>🔍 交易明细分析</span></div>
+      <div class="overflow-auto" style="max-height:300px">
+        <table class="data-table">
+          <thead><tr><th>日期</th><th>标的</th><th>方向</th><th>入场价</th><th>出场价</th><th>盈亏</th><th>持有天数</th><th>策略信号</th></tr></thead>
+          <tbody id="bt-trades-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- PAGE 5: 资金曲线 & 交易日志 -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="page-equity" class="page fade-in">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-lg font-bold">📉 资金曲线与交易日志</h2>
+        <p class="text-xs text-[#8b949e] mt-1">完整的组合净值追踪 + 所有交易记录</p>
+      </div>
+      <div class="flex gap-2">
+        <select class="input-field w-auto"><option>全部历史</option><option>最近7天</option><option>最近30天</option><option>最近90天</option></select>
+        <button class="btn-outline btn-sm" onclick="exportTradesCSV()">📥 导出CSV</button>
+      </div>
+    </div>
+
+    <!-- Equity Chart -->
+    <div class="panel mb-4">
+      <div class="panel-hd">
+        <span>📈 组合净值曲线</span>
+        <span id="equity-page-latest" class="text-xs text-[#8b949e]">--</span>
+      </div>
+      <div id="equity-page-chart" style="height:350px; position:relative"><div class="chart-loader" id="equity-chart-loader"><span class="loading-spinner"></span> 图表加载中...</div></div>
+    </div>
+
+    <!-- Trade Log -->
+    <div class="panel">
+      <div class="panel-hd">
+        <span>📜 完整交易日志</span>
+        <div class="flex gap-2">
+          <input class="input-field w-40 text-xs py-1" placeholder="🔍 搜索标的...">
+          <select class="input-field w-auto text-xs py-1"><option>全部</option><option>买入</option><option>卖出</option></select>
+        </div>
+      </div>
+      <div class="overflow-auto" style="max-height:400px">
+        <table class="data-table">
+          <thead><tr><th>时间</th><th>标的</th><th>方向</th><th>价格</th><th>数量</th><th>金额</th><th>手续费</th><th>盈亏</th><th>原因</th></tr></thead>
+          <tbody id="equity-trades-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- PAGE 6: 市场情绪 (Gemini AI 驱动) -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="page-sentiment" class="page fade-in">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-bold">🎭 市场情绪分析 <span class="text-[10px] bg-[#f59e0b]/20 text-[#f59e0b] px-2 py-0.5 rounded ml-2">AI 驱动 · Gemini 2.5 Flash</span></h2>
+      <div class="flex items-center gap-3">
+        <span id="sentiment-updated" class="text-xs text-[#8b949e]">加载中...</span>
+        <button class="btn-outline btn-sm" onclick="loadSentimentData(true)" id="sentiment-refresh-btn">🔄 刷新分析</button>
+      </div>
+    </div>
+
+    <!-- 整体情绪仪表 -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+      <!-- 总览卡片 -->
+      <div class="panel lg:col-span-1">
+        <div class="panel-hd"><span>📊 整体市场情绪</span></div>
+        <div class="p-4 flex flex-col items-center">
+          <div class="relative w-36 h-36 mb-3" id="sentiment-gauge-container">
+            <svg viewBox="0 0 160 160" class="w-full h-full">
+              <defs>
+                <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#ef4444"/>
+                  <stop offset="25%" stop-color="#f59e0b"/>
+                  <stop offset="50%" stop-color="#facc15"/>
+                  <stop offset="75%" stop-color="#22c55e"/>
+                  <stop offset="100%" stop-color="#00d4aa"/>
+                </linearGradient>
+              </defs>
+              <circle cx="80" cy="85" r="65" fill="none" stroke="#1e2430" stroke-width="14"/>
+              <circle cx="80" cy="85" r="65" fill="none" stroke="url(#gaugeGrad)" stroke-width="14"
+                stroke-dasharray="408.4" stroke-dashoffset="204.2" stroke-linecap="round"
+                transform="rotate(-90 80 85)" id="sentiment-gauge-arc"/>
+              <text x="80" y="78" text-anchor="middle" class="fill-current text-white" font-size="32" font-weight="bold" id="sentiment-gauge-score">--</text>
+              <text x="80" y="100" text-anchor="middle" fill="#8b949e" font-size="12" id="sentiment-gauge-label">加载中</text>
+            </svg>
+          </div>
+          <p class="text-sm text-center text-[#8b949e]" id="sentiment-overall-summary">正在连接 Gemini AI 分析引擎...</p>
+        </div>
+      </div>
+
+      <!-- 标的情绪卡片 -->
+      <div class="panel lg:col-span-2">
+        <div class="panel-hd"><span>🎯 标的市场情绪</span></div>
+        <div class="p-3 space-y-2" id="sentiment-symbols-list">
+          <div class="flex items-center gap-3 p-3 bg-[#0d1117] rounded-lg animate-pulse">
+            <div class="w-16 h-2 bg-[#1e2430] rounded"></div>
+            <div class="flex-1 h-2 bg-[#1e2430] rounded"></div>
+            <div class="w-10 h-2 bg-[#1e2430] rounded"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 周期分层分析 -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
+      <div class="panel" style="border-top: 3px solid #ef4444">
+        <div class="panel-hd"><span>🔴 短期 (1-4周)</span></div>
+        <div class="p-3">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-2xl font-bold" id="st-score">--</span>
+            <span class="text-xs text-[#8b949e]" id="st-summary">加载中...</span>
+          </div>
+          <div class="space-y-1 text-xs" id="st-drivers"></div>
+        </div>
+      </div>
+      <div class="panel" style="border-top: 3px solid #f59e0b">
+        <div class="panel-hd"><span>🟡 中期 (1-3月)</span></div>
+        <div class="p-3">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-2xl font-bold" id="mt-score">--</span>
+            <span class="text-xs text-[#8b949e]" id="mt-summary">加载中...</span>
+          </div>
+          <div class="space-y-1 text-xs" id="mt-drivers"></div>
+        </div>
+      </div>
+      <div class="panel" style="border-top: 3px solid #22c55e">
+        <div class="panel-hd"><span>🟢 长期 (3-12月+)</span></div>
+        <div class="p-3">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-2xl font-bold" id="lt-score">--</span>
+            <span class="text-xs text-[#8b949e]" id="lt-summary">加载中...</span>
+          </div>
+          <div class="space-y-1 text-xs" id="lt-drivers"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 周期位置判断 -->
+    <div id="sentiment-cycle-bar" class="panel mb-4" style="background: linear-gradient(90deg, #1a0a0a 0%, #0d1117 25%, #0d1117 75%, #1a0a0a 100%)">
+      <div class="p-3 flex items-center gap-4">
+        <span class="text-sm font-semibold whitespace-nowrap">📍 周期位置:</span>
+        <div class="flex-1 relative h-8 bg-[#141920] rounded-full overflow-hidden">
+          <div class="absolute inset-0 flex">
+            <div class="flex-1 text-center text-[10px] leading-8 text-[#484f58] border-r border-[#1e2430]">恐慌底部</div>
+            <div class="flex-1 text-center text-[10px] leading-8 text-[#484f58] border-r border-[#1e2430]">修复初期</div>
+            <div class="flex-1 text-center text-[10px] leading-8 text-[#484f58] border-r border-[#1e2430]">上升中期</div>
+            <div class="flex-1 text-center text-[10px] leading-8 text-[#484f58] border-r border-[#1e2430]">顶部过热</div>
+            <div class="flex-1 text-center text-[10px] leading-8 text-[#484f58] border-r border-[#1e2430]">下跌初期</div>
+            <div class="flex-1 text-center text-[10px] leading-8 text-[#484f58] border-r border-[#1e2430]">下跌中继</div>
+            <div class="flex-1 text-center text-[10px] leading-8 text-[#484f58]">横盘整理</div>
+          </div>
+          <div id="cycle-indicator" class="absolute top-0 h-full w-[14.28%] bg-[#f59e0b]/30 border-2 border-[#f59e0b] rounded-full transition-all duration-700 flex items-center justify-center" style="left: 57%">
+            <span id="cycle-label" class="text-[10px] font-bold text-[#f59e0b] whitespace-nowrap">--</span>
+          </div>
+        </div>
+        <span class="text-xs text-[#8b949e] whitespace-nowrap">置信度: <b id="cycle-confidence">--</b>%</span>
+      </div>
+    </div>
+
+    <!-- 关键驱动 & 平台对比 -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <!-- 关键驱动因素 -->
+      <div class="panel">
+        <div class="panel-hd"><span>🔑 关键驱动因素</span></div>
+        <div class="p-3 space-y-2" id="sentiment-drivers-list">
+          <div class="text-sm text-[#8b949e] p-3">加载中...</div>
+        </div>
+      </div>
+
+      <!-- 平台情绪对比 -->
+      <div class="panel">
+        <div class="panel-hd"><span>📊 平台情绪对比</span></div>
+        <div class="p-3 space-y-3" id="sentiment-platforms-list">
+          <div class="text-sm text-[#8b949e] p-3">加载中...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 风险与机会 -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <div class="panel" style="border-left: 3px solid #ef4444">
+        <div class="panel-hd"><span>⚠️ 风险因素</span></div>
+        <div class="p-3 space-y-1" id="sentiment-risks-list">
+          <div class="text-sm text-[#8b949e] p-3">加载中...</div>
+        </div>
+      </div>
+      <div class="panel" style="border-left: 3px solid #22c55e">
+        <div class="panel-hd"><span>💡 潜在机会</span></div>
+        <div class="p-3 space-y-1" id="sentiment-opps-list">
+          <div class="text-sm text-[#8b949e] p-3">加载中...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 结论 -->
+    <div class="panel mb-4">
+      <div class="panel-hd"><span>🎯 AI 综合研判</span></div>
+      <div class="p-4">
+        <p class="text-sm leading-relaxed text-[#c9d1d9]" id="sentiment-conclusion">加载中...</p>
+        <div class="mt-3 p-3 bg-[#0d1117] rounded-lg border border-[#1e2430]">
+          <span class="text-xs text-[#f59e0b]">💡 交易思路 (仅供参考): </span>
+          <span class="text-sm text-[#8b949e]" id="sentiment-suggestion">--</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 数据源信息 -->
+    <div class="flex items-center gap-2 text-xs text-[#484f58]">
+      <span>🧠 模型: Gemini 2.5 Flash (免费层)</span>
+      <span>·</span>
+      <span id="sentiment-data-info">数据源: 多源采集</span>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- PAGE 7: 系统设置 -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="page-settings" class="page fade-in">
+    <h2 class="text-lg font-bold mb-4">⚙️ 系统设置</h2>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <!-- API & Data -->
+      <div class="panel">
+        <div class="panel-hd"><span>🔑 API & 数据源</span></div>
+        <div class="p-4 space-y-3">
+          <div><label class="text-xs text-[#8b949e] block mb-1">Binance API Key</label><input class="input-field" type="password" value="••••••••••" placeholder="留空使用公开数据"></div>
+          <div><label class="text-xs text-[#8b949e] block mb-1">Binance Secret Key</label><input class="input-field" type="password" value="••••••••••" placeholder="留空使用公开数据"></div>
+          <div><label class="text-xs text-[#8b949e] block mb-1">数据源偏好</label><select class="input-field"><option>Binance (ccxt)</option><option>模拟数据</option><option>本地CSV</option></select></div>
+          <button class="btn-accent btn-sm">保存</button>
+        </div>
+      </div>
+
+      <!-- Risk Config -->
+      <div class="panel">
+        <div class="panel-hd"><span>🛡️ 风控参数</span></div>
+        <div class="p-4 space-y-3">
+          <div class="flex justify-between"><span class="text-xs text-[#8b949e]">单笔最大仓位</span><input class="input-field w-24 text-right" value="20%"></div>
+          <div class="flex justify-between"><span class="text-xs text-[#8b949e]">硬止损比例</span><input class="input-field w-24 text-right" value="-8%"></div>
+          <div class="flex justify-between"><span class="text-xs text-[#8b949e]">止盈比例</span><input class="input-field w-24 text-right" value="+15%"></div>
+          <div class="flex justify-between"><span class="text-xs text-[#8b949e]">最大同时持仓</span><input class="input-field w-24 text-right" value="5"></div>
+          <div class="flex justify-between"><span class="text-xs text-[#8b949e]">日最大亏损熔断</span><input class="input-field w-24 text-right" value="-5%"></div>
+          <button class="btn-accent btn-sm">保存</button>
+        </div>
+      </div>
+
+      <!-- Notification -->
+      <div class="panel">
+        <div class="panel-hd"><span>📱 通知推送</span></div>
+        <div class="p-4 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-sm">企业微信推送</span>
+            <input type="checkbox" checked class="accent-[#00d4aa]">
+          </div>
+          <div><label class="text-xs text-[#8b949e] block mb-1">Webhook URL</label><input class="input-field" value="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."></div>
+          <div><label class="text-xs text-[#8b949e] block mb-1">推送时间 (Cron)</label><input class="input-field" value="30 8,14,22 * * *"></div>
+          <button class="btn-accent btn-sm">保存</button>
+        </div>
+      </div>
+
+      <!-- System -->
+      <div class="panel">
+        <div class="panel-hd"><span>💻 系统信息</span></div>
+        <div class="p-4 space-y-2 text-sm">
+          <div class="flex justify-between"><span class="text-[#8b949e]">版本</span><span>v2.5.0</span></div>
+          <div class="flex justify-between"><span class="text-[#8b949e]">模式</span><span class="badge-info">虚拟盘</span></div>
+          <div class="flex justify-between"><span class="text-[#8b949e]">初始本金</span><span>¥10,000</span></div>
+          <div class="flex justify-between"><span class="text-[#8b949e]">数据源</span><span>Binance (ccxt)</span></div>
+          <div class="flex justify-between"><span class="text-[#8b949e]">ML模型数</span><span>8个 (4 ALSTM + 1 Transformer + 3 LightGBM)</span></div>
+          <div class="flex justify-between"><span class="text-[#8b949e]">API端口</span><span class="font-mono text-xs">:8766</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+</div>
+
+<!-- ═══════════════ SCRIPTS ═══════════════ -->
+<script>
+// ═══════════════ STATE ═══════════════
+const API = '/api';
+let currentPage = 'dashboard';
+let orderSide = 'buy';
+let tradeSymbol = 'BTC/USDT';
+let tradeTF = '1h';
+let tradeKlineChart = null, tradeCandle = null, tradeVolume = null;
+let dashEquityChart = null, dashEquityArea = null;
+let btEquityChart = null, btEquityArea = null;
+let equityPageChart = null, equityPageArea = null;
+let _strategiesCache = {};        // Strategy data cache for delete modal lookups
+let _deletedStrategyBackup = null; // For undo functionality
+let _undoTimer = null;
+let _adminAuthenticated = false;   // Admin auth state
+let _adminToken = '';              // Cached admin token for requests
+
+const SYMBOLS = ['BTC/USDT','ETH/USDT','SOL/USDT','BNB/USDT','XRP/USDT','DOGE/USDT','ADA/USDT','AVAX/USDT'];
+const SYM_COLORS = {
+  'BTC/USDT':'#f7931a','ETH/USDT':'#627eea','SOL/USDT':'#9945ff','BNB/USDT':'#f3ba2f',
+  'XRP/USDT':'#00aae4','DOGE/USDT':'#c2a633','ADA/USDT':'#0033ad','AVAX/USDT':'#e84142'
+};
+
+// ═══════════════ NAVIGATION ═══════════════
+function navTo(page, el) {
+  // Gate: settings page requires admin authentication
+  if (page === 'settings' && !_adminAuthenticated) {
+    showToast('🔒 请先解锁管理员权限', 'warning');
+    return;
+  }
+  currentPage = page;
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (el) el.classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById(`page-${page}`).classList.add('active', 'fade-in');
+
+  // Init page-specific charts (double rAF to guarantee layout is done)
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (page === 'dashboard') { initDashEquityChart(); loadDashboardData(); startDashAutoRefresh(); }
+      else { stopDashAutoRefresh(); }
+      if (page === 'trading') { initTradePage(); }
+      if (page === 'backtest') { initBtEquityChart(); loadBacktestData(); }
+      if (page === 'equity') { initEquityPageChart(); loadEquityData(); }
+      if (page === 'sentiment') { loadSentimentData(false); }
+      if (page === 'strategy') { loadStrategyPage(); }
+      if (page === 'settings') { /* static for now */ }
+    });
+  });
+
+  // Close sidebar on mobile
+  if (window.innerWidth <= 768) closeSidebar();
+}
+
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const overlay = document.getElementById('menu-overlay');
+  sb.classList.toggle('open');
+  overlay.classList.toggle('show');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('menu-overlay').classList.remove('show');
+}
+
+// ═══════════════ ADMIN AUTH ═══════════════
+
+/**
+ * Initialize admin auth state from sessionStorage.
+ * Called on page load.
+ */
+function initAdminAuth() {
+  const saved = sessionStorage.getItem('_admin_token');
+  if (saved) {
+    _adminToken = saved;
+    _adminAuthenticated = true;
+  } else {
+    _adminToken = '';
+    _adminAuthenticated = false;
+  }
+  updateAdminLockUI();
+}
+
+/**
+ * Check if admin is currently authenticated.
+ */
+function isAdminAuthenticated() {
+  return _adminAuthenticated && !!_adminToken;
+}
+
+/**
+ * Get headers for admin-authenticated requests.
+ * Always includes Content-Type if body is present.
+ */
+function getAdminHeaders(contentType = true) {
+  const headers = {};
+  if (contentType) headers['Content-Type'] = 'application/json';
+  if (_adminToken) headers['X-Admin-Token'] = _adminToken;
+  return headers;
+}
+
+/**
+ * Update the lock button UI based on auth state.
+ */
+function updateAdminLockUI() {
+  const btn = document.getElementById('admin-lock-btn');
+  const label = document.getElementById('admin-lock-label');
+  if (!btn || !label) return;
+
+  if (_adminAuthenticated) {
+    btn.className = 'admin-lock-btn unlocked';
+    btn.title = '管理员已解锁 · 点击锁定';
+    btn.querySelector('.admin-lock-icon').textContent = '🔓';
+    label.textContent = '已解锁';
+  } else {
+    btn.className = 'admin-lock-btn locked';
+    btn.title = '管理员操作已锁定 · 点击解锁';
+    btn.querySelector('.admin-lock-icon').textContent = '🔒';
+    label.textContent = '已锁定';
+  }
+
+  // Toggle admin-only nav items (系统设置, API文档)
+  const navDivider = document.getElementById('nav-system-divider');
+  const navSettings = document.getElementById('nav-settings');
+  const navApiDocs = document.getElementById('nav-api-docs');
+  if (navDivider) navDivider.classList.toggle('hidden', !_adminAuthenticated);
+  if (navSettings) navSettings.classList.toggle('hidden', !_adminAuthenticated);
+  if (navApiDocs) navApiDocs.classList.toggle('hidden', !_adminAuthenticated);
+
+  // If admin locked and on settings page, redirect to dashboard
+  if (!_adminAuthenticated && currentPage === 'settings') {
+    navTo('dashboard', document.querySelector('[data-page="dashboard"]'));
+  }
+
+  // Refresh strategy cards if on strategy page
+  if (currentPage === 'strategy') loadStrategyPage();
+}
+
+/**
+ * Click handler for lock button.
+ * - If locked: show admin login modal
+ * - If unlocked: lock immediately
+ */
+function handleAdminLockClick() {
+  if (_adminAuthenticated) {
+    // Lock
+    _adminAuthenticated = false;
+    _adminToken = '';
+    sessionStorage.removeItem('_admin_token');
+    updateAdminLockUI();
+    showToast('🔒 管理员操作已锁定 · 策略编辑/删除/交易已禁用', 'info');
+  } else {
+    // Show login modal
+    showAdminLoginModal();
+  }
+}
+
+/**
+ * Show the admin login modal.
+ */
+function showAdminLoginModal() {
+  const modal = document.getElementById('admin-login-modal');
+  if (!modal) return;
+
+  // Reset state
+  const input = document.getElementById('admin-token-input');
+  const hint = document.getElementById('admin-hint');
+  const verifyBtn = document.getElementById('admin-verify-btn');
+  if (input) {
+    input.value = '';
+    input.className = 'admin-token-input';
+  }
+  if (hint) {
+    hint.textContent = '💡 仅限管理员操作策略编辑、启停、删除和手动交易';
+    hint.className = 'admin-hint';
+  }
+  if (verifyBtn) {
+    verifyBtn.disabled = false;
+    verifyBtn.textContent = '🔓 解锁';
+  }
+
+  modal.classList.add('show');
+  setTimeout(() => {
+    if (input) input.focus();
+  }, 150);
+}
+
+/**
+ * Close the admin login modal.
+ */
+function closeAdminLoginModal() {
+  const modal = document.getElementById('admin-login-modal');
+  if (modal) modal.classList.remove('show');
+}
+
+/**
+ * Verify the admin token entered in the modal.
+ */
+async function verifyAdminLogin() {
+  const input = document.getElementById('admin-token-input');
+  const hint = document.getElementById('admin-hint');
+  const verifyBtn = document.getElementById('admin-verify-btn');
+  if (!input || !verifyBtn) return;
+
+  const token = input.value.trim();
+  if (!token) {
+    input.className = 'admin-token-input error';
+    hint.textContent = '⚠️ 请输入管理员密钥';
+    hint.className = 'admin-hint error';
+    input.focus();
+    return;
+  }
+
+  // Show loading
+  verifyBtn.disabled = true;
+  verifyBtn.innerHTML = '<span class="loading-spinner"></span> 验证中...';
+  input.className = 'admin-token-input';
+  hint.textContent = '⏳ 正在验证...';
+  hint.className = 'admin-hint';
+
+  try {
+    const res = await fetch(`${API}/auth/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+
+    if (data.valid) {
+      // Success!
+      _adminAuthenticated = true;
+      _adminToken = token;
+      sessionStorage.setItem('_admin_token', token);
+      updateAdminLockUI();
+      closeAdminLoginModal();
+      showToast('🔓 管理员验证成功！策略操作已解锁', 'success');
+    } else {
+      // Invalid token
+      input.className = 'admin-token-input error';
+      hint.textContent = '❌ 密钥无效，请重试';
+      hint.className = 'admin-hint error';
+      input.focus();
+      input.select();
+    }
+  } catch (e) {
+    hint.textContent = '⚠️ 网络错误，请检查连接后重试';
+    hint.className = 'admin-hint error';
+  } finally {
+    verifyBtn.disabled = false;
+    verifyBtn.textContent = '🔓 解锁';
+  }
+}
+
+/**
+ * Guard: if admin is not authenticated, show login modal and return false.
+ * Use before any mutation operation. Returns true if allowed.
+ */
+function requireAdmin() {
+  if (isAdminAuthenticated()) return true;
+  showAdminLoginModal();
+  showToast('🔒 需要管理员权限才能执行此操作', 'warning');
+  return false;
+}
+
+/**
+ * Called when the server returns 401 — our cached token may have changed.
+ * Force logout so the user must re-authenticate.
+ */
+function handleAuthExpired() {
+  _adminAuthenticated = false;
+  _adminToken = '';
+  sessionStorage.removeItem('_admin_token');
+  updateAdminLockUI();
+  showAdminLoginModal();
+}
+
+// ═══════════════ TOP BAR ═══════════════
+async function refreshAll() {
+  try {
+    const res = await fetch(`${API}/portfolio`);
+    const d = await res.json();
+    document.getElementById('tb-total').textContent = `¥${d.total_value.toLocaleString()}`;
+    const pnlEl = document.getElementById('tb-pnl');
+    const pnlSign = d.total_pnl >= 0 ? '+' : '';
+    pnlEl.textContent = `${pnlSign}¥${d.total_pnl.toLocaleString()} (${d.total_pnl_pct >= 0 ? '+' : ''}${d.total_pnl_pct.toFixed(2)}%)`;
+    pnlEl.className = `text-sm font-bold ${d.total_pnl >= 0 ? 'text-[#00d4aa]' : 'text-[#f04770]'}`;
+    document.getElementById('tb-pos').textContent = `${d.positions_count}`;
+    document.getElementById('tb-status').innerHTML = '<span class="pulse-dot"></span>实时';
+  } catch(e) { console.error('Refresh error:', e); }
+}
+
+// ═══════════════ DASHBOARD ═══════════════
+function initDashEquityChart() {
+  if (dashEquityChart) return;
+  const el = document.getElementById('dash-equity-chart');
+  if (!el) return;
+  // LightweightCharts v4 has built-in ResizeObserver — creates fine even at 0 width
+  _createDashEquityChart(el);
+}
+
+function _createDashEquityChart(el) {
+  try {
+    dashEquityChart = LightweightCharts.createChart(el, {
+      layout: { background: { color: '#141920' }, textColor: '#8b949e' },
+      grid: { vertLines: { color: '#1e2430' }, horzLines: { color: '#1e2430' } },
+      rightPriceScale: { borderColor: '#1e2430' },
+      timeScale: { borderColor: '#1e2430', timeVisible: true },
+      width: el.clientWidth || 800,
+      height: el.clientHeight || 320,
+    });
+    dashEquityArea = dashEquityChart.addAreaSeries({
+      lineColor: '#00d4aa', topColor: 'rgba(0,212,170,0.15)', bottomColor: 'rgba(0,212,170,0.01)', lineWidth: 2,
+    });
+    loadDashEquityData();
+  } catch(e) {
+    console.error('Failed to create dashboard equity chart:', e);
+    document.getElementById('dash-chart-loader')?.classList.add('hidden');
+  }
+}
+
+async function loadDashEquityData() {
+  if (!dashEquityArea) return;
+  try {
+    const res = await fetch(`${API}/equity-curve`);
+    const d = await res.json();
+    document.getElementById('dash-chart-loader')?.classList.add('hidden');
+    if (!d.equity_curve || d.equity_curve.length < 2) return;
+    const seen = new Set();
+    const data = d.equity_curve
+      .map(p => ({ time: Math.floor(new Date(p.time).getTime() / 1000), value: p.value }))
+      .filter(p => { const ok = !seen.has(p.time); seen.add(p.time); return ok; });
+    if (data.length >= 2) dashEquityArea.setData(data);
+  } catch(e) { document.getElementById('dash-chart-loader')?.classList.add('hidden'); }
+}
+
+// ═══════════════ DASHBOARD v2 ═══════════════
+// Dashboard auto-refresh timer
+let _dashRefreshTimer = null;
+let _dashRefreshing = false;
+
+function _fmtPnL(val) {
+  const sign = val >= 0 ? '+' : '';
+  return `${sign}¥${Math.abs(val).toLocaleString()}`;
+}
+function _pnlClass(val) { return val >= 0 ? 'pnl-up' : 'pnl-down'; }
+function _pnlArrow(val) { return val >= 0 ? '▲' : '▼'; }
+function _ts(dtStr) {
+  const d = new Date(dtStr);
+  return `${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}`;
+}
+
+async function loadDashboardData() {
+  if (_dashRefreshing) return;
+  _dashRefreshing = true;
+
+  // Show refreshing state
+  const indicator = document.getElementById('dash-refresh-indicator');
+  if (indicator) indicator.classList.add('refreshing');
+  const btn = document.getElementById('dash-refresh-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="loading-spinner"></span>'; }
+
+  try {
+    // Use aggregation endpoint
+    const res = await fetch(`${API}/dashboard`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    const { portfolio:p, performance:perf, risk, strategies, positions, recent_trades } = d;
+
+    // Populate strategies cache for delete modal lookup
+    if (strategies) {
+      strategies.forEach(s => { _strategiesCache[s.id] = s; });
+    }
+
+    // ━━━━━ Row 1: 8 Metric Cards ━━━━━
+    // Card 1: Total Assets
+    document.getElementById('dash-total-value').textContent = `¥${p.total_value.toLocaleString()}`;
+    const pctEl = document.getElementById('dash-total-pnl-pct');
+    const pnlCls = _pnlClass(p.total_pnl_pct);
+    pctEl.innerHTML = `<span class="${pnlCls}">${_pnlArrow(p.total_pnl_pct)} ${Math.abs(p.total_pnl_pct).toFixed(2)}%</span> 累计`;
+    pctEl.className = `dash-metric-sub ${pnlCls}`;
+
+    // Card 2: Cumulative P&L
+    const cumPnlEl = document.getElementById('dash-cumulative-pnl');
+    cumPnlEl.textContent = _fmtPnL(p.total_pnl);
+    cumPnlEl.className = `dash-metric-value ${_pnlClass(p.total_pnl)}`;
+    document.getElementById('dash-cumulative-pnl-pct').innerHTML = `<span class="${pnlCls}">${_pnlArrow(p.total_pnl_pct)} ${Math.abs(p.total_pnl_pct).toFixed(2)}%</span>`;
+
+    // Card 3: Daily P&L
+    const dailyCls = _pnlClass(p.total_pnl);
+    document.getElementById('dash-daily-pnl').textContent = _fmtPnL(p.total_pnl);
+    document.getElementById('dash-daily-pnl').className = `dash-metric-value ${dailyCls}`;
+    document.getElementById('dash-daily-pnl-pct').innerHTML = `<span class="${dailyCls}">${_pnlArrow(p.total_pnl_pct)} ${Math.abs(p.total_pnl_pct).toFixed(2)}%</span>`;
+
+    // Card 4: Win Rate
+    document.getElementById('dash-winrate').textContent = `${perf.win_rate_pct.toFixed(1)}%`;
+    document.getElementById('dash-trades-count').textContent = `${perf.closed_trades} 笔已平仓 · ${perf.total_trades} 笔总交易`;
+
+    // Card 5: Max Drawdown
+    document.getElementById('dash-max-dd').textContent = `-${perf.max_drawdown_pct.toFixed(1)}%`;
+    document.getElementById('dash-max-dd').className = `dash-metric-value ${perf.max_drawdown_pct <= 10 ? 'text-[#f0b90b]' : 'text-[#f04770]'}`;
+    const annDisplay = perf.annualized_return_pct > 500 ? '数据积累中…' : `${perf.annualized_return_pct >= 0 ? '+' : ''}${perf.annualized_return_pct.toFixed(1)}%`;
+    document.getElementById('dash-calmar').textContent = `Calmar: ${perf.calmar_ratio.toFixed(2)} · 年化: ${annDisplay}`;
+
+    // Card 6: Sharpe
+    document.getElementById('dash-sharpe').textContent = perf.sharpe_ratio.toFixed(2);
+    document.getElementById('dash-sharpe').className = `dash-metric-value ${perf.sharpe_ratio >= 1.5 ? 'text-[#00d4aa]' : perf.sharpe_ratio >= 0.5 ? 'text-[#f0b90b]' : 'text-[#f04770]'}`;
+    document.getElementById('dash-annualized').textContent = `盈利因子: ${perf.profit_factor >= 999 ? '∞' : perf.profit_factor.toFixed(2)} · 最佳: +${perf.best_trade_pct.toFixed(1)}%`;
+
+    // Card 7: Positions Value
+    document.getElementById('dash-pos-value').textContent = `¥${p.positions_value.toLocaleString()}`;
+    const cashRatio = p.total_value > 0 ? (p.total_cash / p.total_value * 100).toFixed(0) : 100;
+    document.getElementById('dash-pos-count').textContent = `${p.positions_count} 个持仓 · 现金 ${cashRatio}%`;
+
+    // Card 8: Risk Score
+    const score = risk.survival_score || 100;
+    const riskEl = document.getElementById('dash-risk-score');
+    riskEl.textContent = `${score.toFixed(0)}/100`;
+    riskEl.className = `dash-metric-value ${score >= 80 ? 'text-[#00d4aa]' : score >= 50 ? 'text-[#f0b90b]' : 'text-[#f04770]'}`;
+    const alerts = [...(risk.alerts || []), ...(risk.warnings || [])];
+    document.getElementById('dash-risk-label').innerHTML = score >= 80
+      ? '🟢 系统安全'
+      : score >= 50
+        ? `🟡 ${alerts.length} 个警告`
+        : `🔴 ${alerts.length} 个警报`;
+
+    // ━━━━━ Top bar update ━━━━━
+    document.getElementById('tb-total').textContent = `¥${p.total_value.toLocaleString()}`;
+    document.getElementById('tb-pos').textContent = `${p.positions_count}`;
+    document.getElementById('tb-winrate').textContent = `${perf.win_rate_pct.toFixed(1)}%`;
+    const tbPnl = document.getElementById('tb-pnl');
+    tbPnl.textContent = _fmtPnL(p.total_pnl);
+    tbPnl.className = `text-sm font-bold ${_pnlClass(p.total_pnl)}`;
+
+    // ━━━━━ Row 2: Asset Allocation ━━━━━
+    const allocDiv = document.getElementById('dash-allocation');
+    const alloc = d.allocation || [];
+    document.getElementById('dash-alloc-total').textContent = `总计 ¥${p.total_value.toLocaleString()}`;
+    if (alloc.length === 0) {
+      allocDiv.innerHTML = '<div class="dash-empty">暂无资产分配数据</div>';
+    } else {
+      allocDiv.innerHTML = alloc.map((m, i) => {
+        const pct = p.total_value > 0 ? (m.total / p.total_value * 100).toFixed(1) : 0;
+        const barWidth = Math.max(2, parseFloat(pct));
+        const pnlCls = (m.pnl || 0) >= 0 ? 'text-[#00d4aa]' : 'text-[#f04770]';
+        return `<div class="flex items-center gap-2 py-1.5 border-b border-[#0d1117] last:border-0">
+          <span class="text-xs w-6 text-right font-mono text-[#484f58]">${i+1}</span>
+          <span class="w-2.5 h-2.5 rounded-sm flex-shrink-0" style="background:${m.color}"></span>
+          <span class="text-xs flex-1 truncate">${m.label}</span>
+          <span class="text-xs font-mono">¥${m.total.toLocaleString()}</span>
+          <span class="text-xs ${pnlCls} w-16 text-right font-mono">${pct}%</span>
+        </div>`;
+      }).join('');
+    }
+
+    // ━━━━━ Row 3: AI Strategy Status Cards ━━━━━
+    document.getElementById('dash-strat-badge').textContent = `${d.strategies_running}/${d.strategies_total} 运行中`;
+    const stratRow = document.getElementById('dash-strategies-row');
+    if (!strategies || strategies.length === 0) {
+      stratRow.innerHTML = '<div class="dash-empty" style="min-width:100%;">📭 暂无AI策略 — <a class="text-[#3b82f6] cursor-pointer underline" onclick="navTo(\'strategy\', document.querySelector(\'[data-page=strategy]\'))">前往创建</a></div>';
+    } else {
+      stratRow.innerHTML = strategies.map(s => {
+        const isRunning = s.status === 'running';
+        const statusIcon = isRunning ? '🟢' : '⏸';
+        const statusLabel = isRunning ? '运行中' : '已暂停';
+        const cardCls = isRunning ? 'running' : 'stopped';
+        const lastSignal = s.last_signal
+          ? `<div class="text-[10px] text-[#8b949e] mt-1.5 truncate">📡 ${s.last_signal}</div>`
+          : '<div class="text-[10px] text-[#484f58] mt-1.5">📡 暂无最近信号</div>';
+        return `<div class="dash-strat-card ${cardCls}">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-semibold text-white truncate">${s.name}</span>
+            <span class="text-[10px] ${isRunning ? 'text-[#00d4aa]' : 'text-[#8b949e]'}">${statusIcon} ${statusLabel}</span>
+          </div>
+          <div class="grid grid-cols-3 gap-1 text-center text-[10px] mb-2">
+            <div class="bg-[#0d1117] rounded p-1">
+              <p class="text-[#484f58]">Sharpe</p>
+              <p class="font-bold ${s.sharpe >= 1.5 ? 'text-[#00d4aa]' : 'text-white'}">${s.sharpe.toFixed(1)}</p>
+            </div>
+            <div class="bg-[#0d1117] rounded p-1">
+              <p class="text-[#484f58]">胜率</p>
+              <p class="font-bold text-white">${s.win_rate.toFixed(0)}%</p>
+            </div>
+            <div class="bg-[#0d1117] rounded p-1">
+              <p class="text-[#484f58]">今日信号</p>
+              <p class="font-bold ${s.signals_today > 0 ? 'text-[#3b82f6]' : 'text-[#8b949e]'}">${s.signals_today}</p>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-1 mb-2">
+            ${(s.symbols || []).slice(0,3).map(sym => `<span class="text-[10px] px-1.5 py-0.5 rounded bg-[#0d1117] text-[#8b949e]">${sym.replace('/USDT','')}</span>`).join('')}
+            ${(s.symbols || []).length > 3 ? `<span class="text-[10px] text-[#484f58]">+${s.symbols.length - 3}</span>` : ''}
+          </div>
+          ${lastSignal}
+          <div class="flex gap-1.5 mt-2">
+            <button onclick="editStrategy('${s.id}')" class="btn-outline btn-sm flex-1 text-[10px] py-1">📋 详情</button>
+            <button onclick="${isAdminAuthenticated() ? `toggleStrategyFromDash('${s.id}')` : 'requireAdmin()'}" class="${isRunning ? 'btn-outline' : 'btn-accent'} btn-sm flex-1 text-[10px] py-1 ${isAdminAuthenticated() ? '' : 'btn-locked'}">${isRunning ? '⏸' : '▶'} ${isRunning ? '暂停' : '启动'}</button>
+            <button onclick="${isAdminAuthenticated() ? `deleteStrategyFromDash('${s.id}', '${s.name.replace(/'/g, "\\'")}')` : 'requireAdmin()'}" class="btn-danger btn-sm text-[10px] py-1 px-2 ${isAdminAuthenticated() ? '' : 'btn-locked'}">🗑</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    // ━━━━━ Row 4: Positions Table ━━━━━
+    document.getElementById('dash-pos-table-count').textContent = `(${positions.length})`;
+    const posTbody = document.getElementById('dash-positions-tbody');
+    if (!positions || positions.length === 0) {
+      posTbody.innerHTML = '<tr><td colspan="7" class="p-6 text-center text-[#8b949e] text-sm">📭 暂无AI持仓 — AI策略尚未建仓或已全部平仓</td></tr>';
+    } else {
+      posTbody.innerHTML = positions.map(p => {
+        const pnlCls = _pnlClass(p.pnl);
+        const pnlSign = p.pnl >= 0 ? '+' : '';
+        return `<tr>
+          <td><span class="font-medium text-sm">${p.name || p.symbol}</span></td>
+          <td class="font-mono text-xs">¥${(p.avg_entry_price || p.entry_price).toLocaleString()}</td>
+          <td class="font-mono text-xs">¥${p.current_price.toLocaleString()}</td>
+          <td class="font-mono text-xs">${p.quantity}</td>
+          <td class="font-mono text-xs">¥${p.value.toLocaleString()}</td>
+          <td class="font-mono text-xs ${pnlCls} font-bold">${pnlSign}¥${Math.abs(p.pnl).toLocaleString()}</td>
+          <td class="font-mono text-xs ${pnlCls}">${p.pnl_pct >= 0 ? '+' : ''}${p.pnl_pct.toFixed(2)}%</td>
+        </tr>`;
+      }).join('');
+    }
+
+    // ━━━━━ Row 5: AI Trade Log ━━━━━
+    document.getElementById('dash-trade-count').textContent = `共 ${d.trades_count || 0} 笔`;
+    const tTbody = document.getElementById('dash-trades-tbody');
+    if (!recent_trades || recent_trades.length === 0) {
+      tTbody.innerHTML = '<tr><td colspan="8" class="p-6 text-center text-[#8b949e] text-sm">📭 暂无AI交易记录 — 策略运行后将自动产生交易</td></tr>';
+    } else {
+      tTbody.innerHTML = recent_trades.slice(0, 20).map(t => {
+        const isBuy = t.side === 'buy';
+        const hasPnl = t.side === 'sell';
+        const pnlCls = (t.pnl || 0) >= 0 ? 'text-[#00d4aa]' : 'text-[#f04770]';
+        return `<tr>
+          <td class="text-xs text-[#8b949e] font-mono whitespace-nowrap">${_ts(t.time)}</td>
+          <td class="text-sm font-medium">${t.name || t.symbol}</td>
+          <td>${isBuy ? '<span class="badge-buy text-[10px]">买入</span>' : '<span class="badge-sell text-[10px]">卖出</span>'}</td>
+          <td class="font-mono text-xs">¥${t.price.toLocaleString()}</td>
+          <td class="font-mono text-xs">${t.quantity}</td>
+          <td class="font-mono text-xs">¥${t.amount.toLocaleString()}</td>
+          <td class="font-mono text-xs ${hasPnl ? pnlCls : 'text-[#8b949e]'}">${hasPnl ? (t.pnl >= 0 ? '+' : '') + '¥' + Math.abs(t.pnl).toLocaleString() : '--'}</td>
+          <td class="text-xs text-[#8b949e] max-w-[140px] truncate" title="${t.reason}">${t.reason}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    // ━━━━━ Update refresh timestamp ━━━━━
+    const now = new Date();
+    document.getElementById('dash-refresh-time').textContent =
+      `更新于 ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+
+    // Also update equity chart
+    loadDashEquityDataV2(d);
+
+  } catch(e) {
+    console.error('Dashboard load error:', e);
+    // Fallback: try individual endpoints
+    try { await refreshAll(); } catch(_) {}
+  } finally {
+    _dashRefreshing = false;
+    if (indicator) indicator.classList.remove('refreshing');
+    const btn = document.getElementById('dash-refresh-btn');
+    if (btn) { btn.disabled = false; btn.innerHTML = '🔄 刷新'; }
+  }
+
+  // Also init equity chart on first load
+  initDashEquityChart();
+}
+
+// Equity curve loader (separated for chart init)
+async function loadDashEquityDataV2(d) {
+  if (!dashEquityArea) { initDashEquityChart(); }
+  if (!dashEquityArea) return;
+  document.getElementById('dash-chart-loader')?.classList.add('hidden');
+
+  const equity = d?.equity_curve;
+  if (equity && equity.length >= 2) {
+    const seen = new Set();
+    const data = equity
+      .map(p => ({ time: Math.floor(new Date(p.time).getTime() / 1000), value: p.value }))
+      .filter(p => { const ok = !seen.has(p.time); seen.add(p.time); return ok; });
+    if (data.length >= 2) dashEquityArea.setData(data);
+
+    // Update latest value display
+    const last = equity[equity.length - 1];
+    const el = document.getElementById('dash-equity-latest');
+    if (el) {
+      const pct = d.portfolio ? d.portfolio.total_pnl_pct : 0;
+      el.textContent = `¥${last.value.toLocaleString()} · ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+    }
+  }
+}
+
+// Fallback loader using individual equity endpoint
+async function loadDashEquityData() {
+  if (!dashEquityArea) return;
+  try {
+    const res = await fetch(`${API}/equity-curve`);
+    const d = await res.json();
+    document.getElementById('dash-chart-loader')?.classList.add('hidden');
+    if (!d.equity_curve || d.equity_curve.length < 2) return;
+    const seen = new Set();
+    const data = d.equity_curve
+      .map(p => ({ time: Math.floor(new Date(p.time).getTime() / 1000), value: p.value }))
+      .filter(p => { const ok = !seen.has(p.time); seen.add(p.time); return ok; });
+    if (data.length >= 2) dashEquityArea.setData(data);
+  } catch(e) { document.getElementById('dash-chart-loader')?.classList.add('hidden'); }
+}
+
+// Strategy actions from dashboard (with auto-refresh)
+function handleNewStrategy() {
+  if (!requireAdmin()) return;
+  const name = prompt('请输入新策略名称：', '我的AI策略');
+  if (!name || !name.trim()) return;
+  const market = confirm('使用加密货币市场？(确定=加密货币, 取消=港股)') ? 'crypto' : 'hk_stock';
+  const defaultSymbols = market === 'crypto' ? ['BTC/USDT'] : ['00700.HK'];
+
+  // Open a basic creation via the strategy creation API
+  (async () => {
+    try {
+      const res = await fetch(`${API}/strategies`, {
+        method: 'POST',
+        headers: getAdminHeaders(true),
+        body: JSON.stringify({
+          name: name.trim(),
+          market: market,
+          symbols: defaultSymbols,
+          status: 'stopped',
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast(`策略「${name.trim()}」创建成功！点击编辑来配置参数 ✨`, 'success');
+        if (typeof loadStrategyPage === 'function') loadStrategyPage();
+        if (typeof loadStrategies === 'function') loadStrategies();
+        if (typeof loadDashboardData === 'function') loadDashboardData();
+      } else if (res.status === 401) {
+        showToast('🔒 权限不足: ' + (data.detail || '需要管理员权限'), 'error');
+        handleAuthExpired();
+      } else {
+        showToast(`创建失败: ${data.detail || '请检查网络连接'}`, 'error');
+      }
+    } catch(e) {
+      // Fallback: if API doesn't support creation, guide user
+      showToast('⚠️ API不支持动态创建，请通过策略配置文件添加新策略', 'warning');
+    }
+  })();
+}
+
+function runQuickBacktest() {
+  const strategySelect = document.getElementById('bt-strategy-select');
+  const strategyId = strategySelect?.value;
+  const strategyName = strategySelect?.selectedOptions?.[0]?.textContent || strategyId;
+  if (!strategyId || strategyId === '加载中...') {
+    showToast('请先选择一个策略', 'warning');
+    return;
+  }
+  // Navigate to backtest page with strategy pre-selected
+  showToast(`正在为「${strategyName}」准备回测数据...`, 'info');
+  navTo('backtest', document.querySelector('[data-page="backtest"]'));
+  // Auto-select strategy in backtest page after navigation
+  setTimeout(() => {
+    const btSelect = document.querySelector('#page-backtest select');
+    if (btSelect) {
+      // Find matching option
+      Array.from(btSelect.options).forEach((opt, i) => {
+        if (opt.textContent.includes(strategyName) || opt.value === strategyId) {
+          btSelect.selectedIndex = i;
+        }
+      });
+    }
+    if (typeof loadBacktestData === 'function') loadBacktestData();
+  }, 300);
+}
+
+async function toggleStrategyFromDash(strategyId) {
+  if (!requireAdmin()) return;
+  try {
+    const res = await fetch(`${API}/strategies/${encodeURIComponent(strategyId)}/toggle`, {
+      method: 'POST',
+      headers: getAdminHeaders(false),
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      showToast(data.message, 'success');
+      loadDashboardData();
+      if (typeof loadStrategies === 'function') loadStrategies();
+    } else if (res.status === 401) {
+      showToast('🔒 权限不足: ' + (data.detail || '需要管理员权限'), 'error');
+      handleAuthExpired();
+    } else {
+      showToast(`操作失败: ${data.detail || '未知错误'}`, 'error');
+    }
+  } catch(e) { showToast('请求失败，请检查网络连接', 'error'); }
+}
+
+async function deleteStrategyFromDash(strategyId, strategyName) {
+  // Use dedicated delete modal with full strategy info from cache
+  const cached = _strategiesCache[strategyId];
+  if (cached) {
+    showDeleteStrategyModal(strategyId, cached);
+  } else {
+    // Fallback: minimal strategy data from what we have
+    showDeleteStrategyModal(strategyId, { id: strategyId, name: strategyName });
+  }
+}
+
+// Start/stop auto-refresh for dashboard
+function startDashAutoRefresh() {
+  if (_dashRefreshTimer) clearInterval(_dashRefreshTimer);
+  _dashRefreshTimer = setInterval(() => {
+    if (currentPage === 'dashboard') loadDashboardData();
+  }, 30000); // 30s refresh
+}
+
+function stopDashAutoRefresh() {
+  if (_dashRefreshTimer) { clearInterval(_dashRefreshTimer); _dashRefreshTimer = null; }
+}
+
+// ═══════════════ TOAST SYSTEM ═══════════════
+function showToast(message, type = 'info', duration = 3500) {
+  const container = document.getElementById('toast-container');
+  const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<span class="toast-icon">${icons[type] || 'ℹ️'}</span><span class="toast-msg">${message}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.2s'; setTimeout(() => toast.remove(), 200); }, duration);
+}
+
+function setBtnLoading(btn, loading) {
+  if (loading) {
+    btn._origHTML = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<span class="loading-spinner"></span> 处理中...`;
+    btn.classList.add('opacity-70');
+  } else {
+    btn.disabled = false;
+    btn.innerHTML = btn._origHTML || btn.innerHTML;
+    btn.classList.remove('opacity-70');
+  }
+}
+
+// ═══════════════ TRADING PAGE ═══════════════
+let tradeLivePrice = 0;
+let _tradeRefreshTimer = null;
+
+function initTradePage() {
+  buildTradeSymbolChips();
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      initTradeKlineChart();
+      loadTradeKlineData();
+    });
+  });
+  loadAccountInfo();
+  loadTradePositions();
+  loadTradeLog();
+  loadAIDecision();
+  loadStrategies();
+  // Auto-refresh every 30s while on trading page
+  if (_tradeRefreshTimer) clearInterval(_tradeRefreshTimer);
+  _tradeRefreshTimer = setInterval(() => {
+    if (currentPage === 'trading') {
+      loadAccountInfo();
+      loadTradePositions();
+      loadTradeLog();
+      loadAIDecision();
+    }
+  }, 30000);
+}
+
+// ── K-line Chart ──
+
+function initTradeKlineChart() {
+  if (tradeKlineChart) return;
+  const el = document.getElementById('trade-kline-chart');
+  if (!el) return;
+  _createTradeChart(el);
+}
+
+function _createTradeChart(el) {
+  try {
+    tradeKlineChart = LightweightCharts.createChart(el, {
+      layout: { background: { color: '#141920' }, textColor: '#8b949e' },
+      grid: { vertLines: { color: '#1e2430' }, horzLines: { color: '#1e2430' } },
+      crosshair: { mode: 1 },
+      rightPriceScale: { borderColor: '#1e2430', scaleMargins: { top: 0.1, bottom: 0.3 } },
+      timeScale: { borderColor: '#1e2430', timeVisible: true },
+      width: el.clientWidth || 800,
+      height: el.clientHeight || 460,
+    });
+    tradeCandle = tradeKlineChart.addCandlestickSeries({
+      upColor: '#00d4aa', downColor: '#f04770',
+      borderUpColor: '#00d4aa', borderDownColor: '#f04770',
+      wickUpColor: '#00d4aa', wickDownColor: '#f04770',
+    });
+    tradeVolume = tradeKlineChart.addHistogramSeries({
+      priceFormat: { type: 'volume' }, priceScaleId: '',
+      scaleMargins: { top: 0.8, bottom: 0 },
+    });
+  } catch(e) {
+    console.error('Failed to create trade K-line chart:', e);
+    document.getElementById('trade-chart-loader')?.classList.add('hidden');
+  }
+}
+
+function buildTradeSymbolChips() {
+  const container = document.getElementById('trade-symbol-chips');
+  if (!container) return;
+  container.innerHTML = SYMBOLS.map(s => {
+    const name = s.replace('/USDT','');
+    return `<button class="text-xs px-2 py-1 rounded-md border cursor-pointer transition whitespace-nowrap
+      ${s === tradeSymbol ? 'bg-[rgba(0,212,170,0.15)] border-[#00d4aa] text-[#00d4aa]' : 'bg-transparent border-[#1e2430] text-[#8b949e] hover:border-[#3b82f6]'} "
+      onclick="selectTradeSymbol('${s}')">${name}</button>`;
+  }).join('');
+}
+
+function selectTradeSymbol(sym) {
+  tradeSymbol = sym;
+  buildTradeSymbolChips();
+  loadTradeKlineData();
+  loadAIDecision();  // Update AI panel for selected symbol
+}
+
+function switchTradeTF() { tradeTF = document.getElementById('trade-tf').value; loadTradeKlineData(); }
+
+async function loadTradeKlineData() {
+  // Ensure chart is initialized before loading data
+  if (!tradeCandle) initTradeKlineChart();
+  if (!tradeCandle) return; // safety check — shouldn't happen now
+  try {
+    const res = await fetch(`${API}/market-data?symbol=${encodeURIComponent(tradeSymbol)}&timeframe=${tradeTF}&limit=200`);
+    const d = await res.json();
+    if (!d.candles) return;
+    tradeCandle.setData(d.candles.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+    tradeVolume.setData(d.candles.map(c => ({ time: c.time, value: c.volume, color: c.close >= c.open ? 'rgba(0,212,170,0.3)' : 'rgba(240,71,112,0.3)' })));
+    document.getElementById('trade-chart-loader')?.classList.add('hidden');
+    const last = d.candles[d.candles.length - 1];
+    tradeLivePrice = last.close;
+    updateLivePriceDisplay(last);
+    document.getElementById('trade-symbol-label').textContent = `${tradeSymbol} · ${tradeTF}`;
+  } catch(e) { document.getElementById('trade-chart-loader')?.classList.add('hidden'); console.error('K-line data error:', e); }
+}
+
+function updateLivePriceDisplay(lastCandle) {
+  const priceEl = document.getElementById('trade-live-price');
+  const changeEl = document.getElementById('trade-live-change');
+  if (!priceEl || !lastCandle) return;
+  const change = lastCandle.close - lastCandle.open;
+  const changePct = lastCandle.open > 0 ? (change / lastCandle.open * 100) : 0;
+  const isUp = change >= 0;
+  priceEl.textContent = `$${lastCandle.close.toFixed(2)}`;
+  priceEl.className = `price-ticker text-sm font-bold ml-2 ${isUp ? 'text-[#00d4aa]' : 'text-[#f04770]'}`;
+  changeEl.textContent = `${isUp ? '+' : ''}${change.toFixed(2)} (${isUp ? '+' : ''}${changePct.toFixed(2)}%)`;
+  changeEl.className = `text-xs ml-1 ${isUp ? 'text-[#00d4aa]' : 'text-[#f04770]'}`;
+}
+
+// ── Account Info ──
+
+async function loadAccountInfo() {
+  try {
+    const res = await fetch(`${API}/portfolio`);
+    const p = await res.json();
+
+    document.getElementById('trade-avail-cash').textContent = `¥${p.total_cash.toLocaleString()}`;
+    document.getElementById('trade-equity').textContent = `¥${p.total_value.toLocaleString()}`;
+
+    // Float PnL
+    const pnlEl = document.getElementById('trade-float-pnl');
+    const sign = p.total_pnl >= 0 ? '+' : '';
+    pnlEl.textContent = `${sign}¥${Math.abs(p.total_pnl).toLocaleString()}`;
+    pnlEl.className = `text-lg font-bold info-card-value ${p.total_pnl >= 0 ? 'text-[#00d4aa]' : 'text-[#f04770]'}`;
+
+    const pctEl = document.getElementById('trade-float-pnl-pct');
+    pctEl.textContent = `${p.total_pnl_pct >= 0 ? '▲' : '▼'} ${Math.abs(p.total_pnl_pct).toFixed(2)}%`;
+    pctEl.className = `text-xs mt-1 ${p.total_pnl_pct >= 0 ? 'text-[#00d4aa]' : 'text-[#f04770]'}`;
+
+    // Equity change
+    const eqChange = document.getElementById('trade-equity-change');
+    eqChange.textContent = `${p.total_pnl_pct >= 0 ? '+' : ''}${p.total_pnl_pct.toFixed(2)}%`;
+    eqChange.className = `text-xs mt-1 ${p.total_pnl_pct >= 0 ? 'text-[#00d4aa]' : 'text-[#f04770]'}`;
+
+    // Daily return (estimated from total PnL — in production this would come from a daily PnL endpoint)
+    const initialCapital = 10000;
+    const dailyPct = ((p.total_value / initialCapital - 1) * 100);
+    const dailyEl = document.getElementById('trade-daily-return');
+    const labelEl = document.getElementById('trade-daily-return-label');
+    dailyEl.textContent = `${dailyPct >= 0 ? '+' : ''}${dailyPct.toFixed(2)}%`;
+    dailyEl.className = `text-lg font-bold info-card-value ${dailyPct >= 0 ? 'text-[#00d4aa]' : 'text-[#f04770]'}`;
+    labelEl.textContent = `¥${Math.abs(p.total_pnl).toLocaleString()}`;
+  } catch(e) { console.error('Account info error:', e); }
+}
+
+// ── Positions Table ──
+
+async function loadTradePositions() {
+  try {
+    const res = await fetch(`${API}/positions`);
+    const d = await res.json();
+    const tbody = document.getElementById('trade-positions-tbody');
+    document.getElementById('trade-pos-count').textContent = `(${d.count})`;
+
+    if (d.positions.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="p-6 text-center text-[#8b949e] text-sm">📭 暂无AI持仓</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = d.positions.map(p => {
+      const pnlCls = p.pnl >= 0 ? 'text-[#00d4aa]' : 'text-[#f04770]';
+      const pnlSign = p.pnl >= 0 ? '+' : '';
+      const pnlPctSign = p.pnl_pct >= 0 ? '+' : '';
+      return `<tr>
+        <td>
+          <span class="font-medium text-sm">${p.name || p.symbol}</span>
+          ${p.entry_reason ? `<span class="text-[10px] text-[#484f58] block" title="${p.entry_reason}">🤖 AI决策建仓</span>` : ''}
+        </td>
+        <td class="font-mono text-xs">¥${(p.avg_entry_price || p.entry_price).toLocaleString()}</td>
+        <td class="font-mono text-xs">¥${p.current_price.toLocaleString()}</td>
+        <td class="font-mono text-xs">${p.quantity}</td>
+        <td class="font-mono text-xs">¥${p.value.toLocaleString()}</td>
+        <td class="font-mono text-xs ${pnlCls} font-bold">${pnlSign}¥${Math.abs(p.pnl).toLocaleString()}</td>
+        <td class="font-mono text-xs ${pnlCls}">${pnlPctSign}${p.pnl_pct.toFixed(2)}%</td>
+        <td>
+          <button onclick="${isAdminAuthenticated() ? `closePosition('${p.id}', '${p.symbol}', ${p.quantity}, ${p.current_price})` : 'requireAdmin()'}"
+            class="btn-danger btn-sm ${isAdminAuthenticated() ? '' : 'btn-locked'}" title="${isAdminAuthenticated() ? 'AI一键平仓' : '🔒 需要管理员权限'}">
+            🤖 平仓
+          </button>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.error('Positions error:', e); }
+}
+
+async function closePosition(posId, symbol, qty, currentPrice) {
+  if (!requireAdmin()) return;
+  // Use custom modal instead of confirm() for consistent UX
+  showConfirmModal(
+    `确认平仓 ${symbol}`,
+    `AI将卖出全部 ${qty} 个仓位 @ 当前价格 ¥${currentPrice.toLocaleString()}`,
+    async () => {
+      try {
+        const res = await fetch(`${API}/positions/close`, {
+          method: 'POST',
+          headers: getAdminHeaders(true),
+          body: JSON.stringify({ position_id: posId, price: currentPrice }),
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          showToast(`${symbol} 平仓成功！盈亏: ${data.pnl >= 0 ? '+' : ''}¥${Math.abs(data.pnl || 0).toLocaleString()}`, 'success');
+          loadAccountInfo();
+          loadTradePositions();
+          loadTradeLog();
+          refreshAll();
+        } else if (res.status === 401) {
+          showToast('🔒 权限不足: ' + (data.detail || '需要管理员权限'), 'error');
+          handleAuthExpired();
+        } else {
+          showToast(`平仓失败: ${data.detail || '未知错误'}`, 'error');
+        }
+      } catch(e) {
+        showToast('平仓请求失败，请检查网络连接', 'error');
+      }
+    }
+  );
+}
+
+// ── Trade Log ──
+
+async function loadTradeLog() {
+  try {
+    const res = await fetch(`${API}/trades?limit=30`);
+    const d = await res.json();
+    const container = document.getElementById('trade-log-container');
+
+    if (d.trades.length === 0) {
+      container.innerHTML = '<div class="p-6 text-center text-[#8b949e] text-sm">📭 暂无AI交易记录</div>';
+      return;
+    }
+
+    container.innerHTML = d.trades.map(t => {
+      const time = new Date(t.time);
+      const ts = `${time.getMonth()+1}/${time.getDate()} ${time.getHours().toString().padStart(2,'0')}:${time.getMinutes().toString().padStart(2,'0')}:${time.getSeconds().toString().padStart(2,'0')}`;
+      const isBuy = t.side === 'buy';
+      const hasPnl = t.side === 'sell';
+      return `<div class="trade-log-item flex items-center justify-between">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-[10px] text-[#484f58] flex-shrink-0 w-[68px]">${ts}</span>
+          <span class="${isBuy ? 'badge-buy' : 'badge-sell'} flex-shrink-0 text-[10px]">${isBuy ? '买入' : '卖出'}</span>
+          <span class="text-xs font-medium truncate">${t.name || t.symbol}</span>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0 text-xs font-mono">
+          <span class="text-[#8b949e]">x${t.quantity} @ ¥${t.price.toLocaleString()}</span>
+          ${hasPnl ? `<span class="${t.pnl >= 0 ? 'text-[#00d4aa]' : 'text-[#f04770]'} font-bold">${t.pnl >= 0 ? '+' : ''}¥${Math.abs(t.pnl).toLocaleString()}</span>` : '<span class="text-[#8b949e]">--</span>'}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('Trade log error:', e); }
+}
+
+// ── AI Decision Panel ──
+
+async function loadAIDecision() {
+  // Update signal symbol label
+  document.getElementById('ai-signal-symbol').textContent = tradeSymbol;
+  document.getElementById('ai-update-time').textContent = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+
+  try {
+    // Fetch signals + ML insights in parallel
+    const [sigRes, mlRes, riskRes] = await Promise.all([
+      fetch(`${API}/signals?market=crypto`),
+      fetch(`${API}/ml-insights`),
+      fetch(`${API}/risk`),
+    ]);
+    const sigData = await sigRes.json();
+    const mlData = await mlRes.json();
+    const riskData = await riskRes.json();
+
+    // ── AI Signal for selected symbol ──
+    const cryptoSignals = sigData.signals?.crypto || [];
+    const currentSignal = cryptoSignals.find(s => s.symbol === tradeSymbol);
+
+    if (currentSignal) {
+      const action = currentSignal.action;
+      const signalBadge = document.getElementById('ai-signal-indicator');
+      const ringCls = action === 'BUY' ? 'buy-ring' : action === 'SELL' ? 'sell-ring' : 'hold-ring';
+      const signalCls = action === 'BUY' ? 'signal-buy' : action === 'SELL' ? 'signal-sell' : 'signal-hold';
+      const signalEmoji = action === 'BUY' ? '📈 买入' : action === 'SELL' ? '📉 卖出' : '⏸ 观望';
+      signalBadge.innerHTML = `
+        <span class="pulse-ring ${ringCls}"></span>
+        <span class="signal-indicator ${signalCls}">${signalEmoji}</span>
+      `;
+      document.getElementById('ai-signal-score').innerHTML = `
+        <span>评分: <b class="text-white">${currentSignal.score}</b></span>
+        <span>置信度: <b class="${currentSignal.confidence > 0.6 ? 'text-[#00d4aa]' : currentSignal.confidence > 0.3 ? 'text-[#f0b90b]' : 'text-[#f04770]'}">${(currentSignal.confidence * 100).toFixed(0)}%</b></span>
+      `;
+      document.getElementById('ai-signal-time').textContent = `风险: ${currentSignal.risk_level}`;
+      document.getElementById('ai-signal-reason').textContent = currentSignal.reasons?.join('；') || '综合技术指标分析中...';
+    } else {
+      document.getElementById('ai-signal-indicator').innerHTML = `
+        <span class="pulse-ring hold-ring"></span>
+        <span class="signal-indicator signal-hold">⏸ 观望</span>
+      `;
+      document.getElementById('ai-signal-score').innerHTML = '<span>评分: <b class="text-white">--</b></span><span>置信度: <b>--</b></span>';
+      document.getElementById('ai-signal-reason').textContent = '等待AI信号更新...';
+    }
+
+    // ── ML Consensus ──
+    const mlForSymbol = mlData.insights?.find(i => i.symbol === tradeSymbol);
+    if (mlForSymbol) {
+      document.getElementById('ai-ml-consensus').innerHTML = `
+        <div class="flex justify-between text-xs">
+          <span class="text-[#8b949e]">ALSTM</span>
+          <span class="font-mono ${mlForSymbol.direction === 'BUY' ? 'text-[#00d4aa]' : mlForSymbol.direction === 'SELL' ? 'text-[#f04770]' : 'text-[#8b949e]'}">${mlForSymbol.strength}% ${mlForSymbol.direction}</span>
+        </div>
+        <div class="flex justify-between text-xs">
+          <span class="text-[#8b949e]">LightGBM</span>
+          <span class="font-mono" id="ai-lgbm-val">${mlForSymbol.consensus}% ${mlForSymbol.direction === 'HOLD' ? 'HOLD' : (mlForSymbol.direction === 'BUY' ? 'BUY' : 'SELL')}</span>
+        </div>
+        <div class="flex justify-between text-xs">
+          <span class="text-[#8b949e]">Transformer</span>
+          <span class="font-mono" id="ai-trans-val">${mlForSymbol.divergence}% ${mlForSymbol.direction}</span>
+        </div>
+        <div class="confidence-bar-track mt-1">
+          <div id="ai-confidence-bar" class="confidence-bar-fill ${mlForSymbol.confidence >= 65 ? 'high' : mlForSymbol.confidence >= 35 ? 'medium' : 'low'}" style="width:${mlForSymbol.confidence}%"></div>
+        </div>
+        <p class="text-[10px] text-[#484f58] text-right">综合置信度 <span id="ai-confidence-pct" class="font-mono">${mlForSymbol.confidence}%</span></p>
+        <p class="text-[10px] text-[#8b949e] mt-1 leading-relaxed">${mlForSymbol.reasoning}</p>
+      `;
+    }
+
+    // ── Last AI Action ──
+    // Use most recent trade from the trades endpoint
+    try {
+      const tRes = await fetch(`${API}/trades?limit=1`);
+      const tData = await tRes.json();
+      if (tData.trades.length > 0) {
+        const lastTrade = tData.trades[0];
+        const tTime = new Date(lastTrade.time);
+        const ts = tTime.toLocaleString('zh-CN', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'});
+        document.getElementById('ai-last-action').innerHTML = `
+          <div class="flex items-center gap-2 mb-1">
+            <span class="${lastTrade.side === 'buy' ? 'badge-buy' : 'badge-sell'} text-[10px]">${lastTrade.side === 'buy' ? '买入' : '卖出'}</span>
+            <span class="font-medium">${lastTrade.name || lastTrade.symbol}</span>
+            <span class="text-[#484f58]">${ts}</span>
+          </div>
+          <p class="text-[11px]">
+            <span class="font-mono">x${lastTrade.quantity} @ ¥${lastTrade.price.toLocaleString()}</span>
+            <span class="text-[#484f58] ml-1">│ ¥${lastTrade.amount.toLocaleString()}</span>
+          </p>
+          <p class="text-[10px] text-[#484f58] mt-0.5 truncate">理由: ${lastTrade.reason}</p>
+        `;
+      }
+    } catch(e) {}
+
+    // ── Risk Status ──
+    const score = riskData.survival_score || 100;
+    const scoreEl = document.getElementById('ai-risk-score');
+    scoreEl.textContent = `${score.toFixed(0)}/100`;
+    scoreEl.className = `font-bold ${score > 60 ? 'text-[#00d4aa]' : score > 30 ? 'text-[#f0b90b]' : 'text-[#f04770]'}`;
+    const alerts = riskData.alerts || [];
+    const warnings = riskData.warnings || [];
+    const allAlerts = [...alerts, ...warnings];
+    document.getElementById('ai-risk-alerts').innerHTML = allAlerts.length > 0
+      ? allAlerts.slice(0, 3).map(a => `⚠️ ${typeof a === 'string' ? a : a.message || JSON.stringify(a)}`).join('<br>')
+      : '✅ 无风控警报';
+
+  } catch(e) { console.error('AI decision load error:', e); }
+}
+
+// ── Strategy Management ──
+
+async function loadStrategyPage() {
+  // Load strategy cards for page 2 (策略管理)
+  const grid = document.getElementById('strategy-page-grid');
+  if (!grid) return;
+
+  try {
+    const res = await fetch(`${API}/strategies`);
+    const d = await res.json();
+
+    // Populate global cache for delete modal lookup
+    if (d.strategies) {
+      d.strategies.forEach(s => { _strategiesCache[s.id] = s; });
+    }
+
+    if (d.strategies.length === 0) {
+      grid.innerHTML = '<div class="p-6 text-center text-[#8b949e] text-sm col-span-full">📭 暂无AI策略</div>';
+      return;
+    }
+
+    // Also update the backtest strategy selector
+    const btSelect = document.getElementById('bt-strategy-select');
+    if (btSelect) {
+      btSelect.innerHTML = d.strategies.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+    }
+
+    grid.innerHTML = d.strategies.map(s => {
+      const statusLabel = s.status === 'running' ? '🟢 运行中' : s.status === 'stopped' ? '⏸ 已暂停' : '🔴 异常';
+      const statusBadge = s.status === 'running' ? 'badge-info' : 'badge-hold';
+      return `
+      <div class="card ${s.status === 'running' ? 'border-[#00d4aa]/30' : ''}">
+        <div class="flex items-center justify-between mb-3">
+          <span class="${statusBadge}">${statusLabel}</span>
+          <span class="text-xs text-[#8b949e]">${s.version}</span>
+        </div>
+        <h3 class="font-bold text-white mb-1">${s.name}</h3>
+        <p class="text-xs text-[#8b949e] mb-3 leading-relaxed">${s.logic_explanation ? s.logic_explanation.slice(0, 100) + '…' : s.description || ''}</p>
+        <div class="grid grid-cols-4 gap-1.5 text-center text-xs mb-3">
+          <div class="bg-[#0d1117] rounded-lg p-1.5">
+            <p class="text-[#484f58] text-[10px]">Sharpe</p>
+            <p class="font-bold ${s.sharpe >= 1.5 ? 'text-[#00d4aa]' : 'text-white'}">${s.sharpe.toFixed(2)}</p>
+          </div>
+          <div class="bg-[#0d1117] rounded-lg p-1.5">
+            <p class="text-[#484f58] text-[10px]">胜率</p>
+            <p class="font-bold text-white">${s.win_rate.toFixed(0)}%</p>
+          </div>
+          <div class="bg-[#0d1117] rounded-lg p-1.5">
+            <p class="text-[#484f58] text-[10px]">最大回撤</p>
+            <p class="font-bold ${s.max_drawdown >= -8 ? 'text-[#f0b90b]' : 'text-[#f04770]'}">${s.max_drawdown.toFixed(1)}%</p>
+          </div>
+          <div class="bg-[#0d1117] rounded-lg p-1.5">
+            <p class="text-[#484f58] text-[10px]">年化</p>
+            <p class="font-bold ${s.annual_return >= 20 ? 'text-[#00d4aa]' : 'text-white'}">${s.annual_return.toFixed(1)}%</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-1 mb-3">
+          ${s.symbols.map(sym => `<span class="param-tag">${sym.replace('/USDT', '')}</span>`).join('')}
+        </div>
+        <div class="flex gap-2">
+          <button onclick="${isAdminAuthenticated() ? `editStrategy('${s.id}')` : 'requireAdmin()'}" class="btn-outline btn-sm ${isAdminAuthenticated() ? '' : 'btn-locked'}" style="flex:0.6">✏️ 编辑</button>
+          ${s.status === 'running'
+            ? `<button onclick="${isAdminAuthenticated() ? `toggleStrategy('${s.id}')` : 'requireAdmin()'}" class="btn-danger btn-sm flex-1 ${isAdminAuthenticated() ? '' : 'btn-locked'}">⏸ 停止</button>`
+            : `<button onclick="${isAdminAuthenticated() ? `toggleStrategy('${s.id}')` : 'requireAdmin()'}" class="btn-accent btn-sm flex-1 ${isAdminAuthenticated() ? '' : 'btn-locked'}">▶ 启动</button>`
+          }
+          <button onclick="${isAdminAuthenticated() ? `deleteStrategy('${s.id}', '${s.name.replace(/'/g, "\\'")}')` : 'requireAdmin()'}" class="btn-danger btn-sm ${isAdminAuthenticated() ? '' : 'btn-locked'}" style="flex:0.5" aria-label="删除策略 ${s.name}">🗑</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    console.error('Strategy page load error:', e);
+  }
+}
+
+async function loadStrategies() {
+  try {
+    const res = await fetch(`${API}/strategies`);
+    const d = await res.json();
+    const strategies = d.strategies;
+
+    // Populate global cache for delete modal lookup
+    if (strategies) {
+      strategies.forEach(s => { _strategiesCache[s.id] = s; });
+    }
+
+    const grid = document.getElementById('strategy-cards-grid');
+    const summaryEl = document.getElementById('strat-summary');
+    if (summaryEl) summaryEl.textContent = `共 ${d.count} 个策略 · ${d.running_count} 个运行中`;
+
+    if (d.strategies.length === 0) {
+      grid.innerHTML = '<div class="p-6 text-center text-[#8b949e] text-sm col-span-full">📭 暂无AI策略</div>';
+      return;
+    }
+
+    grid.innerHTML = d.strategies.map(s => {
+      const statusLabel = s.status === 'running' ? '🟢 运行中' : s.status === 'stopped' ? '⏸ 已暂停' : '🔴 异常';
+      const statusCls = s.status === 'running' ? '' : 'stopped';
+      return `
+      <div class="strategy-card ${s.status}">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="status-dot ${s.status}"></span>
+            <span class="text-xs font-medium text-[#e6edf3]">${statusLabel}</span>
+          </div>
+          <span class="text-[10px] text-[#484f58]">${s.version}</span>
+        </div>
+
+        <!-- Name & Desc -->
+        <h3 class="font-bold text-white text-sm mb-1">${s.name}</h3>
+        <p class="text-xs text-[#8b949e] mb-3 leading-relaxed">${s.description}</p>
+
+        <!-- Market Scope -->
+        <div class="flex flex-wrap gap-1 mb-3">
+          ${s.symbols.map(sym => `<span class="param-tag">${sym.replace('/USDT','')}</span>`).join('')}
+        </div>
+
+        <!-- Performance Grid -->
+        <div class="grid grid-cols-4 gap-1.5 text-center text-xs mb-3">
+          <div class="bg-[#0d1117] rounded-md p-1.5">
+            <p class="text-[#484f58] text-[10px]">Sharpe</p>
+            <p class="font-bold ${s.sharpe >= 1.5 ? 'text-[#00d4aa]' : 'text-white'}">${s.sharpe.toFixed(2)}</p>
+          </div>
+          <div class="bg-[#0d1117] rounded-md p-1.5">
+            <p class="text-[#484f58] text-[10px]">胜率</p>
+            <p class="font-bold text-white">${s.win_rate.toFixed(0)}%</p>
+          </div>
+          <div class="bg-[#0d1117] rounded-md p-1.5">
+            <p class="text-[#484f58] text-[10px]">年化</p>
+            <p class="font-bold ${s.annual_return >= 20 ? 'text-[#00d4aa]' : 'text-white'}">${s.annual_return.toFixed(1)}%</p>
+          </div>
+          <div class="bg-[#0d1117] rounded-md p-1.5">
+            <p class="text-[#484f58] text-[10px]">今日信号</p>
+            <p class="font-bold ${s.signals_today > 0 ? 'text-[#3b82f6]' : 'text-[#8b949e]'}">${s.signals_today}</p>
+          </div>
+        </div>
+
+        <!-- Key Parameters -->
+        <div class="mb-3">
+          <p class="text-[10px] text-[#484f58] mb-1.5 uppercase tracking-wider">核心参数</p>
+          <div class="flex flex-wrap gap-1">
+            ${(Array.isArray(s.parameters)
+              ? s.parameters.slice(0, 4).map(p => `<span class="param-tag"><span class="param-tag-key">${p.label}:</span> ${p.value}</span>`).join('')
+              : Object.entries(s.parameters).slice(0, 4).map(([k, v]) => `<span class="param-tag"><span class="param-tag-key">${k}:</span> ${typeof v === 'object' ? JSON.stringify(v) : v}</span>`).join('')
+            )}
+            ${(Array.isArray(s.parameters) ? s.parameters.length : Object.keys(s.parameters).length) > 4
+              ? `<span class="param-tag">+${(Array.isArray(s.parameters) ? s.parameters.length : Object.keys(s.parameters).length) - 4}更多</span>` : ''}
+          </div>
+        </div>
+
+        <!-- Last Signal -->
+        ${s.last_signal ? `
+        <div class="bg-[#0d1117] rounded-md p-2 mb-3">
+          <p class="text-[10px] text-[#484f58] mb-0.5">最近信号</p>
+          <p class="text-xs text-[#e6edf3]">${s.last_signal}</p>
+          <p class="text-[10px] text-[#484f58] mt-0.5">${new Date(s.last_signal_at).toLocaleString('zh-CN', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'})}</p>
+        </div>` : `
+        <div class="bg-[#0d1117] rounded-md p-2 mb-3">
+          <p class="text-[10px] text-[#484f58]">暂无信号 — 策略已暂停</p>
+        </div>`}
+
+        <!-- Actions -->
+        <div class="flex gap-2">
+          <button onclick="${isAdminAuthenticated() ? `editStrategy('${s.id}')` : 'requireAdmin()'}"
+            class="btn-outline btn-sm ${isAdminAuthenticated() ? '' : 'btn-locked'}" style="flex:0.6">
+            ✏️ 编辑
+          </button>
+          <button onclick="${isAdminAuthenticated() ? `toggleStrategy('${s.id}')` : 'requireAdmin()'}"
+            class="${s.status === 'running' ? 'btn-outline' : 'btn-accent'} btn-sm flex-1 ${isAdminAuthenticated() ? '' : 'btn-locked'}">
+            ${s.status === 'running' ? '⏸ 暂停' : '▶ 启动'}
+          </button>
+          <button onclick="${isAdminAuthenticated() ? `deleteStrategy('${s.id}', '${s.name}')` : 'requireAdmin()'}"
+            class="btn-danger btn-sm flex-1 ${isAdminAuthenticated() ? '' : 'btn-locked'}">
+            🗑 删除
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('Strategies load error:', e); }
+}
+
+async function deleteStrategy(strategyId, strategyName) {
+  // Use dedicated delete modal with full strategy info from cache
+  const cached = _strategiesCache[strategyId];
+  if (cached) {
+    showDeleteStrategyModal(strategyId, cached);
+  } else {
+    // Fallback: minimal strategy data
+    showDeleteStrategyModal(strategyId, { id: strategyId, name: strategyName });
+  }
+}
+
+async function toggleStrategy(strategyId) {
+  if (!requireAdmin()) return;
+  try {
+    const res = await fetch(`${API}/strategies/${encodeURIComponent(strategyId)}/toggle`, {
+      method: 'POST',
+      headers: getAdminHeaders(false),
+    });
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      showToast(data.message, 'success');
+      loadStrategies();
+    } else if (res.status === 401) {
+      showToast('🔒 权限不足: ' + (data.detail || '需要管理员权限'), 'error');
+      handleAuthExpired();
+    } else {
+      showToast(`操作失败: ${data.detail || '未知错误'}`, 'error');
+    }
+  } catch(e) {
+    showToast('请求失败，请检查网络连接', 'error');
+  }
+}
+
+// ── Strategy Edit Modal ──
+
+let _currentEditStrategyId = null;
+
+async function editStrategy(strategyId) {
+  try {
+    const res = await fetch(`${API}/strategies/${encodeURIComponent(strategyId)}`);
+    const d = await res.json();
+    const s = d.strategy;
+
+    _currentEditStrategyId = strategyId;
+
+    // Header
+    document.getElementById('strat-edit-name').textContent = s.name;
+    document.getElementById('strat-edit-version').textContent = `v${s.version} · ${s.market} · ${s.status === 'running' ? '🟢 运行中' : '⏸ 已暂停'}`;
+
+    // Logic tab
+    document.getElementById('strat-logic-explanation').textContent = s.logic_explanation;
+    document.getElementById('strat-entry-conditions').textContent = s.entry_conditions;
+    document.getElementById('strat-exit-conditions').textContent = s.exit_conditions;
+    document.getElementById('strat-position-sizing').textContent = s.position_sizing;
+    document.getElementById('strat-risk-management').textContent = s.risk_management;
+
+    // Full description tab
+    document.getElementById('strat-describe-text').textContent = d.description_text;
+
+    // Parameters tab
+    const paramsList = document.getElementById('strat-params-list');
+    if (Array.isArray(s.parameters)) {
+      paramsList.innerHTML = s.parameters.map((p, i) => {
+        const isDangerous = ['stop_loss_pct', 'max_drawdown_limit'].includes(p.key);
+        const inputAttrs = p.type === 'select' ? '' : `min="${p.min_val || ''}" max="${p.max_val || ''}" step="${p.step || ''}"`;
+        const inputField = p.type === 'select'
+          ? `<select class="strat-param-select" data-param-key="${p.key}">${(p.options || []).map(o => `<option value="${o}" ${o === p.value ? 'selected' : ''}>${o}</option>`).join('')}</select>`
+          : `<input class="strat-param-input" type="${p.type === 'int' ? 'number' : p.type === 'float' ? 'number' : 'text'}" value="${p.value}" data-param-key="${p.key}" ${inputAttrs}>`;
+
+        return `
+        <div class="strat-param-row">
+          ${inputField}
+          <div class="strat-param-info">
+            <div class="strat-param-label">${isDangerous ? '⚠️ ' : ''}${p.label} <span class="strat-param-key">(${p.key})</span></div>
+            <div class="strat-param-desc">${p.description}</div>
+            ${p.min_val !== null && p.max_val !== null ? `<div class="text-[10px] text-[#484f58] mt-1">范围: ${p.min_val} ~ ${p.max_val}${p.step ? ` · 步长: ${p.step}` : ''}</div>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+    } else {
+      // Fallback for old format
+      paramsList.innerHTML = Object.entries(s.parameters).map(([k, v]) => `
+        <div class="strat-param-row">
+          <input class="strat-param-input" type="text" value="${v}" data-param-key="${k}">
+          <div class="strat-param-info">
+            <div class="strat-param-label">${k}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Show modal
+    document.getElementById('strat-edit-modal').classList.add('show');
+    // Reset to logic tab
+    switchStratTab('logic');
+
+  } catch(e) {
+    console.error('Edit strategy error:', e);
+    showToast('加载策略详情失败', 'error');
+  }
+}
+
+async function saveStrategyParams() {
+  if (!_currentEditStrategyId) return;
+
+  const saveBtn = document.getElementById('strat-save-btn');
+  saveBtn.disabled = true;
+  saveBtn.innerHTML = '<span class="loading-spinner"></span> 保存中...';
+
+  // Collect parameter values
+  const updates = {};
+  const inputs = document.querySelectorAll('#strat-params-list [data-param-key]');
+  inputs.forEach(el => {
+    const key = el.dataset.paramKey;
+    let value = el.value;
+    // Try to parse numbers
+    if (el.tagName === 'INPUT' && el.type === 'number') {
+      value = value.includes('.') ? parseFloat(value) : parseInt(value, 10);
+    }
+    updates[key] = value;
+  });
+
+  try {
+    const res = await fetch(`${API}/strategies/${encodeURIComponent(_currentEditStrategyId)}`, {
+      method: 'PUT',
+      headers: getAdminHeaders(true),
+      body: JSON.stringify({ updates }),
+    });
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      showToast(`✅ ${data.message}`, 'success');
+      closeStratEditModal();
+      loadStrategies();
+    } else if (res.status === 401) {
+      showToast('🔒 权限不足: ' + (data.detail || '需要管理员权限'), 'error');
+      handleAuthExpired();
+    } else {
+      showToast(`保存失败: ${data.detail || data.message || '未知错误'}`, 'error');
+    }
+  } catch(e) {
+    showToast('保存请求失败，请检查网络连接', 'error');
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = '💾 保存修改';
+  }
+}
+
+function closeStratEditModal() {
+  document.getElementById('strat-edit-modal').classList.remove('show');
+  _currentEditStrategyId = null;
+}
+
+function switchStratTab(tabName) {
+  // Update tab buttons
+  document.querySelectorAll('#strat-edit-modal .tab-nav-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabName);
+  });
+  // Show/hide tab content
+  document.querySelectorAll('#strat-edit-modal .strat-tab-content').forEach(tab => {
+    tab.style.display = 'none';
+  });
+  const target = document.getElementById('strat-tab-' + tabName);
+  if (target) target.style.display = '';
+}
+
+// ── Confirmation Modal ──
+
+let _modalCallback = null;
+
+function showConfirmModal(title, message, onConfirm) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-message').textContent = message;
+  document.getElementById('modal-detail').textContent = '';
+  document.getElementById('modal-confirm-btn').textContent = '确认操作';
+  document.getElementById('confirm-modal').classList.add('show');
+  _modalCallback = onConfirm;
+  // Focus confirm button
+  setTimeout(() => document.getElementById('modal-confirm-btn').focus(), 100);
+}
+
+function closeModal() {
+  document.getElementById('confirm-modal').classList.remove('show');
+  _modalCallback = null;
+}
+
+// Wire up modal confirm button and strategy edit modal
+document.addEventListener('DOMContentLoaded', () => {
+  // ── Init admin auth state ──
+  initAdminAuth();
+
+  const confirmBtn = document.getElementById('modal-confirm-btn');
+  if (confirmBtn) {
+    confirmBtn.addEventListener('click', async () => {
+      if (_modalCallback) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<span class="loading-spinner"></span> 处理中...';
+        try {
+          await _modalCallback();
+        } catch(e) {
+          console.error('Modal callback error:', e);
+        }
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = '确认操作';
+        closeModal();
+      }
+    });
+  }
+  // Close confirm modal on overlay click
+  document.getElementById('confirm-modal')?.addEventListener('click', (e) => {
+    if (e.target === document.getElementById('confirm-modal')) closeModal();
+  });
+  // Close strategy edit modal on overlay click
+  document.getElementById('strat-edit-modal')?.addEventListener('click', (e) => {
+    if (e.target === document.getElementById('strat-edit-modal')) closeStratEditModal();
+  });
+  // ── Admin Login Modal: overlay click ──
+  document.getElementById('admin-login-modal')?.addEventListener('click', (e) => {
+    if (e.target === document.getElementById('admin-login-modal')) closeAdminLoginModal();
+  });
+
+  // ── Admin Login Modal: Enter key to submit ──
+  document.getElementById('admin-token-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      verifyAdminLogin();
+    }
+  });
+
+  // Close modals on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      // Close admin login modal first
+      const adminModal = document.getElementById('admin-login-modal');
+      if (adminModal && adminModal.classList.contains('show')) {
+        closeAdminLoginModal();
+        return;
+      }
+      // Close delete modal next (highest priority — danger action)
+      const delModal = document.getElementById('delete-strat-modal');
+      if (delModal && delModal.classList.contains('show')) {
+        closeDeleteStrategyModal();
+        return;
+      }
+      // Close strategy edit modal next
+      const stratModal = document.getElementById('strat-edit-modal');
+      if (stratModal && stratModal.classList.contains('show')) {
+        closeStratEditModal();
+      } else {
+        closeModal();
+      }
+    }
+  });
+
+  // ── Delete Strategy Modal: Confirm Button ──
+  const delConfirmBtn = document.getElementById('delete-confirm-btn');
+  if (delConfirmBtn) {
+    delConfirmBtn.addEventListener('click', confirmDeleteStrategy);
+  }
+
+  // ── Delete Strategy Modal: Verify Input (real-time check) ──
+  const verifyInput = document.getElementById('delete-verify-input');
+  if (verifyInput) {
+    verifyInput.addEventListener('input', checkVerifyInput);
+    // Enter key triggers delete when name matches
+    verifyInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const btn = document.getElementById('delete-confirm-btn');
+        if (btn && !btn.disabled) {
+          e.preventDefault();
+          confirmDeleteStrategy();
+        }
+      }
+    });
+  }
+
+  // ── Delete Strategy Modal: Overlay Click ──
+  document.getElementById('delete-strat-modal')?.addEventListener('click', (e) => {
+    if (e.target === document.getElementById('delete-strat-modal')) closeDeleteStrategyModal();
+  });
+});
+
+// ═══════════════ DELETE STRATEGY MODAL ═══════════════
+
+/**
+ * Show the delete strategy confirmation modal with full strategy info,
+ * risk alerts, and name verification.
+ * @param {string} strategyId
+ * @param {object}  strategyData — full strategy object from cache or minimal fallback
+ */
+function showDeleteStrategyModal(strategyId, strategyData) {
+  if (!strategyData) {
+    strategyData = _strategiesCache[strategyId] || { id: strategyId, name: strategyId };
+  }
+
+  const name = strategyData.name || strategyId;
+  const status = strategyData.status || 'stopped';
+  const symbols = strategyData.symbols || [];
+  const sharpe = parseFloat(strategyData.sharpe || 0);
+  const winRate = parseFloat(strategyData.win_rate || 0);
+  const annualReturn = parseFloat(strategyData.annual_return || 0);
+  const totalTrades = parseInt(strategyData.total_trades || 0);
+  const version = strategyData.version || '--';
+  const logicExplanation = (strategyData.logic_explanation || '').slice(0, 160);
+
+  // Status display
+  const statusLabels = { running: '🟢 运行中', stopped: '⏸ 已暂停', error: '🔴 异常' };
+  const statusLabel = statusLabels[status] || status;
+  const statusCls = 'status-' + status;
+
+  // Build info grid
+  document.getElementById('delete-strat-info').innerHTML = `
+    <div class="danger-info-item">
+      <p class="danger-info-label">策略名称</p>
+      <p class="danger-info-value text-white font-bold" style="font-family:inherit;">${_escHtml(name)}</p>
+    </div>
+    <div class="danger-info-item">
+      <p class="danger-info-label">当前状态</p>
+      <p class="danger-info-value ${statusCls}">${statusLabel}</p>
+    </div>
+    <div class="danger-info-item">
+      <p class="danger-info-label">版本</p>
+      <p class="danger-info-value" style="font-size:11px;">${_escHtml(version)}</p>
+    </div>
+    <div class="danger-info-item">
+      <p class="danger-info-label">交易标的</p>
+      <p class="danger-info-value" style="font-size:11px;">
+        ${symbols.length ? _escHtml(symbols.slice(0, 4).join(', ')) : '无'}
+        ${symbols.length > 4 ? ` +${symbols.length - 4}` : ''}
+      </p>
+    </div>
+    <div class="danger-info-item">
+      <p class="danger-info-label">Sharpe / 胜率</p>
+      <p class="danger-info-value">
+        <span style="color:${sharpe >= 1.5 ? '#00d4aa' : '#e6edf3'}">${sharpe.toFixed(2)}</span>
+        <span class="text-[#484f58]"> / </span>
+        <span>${winRate.toFixed(0)}%</span>
+      </p>
+    </div>
+    <div class="danger-info-item">
+      <p class="danger-info-label">年化 / 交易笔数</p>
+      <p class="danger-info-value">
+        <span style="color:${annualReturn >= 20 ? '#00d4aa' : annualReturn < 0 ? '#f04770' : '#e6edf3'}">${annualReturn >= 0 ? '+' : ''}${annualReturn.toFixed(1)}%</span>
+        <span class="text-[#484f58]"> / </span>
+        <span>${totalTrades}笔</span>
+      </p>
+    </div>
+  `;
+
+  // Build risk alerts
+  const risks = [];
+
+  if (status === 'running') {
+    risks.push({
+      icon: '🔴', level: 'critical',
+      text: '策略当前<strong>正在运行中</strong>。删除将立即停止所有该策略的交易活动，如有未平仓持仓可能变为孤立持仓。请先确认是否需要手动平仓。',
+    });
+  }
+  risks.push({
+    icon: '⚠️', level: 'warning',
+    text: '删除后该策略的<strong>历史交易数据、回测记录和所有配置参数</strong>将被永久清除。此操作不可通过常规方式恢复。',
+  });
+  if (totalTrades > 0) {
+    risks.push({
+      icon: '📊', level: 'warning',
+      text: `该策略已累计完成 <strong>${totalTrades} 笔交易</strong>，年化收益 ${annualReturn >= 0 ? '+' : ''}${annualReturn.toFixed(1)}%。删除将丢失全部业绩记录和AI决策日志。`,
+    });
+  }
+  if (logicExplanation) {
+    risks.push({
+      icon: '🧠', level: 'info',
+      text: `策略逻辑：${logicExplanation}`,
+    });
+  }
+  risks.push({
+    icon: '💡', level: 'info',
+    text: '建议：删除前可先<strong>暂停策略</strong>观察一段时间，确认无依赖后再执行删除。删除后提供 3 秒撤销窗口。',
+  });
+
+  document.getElementById('delete-strat-risks').innerHTML = risks.map(r => `
+    <div class="risk-alert-item ${r.level}" role="alert">
+      <span class="risk-alert-icon" aria-hidden="true">${r.icon}</span>
+      <span>${r.text}</span>
+    </div>
+  `).join('');
+
+  // Positions warning: check dashboard data for related positions
+  const posWarn = document.getElementById('delete-positions-warn');
+  try {
+    // Check if any open positions might relate to this strategy's symbols
+    const posRows = document.querySelectorAll('#dash-positions-tbody tr');
+    let relatedPositions = 0;
+    posRows.forEach(row => {
+      const firstCell = row.querySelector('td:first-child');
+      if (firstCell && symbols.some(s => {
+        const symShort = s.replace('/USDT', '').replace('/USDC', '').replace('/BUSD', '');
+        return firstCell.textContent.includes(symShort);
+      })) {
+        relatedPositions++;
+      }
+    });
+    if (relatedPositions > 0) {
+      document.getElementById('delete-positions-text').textContent =
+        `⚠️ 检测到该策略关联了约 ${relatedPositions} 个潜在持仓。删除后这些持仓将变为「孤立持仓」，需手动处理。`;
+      posWarn.style.display = 'block';
+    } else {
+      posWarn.style.display = 'none';
+    }
+  } catch(e) {
+    posWarn.style.display = 'none';
+  }
+
+  // Set verify name
+  document.getElementById('delete-verify-name').textContent = name;
+
+  // Reset verify input
+  const verifyInput = document.getElementById('delete-verify-input');
+  verifyInput.value = '';
+  verifyInput.className = 'verify-input';
+  document.getElementById('delete-verify-hint').textContent = '输入完整名称以解锁删除按钮';
+  document.getElementById('delete-verify-hint').className = 'verify-hint';
+  document.getElementById('delete-verify-hint').style.color = '';
+
+  // Reset confirm button
+  const confirmBtn = document.getElementById('delete-confirm-btn');
+  confirmBtn.disabled = true;
+  confirmBtn.style.opacity = '0.4';
+  confirmBtn.style.cursor = 'not-allowed';
+  confirmBtn._origHTML = '🗑 确认删除';
+
+  // Store current strategy data for the confirm handler
+  document.getElementById('delete-strat-modal')._strategyId = strategyId;
+  document.getElementById('delete-strat-modal')._strategyData = strategyData;
+
+  // Show modal
+  document.getElementById('delete-strat-modal').classList.add('show');
+
+  // Focus verify input after animation
+  setTimeout(() => {
+    const inp = document.getElementById('delete-verify-input');
+    if (inp) inp.focus();
+  }, 180);
+}
+
+/** Close the delete strategy modal and reset state */
+function closeDeleteStrategyModal() {
+  document.getElementById('delete-strat-modal').classList.remove('show');
+  // Clear verify input state
+  const inp = document.getElementById('delete-verify-input');
+  if (inp) { inp.value = ''; inp.className = 'verify-input'; }
+  const hint = document.getElementById('delete-verify-hint');
+  if (hint) { hint.textContent = '输入完整名称以解锁删除按钮'; hint.className = 'verify-hint'; hint.style.color = ''; }
+  const btn = document.getElementById('delete-confirm-btn');
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.4'; btn.style.cursor = 'not-allowed'; }
+}
+
+/** Real-time verification: check if typed name matches expected strategy name */
+function checkVerifyInput() {
+  const input = document.getElementById('delete-verify-input');
+  const expectedName = document.getElementById('delete-verify-name').textContent;
+  const confirmBtn = document.getElementById('delete-confirm-btn');
+  const hint = document.getElementById('delete-verify-hint');
+
+  const typed = input.value.trim();
+
+  if (!typed) {
+    input.className = 'verify-input';
+    hint.textContent = '输入完整名称以解锁删除按钮';
+    hint.className = 'verify-hint';
+    hint.style.color = '';
+    confirmBtn.disabled = true;
+    confirmBtn.style.opacity = '0.4';
+    confirmBtn.style.cursor = 'not-allowed';
+  } else if (typed === expectedName) {
+    input.className = 'verify-input match';
+    hint.textContent = '✓ 名称匹配 — 可以安全删除';
+    hint.className = 'verify-hint';
+    hint.style.color = '#00d4aa';
+    confirmBtn.disabled = false;
+    confirmBtn.style.opacity = '1';
+    confirmBtn.style.cursor = 'pointer';
+  } else {
+    input.className = 'verify-input mismatch';
+    hint.textContent = '✗ 名称不匹配，请核对后重新输入';
+    hint.className = 'verify-hint error';
+    confirmBtn.disabled = true;
+    confirmBtn.style.opacity = '0.4';
+    confirmBtn.style.cursor = 'not-allowed';
+  }
+}
+
+/** Perform the actual API deletion after verification */
+async function confirmDeleteStrategy() {
+  const modal = document.getElementById('delete-strat-modal');
+  const strategyId = modal._strategyId;
+  const strategyData = modal._strategyData || {};
+  const confirmBtn = document.getElementById('delete-confirm-btn');
+
+  // Double-check verification
+  const typed = document.getElementById('delete-verify-input').value.trim();
+  const expected = document.getElementById('delete-verify-name').textContent;
+  if (typed !== expected) {
+    showToast('名称验证未通过，请重新输入', 'error');
+    return;
+  }
+
+  // Save original button state and show loading
+  confirmBtn._origHTML = confirmBtn.innerHTML;
+  confirmBtn.disabled = true;
+  confirmBtn.innerHTML = '<span class="loading-spinner"></span> 删除中...';
+  confirmBtn.style.cursor = 'wait';
+
+  try {
+    const res = await fetch(`${API}/strategies/${encodeURIComponent(strategyId)}`, {
+      method: 'DELETE',
+      headers: getAdminHeaders(false),
+    });
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      // Success — close modal
+      closeDeleteStrategyModal();
+
+      // Store backup for undo
+      _deletedStrategyBackup = { ...strategyData, _deletedAt: Date.now() };
+
+      // Show undo toast
+      showUndoToast(strategyData);
+
+      // Refresh all UIs
+      loadDashboardData();
+      if (typeof loadStrategies === 'function') loadStrategies();
+      if (typeof loadStrategyPage === 'function') loadStrategyPage();
+      if (typeof refreshAll === 'function') refreshAll();
+
+      // Remove from cache
+      delete _strategiesCache[strategyId];
+    } else if (res.status === 401) {
+      showToast('🔒 权限不足: ' + (data.detail || '需要管理员权限'), 'error');
+      closeDeleteStrategyModal();
+      handleAuthExpired();
+    } else {
+      showToast(`删除失败: ${data.detail || '未知错误'}`, 'error');
+      closeDeleteStrategyModal();
+    }
+  } catch (e) {
+    showToast('删除请求失败，请检查网络连接', 'error');
+    closeDeleteStrategyModal();
+  } finally {
+    // Restore button (though modal is closed)
+    confirmBtn.disabled = false;
+    confirmBtn.innerHTML = confirmBtn._origHTML || '🗑 确认删除';
+    confirmBtn.style.cursor = 'pointer';
+  }
+}
+
+/**
+ * Show toast notification with an "undo" button.
+ * Auto-dismisses after 3 seconds and clears the backup.
+ */
+function showUndoToast(strategyData) {
+  const container = document.getElementById('toast-container');
+  const name = strategyData?.name || '未知策略';
+
+  // Clear any existing undo timer / toast
+  if (_undoTimer) clearTimeout(_undoTimer);
+  const existing = container.querySelector('.undo-toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.className = 'toast warning undo-toast';
+  toast.setAttribute('role', 'alert');
+  toast.setAttribute('aria-live', 'polite');
+  toast.innerHTML = `
+    <span class="toast-icon" aria-hidden="true">🗑</span>
+    <span class="toast-msg">策略「<strong>${_escHtml(name)}</strong>」已删除</span>
+    <button class="undo-btn" onclick="undoDeleteStrategy()" aria-label="撤销删除策略">↩ 撤销</button>
+  `;
+  container.appendChild(toast);
+
+  // Auto-dismiss after 3 seconds
+  _undoTimer = setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity 0.25s';
+    setTimeout(() => {
+      toast.remove();
+      if (_deletedStrategyBackup) {
+        // Clear backup after toast expires (undo window closed)
+        _deletedStrategyBackup = null;
+      }
+    }, 250);
+  }, 3000);
+}
+
+/**
+ * Undo strategy deletion.
+ * Attempts API recreation; falls back to frontend simulation.
+ */
+async function undoDeleteStrategy() {
+  if (!_deletedStrategyBackup) {
+    showToast('撤销窗口已过期，无法恢复', 'warning');
+    return;
+  }
+
+  const backup = _deletedStrategyBackup;
+  _deletedStrategyBackup = null;
+
+  // Dismiss undo toast immediately
+  if (_undoTimer) { clearTimeout(_undoTimer); _undoTimer = null; }
+  const undoToasts = document.querySelectorAll('.undo-toast');
+  undoToasts.forEach(t => {
+    t.style.opacity = '0';
+    t.style.transition = 'opacity 0.15s';
+    setTimeout(() => t.remove(), 160);
+  });
+
+  // Try API restore
+  let restored = false;
+  try {
+    const res = await fetch(`${API}/strategies`, {
+      method: 'POST',
+      headers: getAdminHeaders(true),
+      body: JSON.stringify({
+        id: backup.id,
+        name: backup.name,
+        market: backup.market || 'crypto',
+        symbols: backup.symbols || ['BTC/USDT'],
+        status: 'stopped', // Restore as stopped for safety
+      }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      restored = true;
+    }
+  } catch (e) {
+    // API may not support recreation — continue with frontend simulation
+  }
+
+  if (restored) {
+    showToast(`策略「${_escHtml(backup.name)}」已成功恢复 ✅`, 'success');
+  } else {
+    // Frontend simulation: restore to cache
+    showToast(`策略「${_escHtml(backup.name)}」已恢复到列表（前端模拟，下次刷新可能丢失）`, 'warning');
+  }
+
+  // Restore to cache
+  _strategiesCache[backup.id] = { ...backup, status: 'stopped' };
+
+  // Refresh all UIs
+  loadDashboardData();
+  if (typeof loadStrategies === 'function') loadStrategies();
+  if (typeof loadStrategyPage === 'function') loadStrategyPage();
+  if (typeof refreshAll === 'function') refreshAll();
+}
+
+/** Safe HTML escaping utility */
+function _escHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ═══════════════ BACKTEST PAGE ═══════════════
+function initBtEquityChart() {
+  if (btEquityChart) return;
+  const el = document.getElementById('bt-equity-chart');
+  if (!el) return;
+  // LightweightCharts v4 has built-in ResizeObserver — creates fine even at 0 width
+  _createBtEquityChart(el);
+}
+
+function _createBtEquityChart(el) {
+  try {
+    btEquityChart = LightweightCharts.createChart(el, {
+      layout: { background: { color: '#141920' }, textColor: '#8b949e' },
+      grid: { vertLines: { color: '#1e2430' }, horzLines: { color: '#1e2430' } },
+      rightPriceScale: { borderColor: '#1e2430' },
+      timeScale: { borderColor: '#1e2430', timeVisible: true },
+      width: el.clientWidth || 800,
+      height: el.clientHeight || 280,
+    });
+    btEquityArea = btEquityChart.addAreaSeries({
+      lineColor: '#3b82f6', topColor: 'rgba(59,130,246,0.12)', bottomColor: 'rgba(59,130,246,0.01)', lineWidth: 2,
+    });
+  } catch(e) {
+    console.error('Failed to create backtest equity chart:', e);
+    document.getElementById('bt-chart-loader')?.classList.add('hidden');
+  }
+}
+
+function loadBacktestData() {
+  initBtEquityChart();
+
+  // Populate strategy selector dynamically — fetch if cache empty
+  (async () => {
+    const btStratSelect = document.getElementById('bt-page-strategy-select');
+    if (!btStratSelect) return;
+    if (Object.keys(_strategiesCache).length === 0) {
+      try {
+        const res = await fetch(`${API}/strategies`);
+        const d = await res.json();
+        if (d.strategies) {
+          d.strategies.forEach(s => { _strategiesCache[s.id] = s; });
+        }
+      } catch(e) {}
+    }
+    if (Object.keys(_strategiesCache).length > 0) {
+      btStratSelect.innerHTML = Object.values(_strategiesCache).map(s =>
+        `<option value="${s.id}">${s.name}</option>`
+      ).join('');
+    }
+  })();
+
+  // Load performance data from API
+  (async () => {
+    try {
+      const res = await fetch(`${API}/performance`);
+      const d = await res.json();
+      // Update performance cards
+      const cumRet = document.getElementById('bt-cum-return');
+      if (cumRet) cumRet.textContent = `${d.total_return_pct >= 0 ? '+' : ''}${d.total_return_pct?.toFixed(1) || '--'}%`;
+      const annRet = document.getElementById('bt-ann-return');
+      if (annRet) annRet.textContent = d.annualized_return_pct > 500 ? '数据积累中…' : `${d.annualized_return_pct >= 0 ? '+' : ''}${d.annualized_return_pct?.toFixed(1) || '--'}%`;
+      const sharpe = document.getElementById('bt-sharpe');
+      if (sharpe) sharpe.textContent = d.sharpe_ratio?.toFixed(2) || '--';
+      const maxDd = document.getElementById('bt-max-dd');
+      if (maxDd) maxDd.textContent = `-${d.max_drawdown_pct?.toFixed(1) || '--'}%`;
+      const winrate = document.getElementById('bt-winrate');
+      if (winrate) winrate.textContent = `${d.win_rate_pct?.toFixed(1) || '--'}%`;
+      const pf = document.getElementById('bt-profit-factor');
+      if (pf) pf.textContent = d.profit_factor >= 999 ? '∞' : d.profit_factor?.toFixed(2) || '--';
+      const calmar = document.getElementById('bt-calmar');
+      if (calmar) calmar.textContent = d.calmar_ratio?.toFixed(2) || '--';
+      const trades = document.getElementById('bt-total-trades');
+      if (trades) trades.textContent = d.total_trades || d.closed_trades || '--';
+    } catch(e) { /* keep static values on error */ }
+  })();
+
+  // Load real equity curve from API for chart
+  (async () => {
+    try {
+      const res = await fetch(`${API}/equity-curve`);
+      const d = await res.json();
+      document.getElementById('bt-chart-loader')?.classList.add('hidden');
+      if (d.equity_curve && d.equity_curve.length >= 2 && btEquityArea) {
+        // Deduplicate by timestamp (LightweightCharts requires unique times)
+        const seen = new Set();
+        const data = d.equity_curve
+          .map(p => ({ time: Math.floor(new Date(p.time).getTime() / 1000), value: p.value }))
+          .filter(p => { const ok = !seen.has(p.time); seen.add(p.time); return ok; });
+        if (data.length >= 2) btEquityArea.setData(data);
+      }
+    } catch(e) { document.getElementById('bt-chart-loader')?.classList.add('hidden'); console.error('BT equity load error:', e); }
+  })();
+
+  // Load real trades from API for trade analysis table
+  (async () => {
+    const tbody = document.getElementById('bt-trades-tbody');
+    tbody.innerHTML = '<tr><td colspan="8" class="p-6 text-center text-[#8b949e] text-sm"><span class="loading-spinner"></span> 加载交易记录中...</td></tr>';
+    try {
+      const res = await fetch(`${API}/trades?limit=50`);
+      const d = await res.json();
+      const trades = d.trades || [];
+      if (trades.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="p-6 text-center text-[#8b949e] text-sm">📭 暂无交易记录 — 执行模拟交易后将在此显示</td></tr>';
+        return;
+      }
+      tbody.innerHTML = trades.map(t => {
+        const pnlCls = (t.pnl || 0) >= 0 ? 'text-[#00d4aa]' : 'text-[#f04770]';
+        const isBuy = t.side === 'buy';
+        const pnlDisplay = t.side === 'sell' ? `${(t.pnl || 0) >= 0 ? '+' : ''}¥${Math.abs(t.pnl || 0).toLocaleString()}` : '--';
+        return `<tr>
+          <td class="text-xs text-[#8b949e] font-mono">${_ts(t.time).slice(0, 10)}</td>
+          <td class="text-sm font-medium">${t.name || t.symbol}</td>
+          <td>${isBuy ? '<span class="badge-buy text-[10px]">买入</span>' : '<span class="badge-sell text-[10px]">卖出</span>'}</td>
+          <td class="font-mono text-xs">¥${(t.price || 0).toLocaleString()}</td>
+          <td class="font-mono text-xs">${isBuy ? '--' : '¥' + ((t.price || 0) - (t.entry_price || 0)).toLocaleString()}</td>
+          <td class="font-mono text-xs ${pnlCls}">${pnlDisplay}</td>
+          <td class="text-xs">${t.duration || '--'}</td>
+          <td class="text-xs text-[#8b949e] max-w-[120px] truncate">${t.reason || t.strategy || '--'}</td>
+        </tr>`;
+      }).join('');
+    } catch(e) {
+      tbody.innerHTML = '<tr><td colspan="8" class="p-6 text-center text-[#8b949e] text-sm">⚠️ 数据加载失败，请检查网络</td></tr>';
+    }
+  })();
+}
+
+// ═══════════════ EXPORT FUNCTIONS ═══════════════
+function exportBacktestReport() {
+  showToast('📄 正在生成回测报告...', 'info');
+  // Collect visible data and download as JSON
+  (async () => {
+    try {
+      const [perfRes, tradesRes] = await Promise.all([
+        fetch(`${API}/performance`),
+        fetch(`${API}/trades?limit=100`),
+      ]);
+      const perf = await perfRes.json();
+      const trades = await tradesRes.json();
+      const report = {
+        title: 'Chase量化策略 · 回测报告',
+        exported_at: new Date().toISOString(),
+        performance: perf,
+        trades: trades.trades || [],
+      };
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `backtest-report-${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('✅ 回测报告已导出', 'success');
+    } catch(e) {
+      showToast('导出失败，请检查网络连接', 'error');
+    }
+  })();
+}
+
+function exportTradesCSV() {
+  showToast('📥 正在导出交易记录CSV...', 'info');
+  (async () => {
+    try {
+      const res = await fetch(`${API}/trades?limit=500`);
+      const d = await res.json();
+      const trades = d.trades || [];
+      if (trades.length === 0) {
+        showToast('⚠️ 暂无交易记录可导出', 'warning');
+        return;
+      }
+      // Build CSV
+      const headers = ['日期', '标的', '方向', '价格', '数量', '金额', '盈亏', '原因'];
+      const rows = trades.map(t => [
+        _ts(t.time),
+        t.name || t.symbol,
+        t.side === 'buy' ? '买入' : '卖出',
+        t.price || '',
+        t.quantity || '',
+        t.amount || '',
+        t.pnl || '',
+        (t.reason || '').replace(/,/g, '，'),
+      ]);
+      const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `trades-${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(`✅ 已导出 ${trades.length} 条交易记录`, 'success');
+    } catch(e) {
+      showToast('导出失败，请检查网络连接', 'error');
+    }
+  })();
+}
+
+// ═══════════════ EQUITY PAGE ═══════════════
+function initEquityPageChart() {
+  if (equityPageChart) return;
+  const el = document.getElementById('equity-page-chart');
+  if (!el) return;
+  // LightweightCharts v4 has built-in ResizeObserver — creates fine even at 0 width
+  _createEquityPageChart(el);
+}
+
+function _createEquityPageChart(el) {
+  try {
+    equityPageChart = LightweightCharts.createChart(el, {
+      layout: { background: { color: '#141920' }, textColor: '#8b949e' },
+      grid: { vertLines: { color: '#1e2430' }, horzLines: { color: '#1e2430' } },
+      rightPriceScale: { borderColor: '#1e2430' },
+      timeScale: { borderColor: '#1e2430', timeVisible: true },
+      width: el.clientWidth || 800,
+      height: el.clientHeight || 350,
+    });
+    equityPageArea = equityPageChart.addAreaSeries({
+      lineColor: '#00d4aa', topColor: 'rgba(0,212,170,0.15)', bottomColor: 'rgba(0,212,170,0.01)', lineWidth: 2,
+    });
+  } catch(e) {
+    console.error('Failed to create equity page chart:', e);
+    document.getElementById('equity-chart-loader')?.classList.add('hidden');
+  }
+}
+
+async function loadEquityData() {
+  initEquityPageChart();
+  // Real equity data
+  try {
+    const res = await fetch(`${API}/equity-curve`);
+    const d = await res.json();
+    document.getElementById('equity-chart-loader')?.classList.add('hidden');
+    if (equityPageArea && d.equity_curve && d.equity_curve.length >= 2) {
+      // Deduplicate by timestamp (LightweightCharts requires unique times)
+      const seen = new Set();
+      const data = d.equity_curve
+        .map(p => ({ time: Math.floor(new Date(p.time).getTime() / 1000), value: p.value }))
+        .filter(p => { const ok = !seen.has(p.time); seen.add(p.time); return ok; });
+      if (data.length >= 2) {
+        equityPageArea.setData(data);
+        const last = d.equity_curve[d.equity_curve.length - 1];
+        document.getElementById('equity-page-latest').textContent = `最新: ¥${last.value.toLocaleString()}`;
+      }
+    }
+  } catch(e) { document.getElementById('equity-chart-loader')?.classList.add('hidden'); console.error('Equity load error:', e); }
+
+  // Trade log
+  try {
+    const res = await fetch(`${API}/trades?limit=100`);
+    const d = await res.json();
+    const tbody = document.getElementById('equity-trades-tbody');
+    if (!d.trades || d.trades.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="9" class="p-6 text-center text-[#8b949e]">📭 暂无交易记录 — 执行模拟交易后将在此显示</td></tr>';
+    } else {
+      tbody.innerHTML = d.trades.map(t => {
+        const time = new Date(t.time);
+        const ts = time.toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+        return `<tr>
+          <td class="text-xs text-[#8b949e]">${ts}</td>
+          <td class="text-sm">${t.name || t.symbol}</td>
+          <td>${t.side === 'buy' ? '<span class="badge-buy">买入</span>' : '<span class="badge-sell">卖出</span>'}</td>
+          <td class="font-mono text-xs">¥${t.price.toLocaleString()}</td>
+          <td class="font-mono text-xs">${t.quantity}</td>
+          <td class="font-mono text-xs">¥${t.amount.toLocaleString()}</td>
+          <td class="text-xs text-[#8b949e]">¥${t.fee.toFixed(4)}</td>
+          <td class="font-mono text-xs ${t.pnl >= 0 ? 'text-[#00d4aa]' : 'text-[#f04770]'}">${t.side === 'sell' ? (t.pnl >= 0 ? '+' : '') + '¥' + Math.abs(t.pnl).toLocaleString() : '--'}</td>
+          <td class="text-xs text-[#8b949e] max-w-[120px] truncate">${t.reason}</td>
+        </tr>`;
+      }).join('');
+    }
+  } catch(e) {}
+}
+
+// ═══════════════ SENTIMENT (AI 市场情绪) ═══════════════
+async function loadSentimentData(forceRefresh = false) {
+  const btn = document.getElementById('sentiment-refresh-btn');
+  const origText = btn?.textContent;
+  if (btn) { btn.textContent = '⏳ 分析中...'; btn.disabled = true; }
+
+  try {
+    const suffix = forceRefresh ? `?force_refresh=true&_=${Date.now()}` : `?_=${Date.now()}`;
+    const [overviewResp, btcResp] = await Promise.all([
+      fetch(`${API}/sentiment/overview${suffix}`),
+      fetch(`${API}/sentiment/BTC%2FUSDT${suffix}`)
+    ]);
+
+    if (!overviewResp.ok) {
+      const err = await overviewResp.json();
+      throw new Error(err.detail || `HTTP ${overviewResp.status}`);
+    }
+
+    const data = await overviewResp.json();
+    let btcDetail = null;
+    if (btcResp.ok) {
+      btcDetail = await btcResp.json();
+    }
+    renderSentimentOverview(data, btcDetail);
+  } catch(e) {
+    console.error('Sentiment load error:', e);
+    document.getElementById('sentiment-overall-summary').textContent = '⚠️ 情绪分析加载失败: ' + e.message;
+    document.getElementById('sentiment-gauge-score').textContent = '!';
+    document.getElementById('sentiment-gauge-label').textContent = '加载失败';
+    document.getElementById('sentiment-updated').textContent = '加载失败';
+  } finally {
+    if (btn) { btn.textContent = origText; btn.disabled = false; }
+  }
+}
+
+function renderSentimentOverview(data, btcDetail) {
+  // Update timestamp
+  const dt = data.analyzed_at ? new Date(data.analyzed_at) : new Date();
+  document.getElementById('sentiment-updated').textContent =
+    `更新于 ${dt.toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}`;
+
+  // ── Gauge ──
+  const score = data.overall_sentiment_score || 50;
+  const label = data.overall_label || '中性';
+  document.getElementById('sentiment-gauge-score').textContent = score;
+
+  // Gauge arc: stroke-dashoffset maps score 0→100 to 408→0 (full arc)
+  const totalArc = 408.4;
+  const offset = totalArc - (totalArc * score / 100);
+  document.getElementById('sentiment-gauge-arc').setAttribute('stroke-dashoffset', offset);
+
+  // Color based on score
+  const gaugeScore = document.getElementById('sentiment-gauge-score');
+  if (score >= 70) gaugeScore.style.fill = '#00d4aa';
+  else if (score >= 55) gaugeScore.style.fill = '#22c55e';
+  else if (score >= 45) gaugeScore.style.fill = '#facc15';
+  else if (score >= 30) gaugeScore.style.fill = '#f59e0b';
+  else gaugeScore.style.fill = '#ef4444';
+
+  document.getElementById('sentiment-gauge-label').textContent = label;
+  document.getElementById('sentiment-overall-summary').textContent =
+    `综合 ${data.symbols?.length || 0} 个标的 · 数据来源: Google News / Yahoo Finance / CoinDesk / CoinTelegraph 等`;
+
+  // ── Symbol Cards ──
+  const symList = document.getElementById('sentiment-symbols-list');
+  if (data.symbols && data.symbols.length > 0) {
+    symList.innerHTML = data.symbols.map(s => {
+      const pct = s.score;
+      const barColor = pct >= 70 ? '#00d4aa' : pct >= 55 ? '#22c55e' : pct >= 45 ? '#facc15' : pct >= 30 ? '#f59e0b' : '#ef4444';
+      const emoji = pct >= 70 ? '🔥' : pct >= 55 ? '📈' : pct >= 45 ? '➡️' : pct >= 30 ? '📉' : '🧊';
+      return `<div class="flex items-center gap-3 p-3 bg-[#0d1117] rounded-lg">
+        <div class="w-20 text-sm font-semibold truncate" title="${s.symbol}">${s.symbol}</div>
+        <div class="flex-1 bg-[#141920] rounded-full h-3 overflow-hidden">
+          <div class="h-full rounded-full transition-all duration-500" style="width:${pct}%;background:${barColor}"></div>
+        </div>
+        <div class="w-12 text-right text-sm font-mono font-semibold" style="color:${barColor}">${pct}</div>
+        <div class="w-16 text-right text-xs text-[#8b949e]">${emoji} ${s.label}</div>
+      </div>`;
+    }).join('');
+  } else {
+    symList.innerHTML = '<div class="text-sm text-[#8b949e] p-3">暂无标的情绪数据</div>';
+  }
+
+  // ── Cycle Analysis (from BTC detail) ──
+  if (btcDetail && btcDetail.macro_cycle) {
+    const mc = btcDetail.macro_cycle;
+    const cycleLabels = {
+      'short_term': { id: 'st', label: '短期', color: '#ef4444' },
+      'mid_term': { id: 'mt', label: '中期', color: '#f59e0b' },
+      'long_term': { id: 'lt', label: '长期', color: '#22c55e' },
+    };
+    for (const [key, cfg] of Object.entries(cycleLabels)) {
+      const v = mc[key];
+      if (!v) continue;
+      const scoreEl = document.getElementById(`${cfg.id}-score`);
+      const summaryEl = document.getElementById(`${cfg.id}-summary`);
+      const driversEl = document.getElementById(`${cfg.id}-drivers`);
+      if (scoreEl) {
+        scoreEl.textContent = v.score || '--';
+        scoreEl.style.color = cfg.color;
+      }
+      if (summaryEl) summaryEl.textContent = v.summary || '';
+      if (driversEl && v.drivers) {
+        driversEl.innerHTML = v.drivers.slice(0, 4).map(d => {
+          const e = d.impact === 'positive' ? '🟢' : d.impact === 'negative' ? '🔴' : '⚪';
+          return `<div class="flex items-start gap-1 py-0.5">
+            <span class="mt-0.5">${e}</span>
+            <span>${d.factor}${d.detail ? ': ' + d.detail : ''}</span>
+          </div>`;
+        }).join('');
+      }
+    }
+
+    // Cycle position indicator
+    const cp = btcDetail.cycle_position;
+    const cc = btcDetail.cycle_confidence;
+    const cyclePositions = ['恐慌底部', '修复初期', '上升中期', '顶部过热', '下跌初期', '下跌中继', '横盘整理'];
+    const posIdx = cyclePositions.indexOf(cp);
+    const indicator = document.getElementById('cycle-indicator');
+    const cycleLabel = document.getElementById('cycle-label');
+    const cycleConf = document.getElementById('cycle-confidence');
+    if (indicator && posIdx >= 0) {
+      const leftPct = (posIdx / 6) * 85.72; // 100 - 14.28 = 85.72 available
+      indicator.style.left = leftPct + '%';
+    }
+    if (cycleLabel) cycleLabel.textContent = cp || '--';
+    if (cycleConf) cycleConf.textContent = cc || '--';
+  }
+
+  // Update key drivers with cycle tags
+  // ── Key Drivers (with cycle tags from BTC detail) ──
+  const drvList = document.getElementById('sentiment-drivers-list');
+  // Prefer BTC detail drivers (with cycle tags) over aggregated counts
+  const drivers = (btcDetail && btcDetail.key_drivers && btcDetail.key_drivers.length > 0)
+    ? btcDetail.key_drivers
+    : null;
+
+  if (drivers) {
+    const cycleTagStyle = {
+      'short': 'background:#ef4444/20;color:#ef4444',
+      'mid': 'background:#f59e0b/20;color:#f59e0b',
+      'long': 'background:#22c55e/20;color:#22c55e',
+    };
+    drvList.innerHTML = drivers.slice(0, 8).map(d => {
+      const cycle = d.cycle || '?';
+      const emoji = d.impact === 'positive' ? '🟢' : d.impact === 'negative' ? '🔴' : '⚪';
+      const tagStyle = cycleTagStyle[cycle] || 'background:#484f58/20;color:#8b949e';
+      const cycleLabel = cycle === 'short' ? '短期' : cycle === 'mid' ? '中期' : cycle === 'long' ? '长期' : '未知';
+      return `<div class="flex items-center gap-2 p-2 bg-[#0d1117] rounded">
+        <span class="text-sm">${emoji}</span>
+        <span class="text-xs px-1.5 py-0.5 rounded font-mono" style="${tagStyle}">${cycleLabel}</span>
+        <span class="text-sm flex-1">${d.factor}</span>
+        <span class="text-xs text-[#8b949e]">强度${d.strength || '?'}/10</span>
+      </div>`;
+    }).join('');
+  } else if (data.dominant_drivers && data.dominant_drivers.length > 0) {
+    drvList.innerHTML = data.dominant_drivers.map(([factor, count], i) => {
+      const impactColors = ['#ef4444','#f59e0b','#facc15','#22c55e','#00d4aa'];
+      const color = impactColors[Math.min(i, impactColors.length - 1)];
+      return `<div class="flex items-center gap-2 p-2 bg-[#0d1117] rounded">
+        <span class="w-2 h-2 rounded-full" style="background:${color};flex-shrink:0"></span>
+        <span class="text-sm flex-1">${factor}</span>
+        <span class="text-xs text-[#8b949e]">${count}次提及</span>
+      </div>`;
+    }).join('');
+  } else {
+    drvList.innerHTML = '<div class="text-sm text-[#8b949e] p-3">分析中...</div>';
+  }
+
+  // ── Platform Comparison ──
+  const platList = document.getElementById('sentiment-platforms-list');
+  // Platform data comes from individual symbol reports, show a note for overview
+  platList.innerHTML = `<div class="text-sm text-[#8b949e] p-2">
+    🎭 平台情绪对比数据需查看单个标的详情。<br>
+    <span class="text-xs">点击下方标的上方的进度条可展开，或通过 API: <code class="text-[#00d4aa]">/api/sentiment/BTC/USDT</code></span>
+  </div>`;
+
+  // ── Risks ──
+  const riskList = document.getElementById('sentiment-risks-list');
+  if (data.top_risks && data.top_risks.length > 0) {
+    riskList.innerHTML = data.top_risks.map(r =>
+      `<div class="flex items-start gap-2 p-2 text-sm">
+        <span class="text-[#ef4444] mt-0.5">⚠️</span>
+        <span>${r}</span>
+      </div>`
+    ).join('');
+  } else {
+    riskList.innerHTML = '<div class="text-sm text-[#8b949e] p-3">暂无风险数据</div>';
+  }
+
+  // ── Opportunities ──
+  const oppList = document.getElementById('sentiment-opps-list');
+  if (data.top_opportunities && data.top_opportunities.length > 0) {
+    oppList.innerHTML = data.top_opportunities.map(o =>
+      `<div class="flex items-start gap-2 p-2 text-sm">
+        <span class="text-[#22c55e] mt-0.5">💡</span>
+        <span>${o}</span>
+      </div>`
+    ).join('');
+  } else {
+    oppList.innerHTML = '<div class="text-sm text-[#8b949e] p-3">暂无机会数据</div>';
+  }
+
+  // ── Conclusion ──
+  const overallScore = data.overall_sentiment_score || 50;
+  let conclusionHTML = '';
+  if (overallScore >= 70) {
+    conclusionHTML = '🟢 市场情绪整体偏向乐观，多头信号占主导。建议关注强势标的，适度参与反弹行情。';
+  } else if (overallScore >= 55) {
+    conclusionHTML = '↗️ 市场情绪中性偏积极，存在结构性机会。建议精选标的，控制仓位参与。';
+  } else if (overallScore >= 45) {
+    conclusionHTML = '➡️ 市场情绪中性，多空交织。建议等待更明确的信号再入场，当前以持仓管理为主。';
+  } else if (overallScore >= 30) {
+    conclusionHTML = '↘️ 市场情绪偏谨慎，风险因素增多。建议减仓或观望，严格止损。';
+  } else {
+    conclusionHTML = '🔴 市场情绪偏向悲观，恐慌情绪蔓延。建议现金为王，等待情绪拐点出现。';
+  }
+  document.getElementById('sentiment-conclusion').textContent = conclusionHTML;
+  document.getElementById('sentiment-suggestion').textContent =
+    overallScore >= 55 ? '关注强势标的回调机会，轻仓试多，严格止损 (仅供参考，非投资建议)'
+    : overallScore >= 45 ? '多空不明朗，建议观望为主，关注晚间宏观数据 (仅供参考，非投资建议)'
+    : '市场偏弱，建议防守为主，等待情绪修复信号再入场 (仅供参考，非投资建议)';
+
+  // ── Data info ──
+  document.getElementById('sentiment-data-info').textContent =
+    `数据源: Google News / RSS多源 · 分析标的: ${data.symbols?.length || 0}个`;
+}
+
+// ═══════════════ INIT ═══════════════
+document.addEventListener('DOMContentLoaded', () => {
+  loadDashboardData();
+  startDashAutoRefresh();
+  setInterval(refreshAll, 60000);
+});
+
+// Handle window resize for charts — lightweight-charts v4 auto-resizes via ResizeObserver
+// This fallback ensures charts in hidden containers get properly sized when revealed
+window.addEventListener('resize', () => {
+  [tradeKlineChart, dashEquityChart, btEquityChart, equityPageChart].forEach(c => {
+    if (c && typeof c.applyOptions === 'function') {
+      try { c.applyOptions({}); } catch(e) {} // triggers internal resize recalculation
+    }
+  });
+});
+</script>
+</body>
+</html>

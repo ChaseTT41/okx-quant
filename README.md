@@ -60,6 +60,9 @@
 yina-app/
 ├── chase-quant-web/              # 🎯 核心量化仪表板
 │   ├── app.py                    # Streamlit Web App (7个Tab)
+│   ├── api_server.py             # 🆕 FastAPI 数据接口 (为前端仪表板提供API)
+│   ├── static/                   # 🆕 前端仪表板 (HTML5 + Tailwind + TradingView图表)
+│   │   └── index.html            # 模拟盘单页应用 · 深色金融UI · 响应式
 │   ├── auto_trade.py             # 自动交易脚本 (Cron触发)
 │   │
 │   ├── feature_engine.py         # 500+特征工厂 (单值版)
@@ -124,7 +127,20 @@ pip install torch torchvision torchaudio
 pip install optuna
 ```
 
-### 2. 启动量化仪表板
+### 2. 启动全新模拟盘仪表板 🆕 (推荐)
+
+```bash
+cd ~/yina-app/chase-quant-web
+pip install fastapi uvicorn
+
+# 启动 API Server + 前端仪表板
+python3 api_server.py --port 8766
+# 浏览器打开: http://localhost:8766
+```
+
+> 🎨 现代化深色金融UI · K线图 (TradingView轻量图表) · 持仓面板 · 资金曲线 · 绩效指标 · ML信号洞察 · 响应式设计
+
+### 3. 启动 Streamlit 分析仪表板 (经典版)
 
 ```bash
 cd ~/yina-app/chase-quant-web

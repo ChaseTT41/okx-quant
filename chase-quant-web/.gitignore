@@ -1,0 +1,41 @@
+# 敏感文件 — 不要提交到 Git!
+.env
+*.key
+*.pem
+*.crt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Data (含交易记录和快照)
+data/portfolio.json
+data/trades.json
+data/snapshots.json
+data/models/
+data/reports/
+data/backtest_results/
+data/optimization_results/
+data/qlib_reports/
+data/executions/
+data/cross_market_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Node (如果有前端构建)
+node_modules/
+
+# Claude
+.claude/

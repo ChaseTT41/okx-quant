@@ -15,7 +15,7 @@ Phase 14: 基于全算法框架的智能日报生成 + Webhook推送
 
 推送渠道:
   企业微信群「金融监控」
-  Webhook: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=2c602b48-5da2-4989-9193-30c0e226c769
+  Webhook: 通过 WECHAT_WEBHOOK_KEY 环境变量配置
 
 推送时段:
   早报 08:30 — 隔夜行情 + 今日预判
@@ -52,10 +52,30 @@ REPORTS_DIR = DATA_DIR / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # 企业微信 Webhook
-WECHAT_WEBHOOK_URL = (
-    "https://qyapi.weixin.qq.com/cgi-bin/webhook/send"
-    "?key=2c602b48-5da2-4989-9193-30c0e226c769"
+# ⚠️ 敏感信息: 通过环境变量 WECHAT_WEBHOOK_KEY 传入, 不要硬编码!
+# 开发环境可设置: export WECHAT_WEBHOOK_KEY="your_key_here"
+_WEBHOOK_KEY = os.environ.get(
+    "WECHAT_WEBHOOK_KEY",
+    os.environ.get("WEBHOOK_KEY", ""),  # 兼容旧变量名
 )
+if not _WEBHOOK_KEY:
+    # 尝试从 .env 文件加载
+    _env_file = Path(__file__).parent / ".env"
+    if _env_file.exists():
+        with open(_env_file) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("WECHAT_WEBHOOK_KEY="):
+                    _WEBHOOK_KEY = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+                elif line.startswith("WEBHOOK_KEY="):
+                    _WEBHOOK_KEY = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+
+WECHAT_WEBHOOK_URL = (
+    f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send"
+    f"?key={_WEBHOOK_KEY}"
+) if _WEBHOOK_KEY else ""
 
 # 推送时段判定
 REPORT_HOURS = {

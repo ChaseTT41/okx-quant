@@ -382,6 +382,7 @@ class PortfolioManager:
 
     # ── 快照 ──
     def take_snapshot(self):
+        """记录快照 — 只写 snapshots.json，不覆盖 portfolio.json (避免和 auto_trade 冲突)"""
         snap = PortfolioSnapshot(
             time=datetime.now(timezone.utc).isoformat(),
             total_value=self.total_value,
@@ -391,7 +392,9 @@ class PortfolioManager:
             pnl_pct=self.total_pnl_pct,
         )
         self.snapshots.append(snap)
-        self._save()
+        # 只保存快照，不覆盖 portfolio.json 和 trades.json
+        SNAPSHOT_FILE.write_text(json.dumps(
+            [asdict(s) for s in self.snapshots[-200:]], indent=2, ensure_ascii=False))
 
     # ── 风险检查 ──
     def check_risk(self) -> List[str]:

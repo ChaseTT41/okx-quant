@@ -1,0 +1,178 @@
+{
+  "symbol": "ETH/USDT",
+  "market": "crypto",
+  "analyzed_at": "2026-06-08T22:01:05.537093+08:00",
+  "current_price_range": "ETH/USDT 价格近期经历大幅下跌，逼近关键支撑位。",
+  "recent_performance": "比特币和以太坊延续跌势，加密货币市场情绪转弱，经历自2024年7月以来最糟糕的一周。",
+  "sentiment_score": 35,
+  "sentiment_label": "中性偏跌",
+  "sentiment_summary": "市场情绪低迷，短期反弹乏力，中期承压。",
+  "key_drivers": [
+    {
+      "factor": "宏观地缘政治风险",
+      "impact": "negative",
+      "strength": 8,
+      "cycle": "short",
+      "detail": "以色列与伊朗的军事冲突升级导致风险资产避险情绪升温，短期内对加密货币构成压力。",
+      "source": "CryptoSlate, AP News"
+    },
+    {
+      "factor": "ETF资金流出",
+      "impact": "negative",
+      "strength": 7,
+      "cycle": "short",
+      "detail": "美国比特币、以太坊ETF结束创纪录的资金连续流出，短期内对市场情绪造成负面影响。",
+      "source": "CoinDesk"
+    },
+    {
+      "factor": "技术面抛售压力",
+      "impact": "negative",
+      "strength": 7,
+      "cycle": "short",
+      "detail": "比特币、以太坊价格逼近关键支撑位，市场出现惨烈抛售后反弹乏力，短期内抛售压力依然存在。",
+      "source": "Moomoo, CoinDesk"
+    },
+    {
+      "factor": "机构乐观情绪（潜在）",
+      "impact": "positive",
+      "strength": 5,
+      "cycle": "short",
+      "detail": "有消息称机构乐观情绪提振以太坊，但目前尚未转化为持续的上涨动力，短期影响有限。",
+      "source": "Moomoo"
+    },
+    {
+      "factor": "USDT市值超越ETH",
+      "impact": "neutral",
+      "strength": 4,
+      "cycle": "short",
+      "detail": "USDT市值超越ETH成为第二大加密货币市值排名，反映了稳定币的吸引力，但对ETH本身情绪影响中性。",
+      "source": "深潮TechFlow"
+    },
+    {
+      "factor": "AI行业发展",
+      "impact": "positive",
+      "strength": 6,
+      "cycle": "mid",
+      "detail": "AI股票在经历抛售后有所恢复，AI算力需求对能源和基础设施的拉动可能间接影响相关技术发展，中期有潜在利好。",
+      "source": "AP News, Business Insider, Decrypt"
+    },
+    {
+      "factor": "监管政策讨论",
+      "impact": "neutral",
+      "strength": 5,
+      "cycle": "mid",
+      "detail": "国会即将讨论加密税收规则，包括质押、挖矿等，中期可能带来政策不确定性或利好，目前影响中性。",
+      "source": "Decrypt"
+    },
+    {
+      "factor": "以太坊基金会裁员",
+      "impact": "neutral",
+      "strength": 3,
+      "cycle": "short",
+      "detail": "Joe Lubin表示基金会裁员和离职并非危机，短期内对市场情绪影响有限，但需关注后续发展。",
+      "source": "CoinDesk"
+    },
+    {
+      "factor": "宏观经济周期（潜在）",
+      "impact": "neutral",
+      "strength": 4,
+      "cycle": "long",
+      "detail": "有分析师担忧2026年可能出现1999年式的泡沫破裂，长期来看宏观经济环境对加密市场有潜在影响，但目前数据不足以明确判断。",
+      "source": "Fortune"
+    }
+  ],
+  "platform_sentiment": {
+    "国际/英文媒体": {
+      "score": 40,
+      "summary": "关注下跌和风险，情绪偏谨慎。"
+    },
+    "国际/社交媒体": {
+      "score": 45,
+      "summary": "讨论反弹与支撑，情绪略有波动。"
+    },
+    "国内/中文媒体": {
+      "score": 30,
+      "summary": "报道下跌和情绪转弱，偏悲观。"
+    },
+    "国内/投资社区": {
+      "score": 35,
+      "summary": "关注反弹动能和交易所余额，情绪谨慎。"
+    }
+  },
+  "risks": [
+    "地缘政治冲突加剧导致避险情绪进一步蔓延。",
+    "ETF持续资金流出对市场信心造成打击。",
+    "关键支撑位被跌破可能引发更大规模的抛售。",
+    "监管政策的不确定性可能对市场造成负面影响。",
+    "潜在的宏观经济衰退风险。"
+  ],
+  "opportunities": [
+    "短期内若地缘政治风险缓解，可能出现技术性反弹。",
+    "长期来看，AI技术发展和应用落地可能为加密市场带来新的增长点。",
+    "USDT市值超越ETH可能促使部分资金重新评估ETH的价值和潜力。",
+    "DeFi领域的技术进步和安全性的提升可能吸引更多用户和资金。",
+    "机构对加密资产的持续关注和潜在的ETF资金回流。"
+  ],
+  "macro_cycle": {
+    "short_term": {
+      "score": 30,
+      "summary": "短期内受地缘政治和ETF资金流出影响，情绪偏弱。",
+      "drivers": [
+        {
+          "factor": "地缘政治风险",
+          "impact": "negative",
+          "detail": "短期内对风险资产构成直接压力。"
+        },
+        {
+          "factor": "ETF资金流出",
+          "impact": "negative",
+          "detail": "短期内削弱市场信心。"
+        }
+      ]
+    },
+    "mid_term": {
+      "score": 45,
+      "summary": "中期面临宏观经济不确定性和监管政策讨论，情绪中性偏跌。",
+      "drivers": [
+        {
+          "factor": "AI行业发展",
+          "impact": "positive",
+          "detail": "中期可能带来技术驱动的增长机会。"
+        },
+        {
+          "factor": "监管政策讨论",
+          "impact": "neutral",
+          "detail": "中期可能带来不确定性或潜在利好。"
+        }
+      ]
+    },
+    "long_term": {
+      "score": 50,
+      "summary": "长期来看，技术革命和结构性问题是关键，目前数据不足以明确判断。",
+      "drivers": [
+        {
+          "factor": "宏观经济周期",
+          "impact": "neutral",
+          "detail": "长期影响存在，但目前判断依据不足。"
+        }
+      ]
+    }
+  },
+  "cycle_position": "下跌初期",
+  "cycle_confidence": 55,
+  "sentiment_trend": "恶化",
+  "divergence_note": "无明显背离",
+  "conclusion": "当前ETH/USDT市场情绪偏向中性偏跌，短期内受地缘政治风险和ETF资金流出影响，市场表现疲软，延续跌势。中期来看，AI行业发展和监管政策讨论是关键驱动因素，但宏观经济的不确定性仍构成压力。长期来看，市场结构性问题和技术发展将是主导因素，但目前缺乏足够数据支持明确判断。整体市场处于下跌初期，需警惕进一步下行风险。",
+  "trading_suggestion": "短期内保持谨慎，关注地缘政治局势和ETF资金流向。若出现企稳迹象，可考虑逢低布局，但需严格控制风险。仅供参考，非投资建议。",
+  "data_sources": [
+    "google_news",
+    "Google News Business",
+    "Yahoo Finance",
+    "CoinTelegraph",
+    "CryptoSlate",
+    "Decrypt"
+  ],
+  "data_count": 102,
+  "model_used": "gemini-2.5-flash-lite",
+  "cache_hit": false
+}

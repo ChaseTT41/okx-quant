@@ -326,11 +326,15 @@ class RollingAwareAutoTrader:
         """
         warnings_list = []
 
-        # 检查 Qlib 模型
+        # 检查 Qlib 模型 (检查磁盘文件，不依赖lazy loading状态)
+        qlib_models_available = False
         if self.use_v5 and self.engine.qlib_predictor:
-            n_models = len(self.engine.qlib_predictor._loaded_models)
-            if n_models == 0:
-                warnings_list.append("⚠️ 未加载任何 Qlib 模型 — 请先训练")
+            from qlib_models import MODEL_DIR
+            pth_files = list(MODEL_DIR.glob("qlib_*.pth"))
+            if pth_files:
+                qlib_models_available = True
+            else:
+                warnings_list.append("⚠️ 未找到 Qlib 模型文件 — 请先训练")
         elif self.use_v5:
             warnings_list.append("⚠️ Qlib 推理器未初始化")
 
@@ -341,7 +345,11 @@ class RollingAwareAutoTrader:
 
             if status["should_retrain"]:
                 reason = status["retrain_reason"]
-                warnings_list.append(f"🔴 建议重训: {reason}")
+                # 首次训练不是致命错误 (Qlib 模型可能已就绪)
+                if "首次训练" in reason and qlib_models_available:
+                    warnings_list.append(f"⚠️ 滚动训练: {reason} (Qlib模型已就绪)")
+                else:
+                    warnings_list.append(f"🔴 建议重训: {reason}")
 
                 if self.auto_retrain:
                     print(f"🔄 自动触发滚动重训: {reason}")
@@ -418,10 +426,10 @@ class RollingAwareAutoTrader:
                         fusion_signal.confidence = min(1.0, fusion_signal.confidence * graph_bonus)
                         fusion_signal.signal_consensus *= graph_bonus
 
-                        # 重新判定 action
-                        if fusion_signal.signal_consensus > 0.5:
+                        # 重新判定 action — 使用引擎阈值
+                        if fusion_signal.signal_consensus > self.engine.ACTION_THRESHOLDS["BUY"]:
                             fusion_signal.action = "BUY"
-                        elif fusion_signal.signal_consensus < -0.5:
+                        elif fusion_signal.signal_consensus < self.engine.ACTION_THRESHOLDS["SELL"]:
                             fusion_signal.action = "SELL"
                         else:
                             fusion_signal.action = "HOLD"
@@ -576,14 +584,16 @@ class RollingAwareAutoTrader:
             elif pos.pnl_pct >= 15.0:
                 pf.sell(pos.id, pos.current_price, f"止盈: +{pos.pnl_pct:.1f}%")
                 results.append(f"🟢 止盈 {pos.symbol}: +{pos.pnl_pct:.1f}%")
-            # ML 出场信号
+            # ML 出场信号 (最小仓位不受ML卖出影响, 仅止损止盈)
             else:
-                for sig in sell_sigs:
-                    if sig["symbol"] == pos.symbol:
-                        pf.sell(pos.id, pos.current_price,
-                               f"ML卖出: {sig['signal_val']:+.3f}")
-                        results.append(f"🔴 ML卖出 {pos.symbol}: {pos.pnl_pct:+.1f}%")
-                        break
+                is_min_position = "[最小仓位]" in str(getattr(pos, 'entry_reason', ''))
+                if not is_min_position:
+                    for sig in sell_sigs:
+                        if sig["symbol"] == pos.symbol:
+                            pf.sell(pos.id, pos.current_price,
+                                   f"ML卖出: {sig['signal_val']:+.3f}")
+                            results.append(f"🔴 ML卖出 {pos.symbol}: {pos.pnl_pct:+.1f}%")
+                            break
 
         # 5. 入场信号
         held_symbols = [p.symbol for p in pf.open_positions if p.market == "crypto"]
@@ -602,7 +612,7 @@ class RollingAwareAutoTrader:
             if max_size < 200:
                 continue
 
-            ml_score = abs(sig["signal_val"]) * 30 + sig["confidence"] * 20 + sig["consensus"] * 30
+            ml_score = abs(sig["signal_val"]) * 80 + sig["confidence"] * 50 + sig["consensus"] * 50
             ml_score = min(100, ml_score)
 
             check = rc.pre_trade_check("crypto", max_size, ml_score, total_value)
@@ -674,6 +684,34 @@ class RollingAwareAutoTrader:
                 )
                 if trade:
                     results.append(f"🧠 买入 {sig['symbol']} ¥{max_size:.0f} | {reasoning}")
+
+        # 5.5. 最小仓位规则: 若加密市场无持仓且本轮未因ML信号卖出, 才建仓 (防止卖完立刻买回)
+        crypto_positions = [p for p in pf.open_positions if p.market == "crypto"]
+        had_ml_sell = any("ML卖出" in str(r) for r in results)
+        if not crypto_positions and ml_signals and not buy_sigs and not had_ml_sell:
+            strongest = max(ml_signals, key=lambda s: s["signal_val"])
+            cash = pf.cash.get("crypto", 0)
+            min_size = min(max(cash * 0.02, 200), cash * 0.3)
+
+            if min_size >= 200 and cash >= min_size:
+                ml_score = abs(strongest["signal_val"]) * 80 + strongest["confidence"] * 50
+                ml_score = min(100, ml_score)
+                check = rc.pre_trade_check("crypto", min_size, ml_score, total_value)
+                if check.passed:
+                    quantity = min_size / strongest["price"]
+                    reasoning = (
+                        f"[最小仓位] 信号={strongest['signal_val']:+.3f} | "
+                        f"全市场偏空中选最强, 自动建仓"
+                    )
+                    trade = pf.buy(
+                        market="crypto", symbol=strongest["symbol"],
+                        name=strongest.get("name", strongest["symbol"]),
+                        price=strongest["price"], quantity=quantity,
+                        reason=reasoning,
+                    )
+                    if trade:
+                        results.append(f"🐾 最小仓位买入 {strongest['symbol']} ¥{min_size:.0f} | {reasoning}")
+                        print(f"  🐾 最小仓位规则触发! 买入 {strongest['symbol']} ¥{min_size:.0f}")
 
         pf.take_snapshot()
         return results, pf
@@ -859,7 +897,7 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
             continue
 
         all_sigs = scanner.scan()
-        buy_sigs = [s for s in all_sigs if s.action == "BUY" and s.score >= 65]
+        buy_sigs = [s for s in all_sigs if s.action == "BUY" and s.score >= 50]
         buy_sigs.sort(key=lambda s: s.score, reverse=True)
 
         # ── 第一步: 检查持仓止损/止盈 ──

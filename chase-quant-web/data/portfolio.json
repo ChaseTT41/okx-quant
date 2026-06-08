@@ -1,10 +1,50 @@
 {
   "cash": {
-    "crypto": 4000.0,
-    "a_stock": 3500.0,
+    "crypto": 2451.697058262296,
+    "a_stock": 2500.0,
     "us_stock": 2500.0
   },
-  "positions": {},
+  "positions": {
+    "crypto_BNB/USDT_20260608231347": {
+      "id": "crypto_BNB/USDT_20260608231347",
+      "market": "crypto",
+      "symbol": "BNB/USDT",
+      "name": "BNB",
+      "entry_price": 605.72,
+      "current_price": 603.89,
+      "quantity": 2.4781070713574427,
+      "entry_time": "2026-06-08T23:13:47.261947+08:00",
+      "entry_reason": "[🐺] 1hMACD金叉 | 评分60",
+      "stop_loss": 575.434,
+      "take_profit": 654.1776000000001,
+      "status": "open",
+      "avg_entry_price": 605.72,
+      "entry_prices": [
+        605.72
+      ],
+      "execution_strategy": "aggressive"
+    },
+    "crypto_ETH/USDT_20260608231848": {
+      "id": "crypto_ETH/USDT_20260608231848",
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "name": "ETH",
+      "entry_price": 1700.0,
+      "current_price": 1692.81,
+      "quantity": 0.6180748886375536,
+      "entry_time": "2026-06-08T23:18:48.591155+08:00",
+      "entry_reason": "[🐺] 1hMACD金叉 | 评分60",
+      "stop_loss": 1615.0,
+      "take_profit": 1836.0000000000002,
+      "status": "open",
+      "avg_entry_price": 1700.0,
+      "entry_prices": [
+        1700.0
+      ],
+      "execution_strategy": "aggressive"
+    }
+  },
   "initial_capital": 10000.0,
-  "created_at": "2026-06-06T15:26:25.506121+00:00"
+  "created_at": "2026-06-08T11:25:00.000000+00:00",
+  "updated_at": "2026-06-08T23:33:53.260990+08:00"
 }

@@ -1,0 +1,80 @@
+{
+  "symbols": [
+    "BTC/USDT",
+    "ETH/USDT",
+    "SOL/USDT",
+    "BNB/USDT",
+    "XRP/USDT"
+  ],
+  "n_assets": 5,
+  "created_at": "2026-06-07T16:03:38.248687",
+  "data_start": "2025-06-07",
+  "data_end": "2026-06-07",
+  "n_days": 366,
+  "lookback_days": 365,
+  "avg_degree": 4.0,
+  "graph_density": 0.5,
+  "n_communities": 3,
+  "community_labels": [
+    1,
+    1,
+    1,
+    2,
+    3
+  ],
+  "top_edges": [
+    {
+      "source": "ETH/USDT",
+      "target": "SOL/USDT",
+      "weight": 0.2821
+    },
+    {
+      "source": "BTC/USDT",
+      "target": "SOL/USDT",
+      "weight": 0.2649
+    },
+    {
+      "source": "BTC/USDT",
+      "target": "ETH/USDT",
+      "weight": 0.2616
+    },
+    {
+      "source": "BNB/USDT",
+      "target": "XRP/USDT",
+      "weight": 0.2511
+    },
+    {
+      "source": "BTC/USDT",
+      "target": "XRP/USDT",
+      "weight": 0.2473
+    },
+    {
+      "source": "SOL/USDT",
+      "target": "XRP/USDT",
+      "weight": 0.2419
+    },
+    {
+      "source": "ETH/USDT",
+      "target": "XRP/USDT",
+      "weight": 0.2337
+    },
+    {
+      "source": "BTC/USDT",
+      "target": "BNB/USDT",
+      "weight": 0.2262
+    },
+    {
+      "source": "ETH/USDT",
+      "target": "BNB/USDT",
+      "weight": 0.2256
+    },
+    {
+      "source": "SOL/USDT",
+      "target": "BNB/USDT",
+      "weight": 0.2248
+    }
+  ],
+  "version": 1,
+  "previous_hash": "",
+  "graph_hash": "6393527357234476"
+}

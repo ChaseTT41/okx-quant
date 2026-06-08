@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<script src="/static/lightweight-charts.standalone.production.js"></script>
+<style>
+body { margin: 0; background: #0a0e14; }
+#chart { width: 800px; height: 400px; margin: 20px; }
+</style>
+</head>
+<body>
+<div id="chart"></div>
+<div id="status" style="color:#0f0;font-family:monospace;padding:20px;">Initializing...</div>
+<script>
+const status = document.getElementById('status');
+try {
+  status.textContent = 'LightweightCharts type: ' + typeof LightweightCharts;
+
+  const el = document.getElementById('chart');
+  status.textContent += ' | el: ' + el.clientWidth + 'x' + el.clientHeight;
+
+  const chart = LightweightCharts.createChart(el, {
+    layout: { background: { color: '#141920' }, textColor: '#8b949e' },
+    grid: { vertLines: { color: '#1e2430' }, horzLines: { color: '#1e2430' } },
+    rightPriceScale: { borderColor: '#1e2430' },
+    timeScale: { borderColor: '#1e2430', timeVisible: true },
+    width: 800,
+    height: 400,
+  });
+  status.textContent += ' | chart created';
+
+  const area = chart.addAreaSeries({
+    lineColor: '#00d4aa', topColor: 'rgba(0,212,170,0.15)', bottomColor: 'rgba(0,212,170,0.01)', lineWidth: 2,
+  });
+  status.textContent += ' | area added';
+
+  // Test with real data from API
+  fetch('/api/equity-curve')
+    .then(r => r.json())
+    .then(d => {
+      if (d.equity_curve && d.equity_curve.length >= 2) {
+        const data = d.equity_curve.map(p => ({
+          time: Math.floor(new Date(p.time).getTime() / 1000),
+          value: p.value,
+        }));
+        area.setData(data);
+        status.textContent += ' | data set: ' + data.length + ' points, first=' + JSON.stringify(data[0]) + ', last=' + JSON.stringify(data[data.length-1]);
+        status.textContent += ' | RENDERED SUCCESSFULLY ✅';
+      } else {
+        status.textContent += ' | NO DATA ❌';
+      }
+    })
+    .catch(e => {
+      status.textContent += ' | FETCH ERROR: ' + e.message + ' ❌';
+    });
+
+} catch(e) {
+  status.textContent = 'ERROR: ' + e.message + ' | stack: ' + e.stack;
+}
+</script>
+</body>
+</html>

@@ -14,7 +14,7 @@ HARD_STOP_LOSS_PCT = -8.0     # 硬止损线
 DAILY_LOSS_LIMIT_PCT = -5.0   # 日亏损上限
 MONTHLY_TARGET_PCT = 30.0     # 月盈利目标
 MAX_POSITION_SIZE_PCT = 40.0  # 单仓位 ≤ 总资金40%
-MIN_SCORE_FOR_ENTRY = 65      # 最低入场分
+MIN_SCORE_FOR_ENTRY = 35      # 最低入场分 (v5 0-100评分体系)
 
 # Phase 13: 执行层风控参数
 MAX_PARTICIPATION_RATE = 0.10  # 最大成交量占比 (10%)
