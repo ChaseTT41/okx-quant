@@ -724,6 +724,9 @@ class ReportFormatter:
             fg_bar = "🟢" * min(5, max(1, fg["value"] // 20)) + "⚪" * max(0, 5 - fg["value"] // 20)
             lines.append(f"\n> 😱 恐惧&贪婪指数: **{fg['value']}** {fg_bar} — {fg['classification']}")
 
+        # 港股市场提示
+        lines.append(f"\n> 🇭🇰 港股/A股: 扫描覆盖20只蓝筹, 五维评分+止损止盈自动管理")
+
         return "\n".join(lines)
 
     @classmethod

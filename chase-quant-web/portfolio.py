@@ -21,6 +21,7 @@ ALLOCATION = {
     "crypto":  4000.0,   # 加密货币 (Binance/OKX)
     "a_stock": 3500.0,   # A股 (同花顺标准)
     "us_stock": 2500.0,   # 美股 (VSTrader)
+    "hk_stock": 1500.0,   # 港股 (港交所)
 }
 
 # 手续费
@@ -28,7 +29,26 @@ FEES = {
     "crypto":  0.001,    # 0.1%
     "a_stock": 0.0003,   # 万三佣金 + 千一印花税(卖) ≈ 综合0.03%
     "us_stock": 0.005,   # 0.5% 含汇损
+    "hk_stock": 0.003,   # 0.1%印花税 + 0.1%佣金 + 0.1%杂费 ≈ 综合0.3%
 }
+
+# 币种全名映射 (ticker → full name)
+COIN_FULL_NAMES = {
+    "BTC": "Bitcoin", "ETH": "Ethereum", "BNB": "BNB Chain",
+    "SOL": "Solana", "XRP": "XRP", "ADA": "Cardano", "DOGE": "Dogecoin",
+    "AVAX": "Avalanche", "DOT": "Polkadot", "LINK": "Chainlink",
+    "MATIC": "Polygon", "ATOM": "Cosmos", "LTC": "Litecoin",
+    "UNI": "Uniswap", "APT": "Aptos", "NEAR": "NEAR Protocol",
+    "OP": "Optimism", "ARB": "Arbitrum", "SUI": "Sui", "TON": "Toncoin",
+    "FIL": "Filecoin", "TRX": "TRON", "ETC": "Ethereum Classic",
+    "ICP": "Internet Computer", "RENDER": "Render",
+    "WIF": "dogwifhat", "PEPE": "Pepe", "AAVE": "Aave", "ORDI": "ORDI",
+}
+
+
+def _coin_full_name(ticker: str) -> str:
+    """从 ticker 获取全名，找不到则返回 ticker 本身"""
+    return COIN_FULL_NAMES.get(ticker.upper(), ticker)
 
 
 @dataclass
@@ -130,6 +150,10 @@ class PortfolioManager:
     def _load(self):
         pf = json.loads(PORTFOLIO_FILE.read_text())
         self.cash = pf.get("cash", dict(ALLOCATION))
+        # 迁移: 自动添加新市场
+        for mkt, amt in ALLOCATION.items():
+            if mkt not in self.cash:
+                self.cash[mkt] = amt
         self.positions = {}
         for pid, pdata in pf.get("positions", {}).items():
             self.positions[pid] = Position(**pdata)
@@ -265,7 +289,8 @@ class PortfolioManager:
         else:
             # 首次建仓
             symbol_clean = position_id.split("_", 2)[-1] if "_" in position_id else position_id
-            name = symbol_clean.replace("/USDT", "")
+            ticker = symbol_clean.replace("/USDT", "")
+            name = _coin_full_name(ticker)
             pos = Position(
                 id=position_id,
                 market="crypto",
@@ -379,6 +404,7 @@ class PortfolioManager:
         """更新持仓市价"""
         if position_id in self.positions:
             self.positions[position_id].current_price = price
+            self._save()  # 立即持久化, 确保API服务器读到最新价
 
     # ── 快照 ──
     def take_snapshot(self):
@@ -430,6 +456,7 @@ class PortfolioManager:
             ("crypto", "₿ 加密货币", "#F7931A"),
             ("a_stock", "🇨🇳 A股", "#FF0000"),
             ("us_stock", "🇺🇸 美股", "#1E90FF"),
+            ("hk_stock", "🇭🇰 港股", "#DC143C"),
         ]:
             positions_val = sum(p.value for p in self.open_positions if p.market == market)
             cash_val = self.cash.get(market, 0)

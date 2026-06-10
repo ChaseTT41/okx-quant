@@ -17,6 +17,22 @@ from dataclasses import dataclass
 import warnings
 warnings.filterwarnings("ignore")
 
+# 币种全名映射
+COIN_FULL_NAMES = {
+    "BTC": "Bitcoin", "ETH": "Ethereum", "BNB": "BNB Chain",
+    "SOL": "Solana", "XRP": "XRP", "ADA": "Cardano", "DOGE": "Dogecoin",
+    "AVAX": "Avalanche", "DOT": "Polkadot", "LINK": "Chainlink",
+    "MATIC": "Polygon", "ATOM": "Cosmos", "LTC": "Litecoin",
+    "UNI": "Uniswap", "APT": "Aptos", "NEAR": "NEAR Protocol",
+    "OP": "Optimism", "ARB": "Arbitrum", "SUI": "Sui", "TON": "Toncoin",
+    "FIL": "Filecoin", "TRX": "TRON", "ETC": "Ethereum Classic",
+    "ICP": "Internet Computer", "RENDER": "Render",
+    "WIF": "dogwifhat", "PEPE": "Pepe", "AAVE": "Aave", "ORDI": "ORDI",
+}
+
+def _coin_full_name(ticker: str) -> str:
+    return COIN_FULL_NAMES.get(ticker.upper(), ticker)
+
 # 偏差修正模块
 try:
     from bias_correction import (
@@ -196,7 +212,7 @@ class CryptoSignals:
 
             signals.append(Signal(
                 market="crypto", symbol=symbol,
-                name=symbol.replace("/USDT", ""),
+                name=_coin_full_name(symbol.replace("/USDT", "")),
                 price=price, action=action,
                 score=score, confidence=min(0.95, max(0.25, 1 - score / 120)),
                 reasons=reasons, risk_level=risk,
@@ -223,17 +239,17 @@ class AStockSignals:
     def fetch_daily(self, code: str) -> Optional[pd.DataFrame]:
         try:
             import akshare as ak
-            # akshare 东方财富日线
-            symbol = f"{'sh' if code.startswith('6') else 'sz'}{code}"
-            df = ak.stock_zh_a_hist(symbol=code, period="daily",
-                                   start_date=(datetime.now() - timedelta(days=200)).strftime("%Y%m%d"),
-                                   end_date=datetime.now().strftime("%Y%m%d"),
-                                   adjust="qfq")
+            # 使用腾讯数据源 (更稳定, 东方财富API频繁断连)
+            symbol_tx = f"{'sh' if code.startswith('6') else 'sz'}{code}"
+            start = (datetime.now() - timedelta(days=200)).strftime("%Y%m%d")
+            end = datetime.now().strftime("%Y%m%d")
+            df = ak.stock_zh_a_hist_tx(symbol=symbol_tx, start_date=start, end_date=end)
             if df is None or len(df) < 30:
                 return None
-            df = df.rename(columns={"日期": "date", "开盘": "open", "收盘": "close",
-                                     "最高": "high", "最低": "low", "成交量": "volume"})
+            # stock_zh_a_hist_tx 列名: date/open/close/high/low/amount (amount=成交额, 无volume)
             df["date"] = pd.to_datetime(df["date"])
+            if "volume" not in df.columns:
+                df["volume"] = df.get("amount", 0)  # 用成交额替代成交量
             return df
         except Exception:
             return None
@@ -413,6 +429,85 @@ class USStockSignals:
         return sorted(signals, key=lambda s: s.score, reverse=True)
 
 
+class HKStockSignals:
+    """港股信号 (五维评分卡, via hk_stock_data + hk_five_dim_scorer)"""
+
+    WATCHLIST = [
+        ("00700", "腾讯控股"), ("09988", "阿里巴巴"), ("03690", "美团"),
+        ("02318", "中国平安"), ("00388", "港交所"), ("01299", "友邦保险"),
+        ("00939", "建设银行"), ("01398", "工商银行"), ("00941", "中国移动"),
+        ("00883", "中海油"), ("01211", "比亚迪股份"), ("01024", "快手"),
+        ("09618", "京东"), ("09999", "网易"), ("01810", "小米集团"),
+        ("09888", "百度集团"), ("02269", "药明生物"), ("01109", "华润置地"),
+        ("02020", "安踏体育"), ("03968", "招商银行"),
+    ]
+
+    def __init__(self):
+        self._scorer = None
+
+    @property
+    def scorer(self):
+        if self._scorer is None:
+            try:
+                import sys
+                from pathlib import Path
+                _hk_path = str(Path(__file__).parent.parent)
+                if _hk_path not in sys.path:
+                    sys.path.insert(0, _hk_path)
+                from hk_five_dim_scorer import FiveDimScorer
+                self._scorer = FiveDimScorer()
+            except Exception:
+                self._scorer = False
+        return self._scorer if self._scorer is not False else None
+
+    def scan(self) -> List[Signal]:
+        signals = []
+        scorer = self.scorer
+        if scorer is None:
+            return signals
+
+        for code, name in self.WATCHLIST:
+            try:
+                result = scorer.score(code)
+                price = result.close
+                if price <= 0:
+                    continue
+
+                reasons = []
+                if result.trend.signals:
+                    reasons.extend(result.trend.signals[:2])
+                if result.ob_os.signals:
+                    reasons.append(result.ob_os.signals[0])
+                if result.fundamental.signals:
+                    reasons.append(result.fundamental.signals[0])
+
+                composite = result.composite
+                if composite >= 65:
+                    action = "BUY"
+                elif composite < 35:
+                    action = "SELL"
+                else:
+                    action = "HOLD"
+
+                risk = "low" if composite >= 70 else "medium" if composite >= 40 else "high"
+                score_val = max(0, min(100, composite))
+                confidence = result.confidence
+
+                signals.append(Signal(
+                    market="hk_stock", symbol=code,
+                    name=name, price=price, action=action,
+                    score=score_val, confidence=confidence,
+                    reasons=reasons[:5], risk_level=risk,
+                    suggested_size=max(200, min(1500, score_val * 12)),
+                    stop_loss=result.stop_loss if result.stop_loss > 0 else price * 0.92,
+                    take_profit=result.target if result.target > 0 else price * 1.10,
+                ))
+            except Exception:
+                continue
+
+        return sorted(signals, key=lambda s: s.score, reverse=True)
+
+
 class SignalEngine:
     """统一信号引擎"""
 
@@ -420,6 +515,7 @@ class SignalEngine:
         self.crypto = CryptoSignals()
         self.a_stock = AStockSignals()
         self.us_stock = USStockSignals()
+        self.hk_stock = HKStockSignals()
 
     def scan_all(self) -> Dict[str, List[Signal]]:
         """扫描全市场, 返回 BUY 信号 (score >= 65)"""
@@ -428,6 +524,7 @@ class SignalEngine:
             ("crypto", self.crypto),
             ("a_stock", self.a_stock),
             ("us_stock", self.us_stock),
+            ("hk_stock", self.hk_stock),
         ]:
             try:
                 all_sigs = scanner.scan()
@@ -444,6 +541,7 @@ class SignalEngine:
             ("crypto", self.crypto),
             ("a_stock", self.a_stock),
             ("us_stock", self.us_stock),
+            ("hk_stock", self.hk_stock),
         ]:
             try:
                 results[market] = scanner.scan()

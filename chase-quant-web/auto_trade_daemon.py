@@ -12,6 +12,7 @@ Yina 自主模拟盘交易守护进程 🐾
 from __future__ import annotations
 import sys
 import os
+os.environ.setdefault('TQDM_DISABLE', '1')  # 关闭akshare进度条, 保持日志清爽
 import json
 import time
 import signal
@@ -30,7 +31,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 STATE_FILE = DATA_DIR / "daemon_state.json"
 
 # 夜间休眠: 北京时间 01:00-07:00 暂停扫描 (加密市场仍开盘但波动低)
-SLEEP_START_HOUR = 1
+SLEEP_START_HOUR = 4  # 美股04:00收盘后才休眠
 SLEEP_END_HOUR = 7
 BEIJING_TZ = timezone(timedelta(hours=8))
 
@@ -181,6 +182,89 @@ def build_daily_report(state: dict, pf) -> str:
     return "\n".join(lines)
 
 
+# ── 多策略并行配置 ──
+STRATEGY_CONFIG = {
+    "ml_momentum": True,           # ML融合动量策略
+    "mean_reversion_grid": True,   # 均值回归网格策略
+    "cross_market_alpha": True,    # 跨市场Alpha套利
+    "aggressive": False,           # 激进交易 (默认关闭，波动大)
+}
+
+
+def execute_strategy_signals(signals: list, pf) -> list:
+    """
+    执行策略信号 (仅BUY, SELL记录日志不自动平仓)
+
+    规则:
+      - 只执行 BUY 信号
+      - 已有持仓的 symbol 跳过
+      - 每策略最多执行 1 个
+      - 风控检查 + 最低 ¥200
+      - entry_reason 标注策略名
+    """
+    from risk import RiskController
+    rc = RiskController(pf)
+    total_value = pf.total_value
+    results = []
+
+    held_symbols = [p.symbol for p in pf.open_positions if p.market == "crypto"]
+
+    # 按策略分组，每策略选最强的 BUY
+    buy_by_strategy = {}
+    for s in signals:
+        if s["action"] != "BUY":
+            continue
+        if s["symbol"] in held_symbols:
+            continue
+        strat = s.get("strategy_name", "未知策略")
+        if strat not in buy_by_strategy or s["score"] > buy_by_strategy[strat]["score"]:
+            buy_by_strategy[strat] = s
+
+    for strat_name, sig in buy_by_strategy.items():
+        try:
+            cash = pf.cash.get("crypto", 0)
+            size_pct = sig.get("suggested_size", 0.05)
+            if isinstance(size_pct, float) and size_pct > 1:
+                size_pct = size_pct / 100
+            max_size = min(cash * size_pct, cash * 0.3)
+
+            if max_size < 200:
+                log(f"  💤 [{strat_name}] {sig['symbol']} 资金不足 (可用{cash:.0f}, 需≥200)")
+                continue
+
+            score = sig.get("score", 50)
+            check = rc.pre_trade_check("crypto", max_size, score, total_value)
+            if not check.passed:
+                log(f"  ⚠️ [{strat_name}] {sig['symbol']} 风控拦截: {check.reason}")
+                continue
+
+            quantity = max_size / sig["price"]
+            reason = f"[{strat_name}] " + " | ".join(sig.get("reasons", ["信号触发"])[:3])
+
+            trade = pf.buy(
+                market="crypto", symbol=sig["symbol"],
+                name=sig.get("name", sig["symbol"]),
+                price=sig["price"], quantity=quantity,
+                reason=reason,
+            )
+            if trade:
+                result_msg = f"🧠 [{strat_name}] BUY {sig['symbol']} ¥{max_size:.0f} | 评分{sig['score']:.0f} | 置信{sig['confidence']:.0%}"
+                results.append(result_msg)
+                log(f"  ✅ {result_msg}")
+                held_symbols.append(sig["symbol"])  # 防止同轮重复买入
+        except Exception as e:
+            log(f"  ❌ [{strat_name}] 执行失败: {e}")
+
+    # 记录 SELL 信号到日志
+    sell_sigs = [s for s in signals if s["action"] == "SELL"]
+    if sell_sigs:
+        log(f"  📋 {len(sell_sigs)} 条SELL信号 (仅记录，出场走全局止损/止盈):")
+        for s in sell_sigs[:5]:
+            log(f"     🔴 [{s.get('strategy_name', '?')}] {s['symbol']} | 评分{s['score']:.0f} | 置信{s['confidence']:.0%}")
+
+    return results
+
+
 def run_trade_cycle(state: dict) -> dict:
     """执行一次交易周期"""
     from portfolio import PortfolioManager
@@ -218,17 +302,34 @@ def run_trade_cycle(state: dict) -> dict:
                 from auto_trade import auto_scan_and_trade
                 results, pf = auto_scan_and_trade(["crypto"], use_ml=False, use_rolling=False)
 
+        # ── 🆕 多策略并行引擎 (strategies.py + aggressive_trader) ──
+        try:
+            from strategy_runner import run_all_strategies, STRATEGY_CONFIG as ST_CFG
+            enabled = [k for k, v in ST_CFG.items() if v]
+            if enabled:
+                log(f"🧠 多策略引擎: {len(enabled)}条策略线 ({', '.join(enabled)})")
+                strategy_signals = run_all_strategies()
+                if strategy_signals:
+                    strat_results = execute_strategy_signals(strategy_signals, pf)
+                    if strat_results:
+                        results.extend(strat_results)
+                        log(f"🧠 多策略引擎: {len(strat_results)} 笔执行")
+                else:
+                    log("💤 多策略引擎: 无信号")
+        except Exception as e:
+            log(f"⚠️ 多策略引擎异常: {e}")
+
         # ── A股 + 美股传统信号扫描 (ML引擎不覆盖) ──
         try:
             from auto_trade import auto_scan_and_trade
             trad_results, pf = auto_scan_and_trade(
-                ["a_stock", "us_stock"], use_ml=False, use_rolling=False
+                ["a_stock", "us_stock", "hk_stock"], use_ml=False, use_rolling=False
             )
             if trad_results:
                 results.extend(trad_results)
-                log(f"📊 A股/美股: {len(trad_results)} 笔信号")
+                log(f"📊 A股/美股/港股: {len(trad_results)} 笔信号")
         except Exception as e:
-            log(f"⚠️ A股/美股扫描异常: {e}")
+            log(f"⚠️ A股/美股/港股扫描异常: {e}")
 
         return {"ok": True, "results": results, "pf": pf}
 

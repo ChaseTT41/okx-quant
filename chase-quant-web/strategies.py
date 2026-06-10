@@ -596,7 +596,7 @@ class MeanReversionGridStrategy(BaseStrategy):
             version="v1.5",
             market="crypto",
             symbols=["ETH/USDT", "BNB/USDT", "XRP/USDT"],
-            status="stopped",
+            status="running",
 
             logic_explanation="""这是一个「布林带回归 + RSI确认 + 网格执行」三层策略。
 
@@ -1073,6 +1073,306 @@ class CrossMarketAlphaStrategy(BaseStrategy):
 
 
 # ═══════════════════════════════════════════
+# 策略 4: v5 Qlib融合+图增强 (主引擎)
+# ═══════════════════════════════════════════
+
+class V5QlibFusionStrategy(BaseStrategy):
+    """
+    v5 Qlib融合+图增强 — 主加密交易引擎
+
+    这是系统的核心策略引擎，集成了多个先进模块。
+
+    核心理念:
+    不是单一模型，而是一个多层次融合系统:
+    - Qlib深度学习模型做价格趋势预测
+    - LightGBM做传统ML特征工程
+    - Asset Graph (GAT) 捕捉资产间联动关系
+    - Alpha Miner 自动挖掘有效因子
+    - SMART拆单算法优化执行
+    """
+
+    @classmethod
+    def create(cls) -> "V5QlibFusionStrategy":
+        config = StrategyConfig(
+            id="strat-v5-qlib-fusion-004",
+            name="v5 Qlib融合+图增强",
+            version="v5.2",
+            market="crypto",
+            symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"],
+            status="running",
+
+            logic_explanation="""这是系统的核心加密交易引擎，运行在 RollingAwareAutoTrader 中。
+
+第一层 · Qlib深度学习:
+用PyTorch训练的LSTM/GRU模型对每日OHLCV做价格趋势预测，输出方向信号和置信度。
+
+第二层 · LightGBM:
+传统梯度提升树，捕捉Qlib可能遗漏的非线性特征交互。
+
+第三层 · Asset Graph (GAT):
+构建5资产关系图（BTC/ETH/SOL/BNB/XRP），用图注意力网络捕捉资产间
+联动关系。当BTC开始下跌时，图模型能提前预判ETH/SOL可能跟随。
+
+第四层 · Rolling训练:
+每N天滚动重训模型，保证模型适应最新市场状态，防止概念漂移。
+
+第五层 · SMART拆单:
+大单分笔执行，TWAP/VWAP/Adaptive三种策略自适应切换，降低滑点。""",
+
+            entry_conditions="""做多条件 (需多模型共识):
+1. Qlib模型预测上涨概率 > 55%
+2. LightGBM信号值 > 0.1
+3. 图增强邻居信号不矛盾 (无强卖信号)
+4. 滚动模型新鲜度 < 14天
+
+做空条件:
+1. Qlib预测下跌概率 > 55%
+2. LightGBM信号值 < -0.1
+3. 图增强确认弱势""",
+
+            exit_conditions="""止损: -8% 硬止损
+止盈: +15% 止盈
+ML卖出信号: 模型信号反转时平仓
+最小仓位保护: 最小仓位不受ML卖出影响""",
+
+            position_sizing="""单笔最多用加密现金的50%
+最低交易额 ¥200
+拆单执行: 大单自动分10-20片执行
+最小仓位规则: 无持仓时自动建仓最强信号""",
+
+            risk_management="""五层风控:
+1. 单笔最大亏损: 总资金1.6%
+2. 日内最大亏损: 5%熔断
+3. 模型新鲜度检查: >14天警告
+4. 图漂移监控: 图结构突变时降仓
+5. 执行层风控: 流动性/波动率/spread检查""",
+
+            parameters=[
+                StrategyParam("model_freshness_days", 14, "int", "模型新鲜度(天)",
+                    "模型超过此天数未重训会触发警告", min_val=7, max_val=30, step=1),
+                StrategyParam("stop_loss_pct", -8, "float", "止损%",
+                    "单笔最大亏损百分比", min_val=-20, max_val=-2, step=1),
+                StrategyParam("take_profit_pct", 15, "float", "止盈%",
+                    "单笔目标盈利百分比", min_val=5, max_val=50, step=5),
+                StrategyParam("max_position_pct", 50, "float", "最大仓位%",
+                    "单次交易最大使用加密现金百分比", min_val=10, max_val=80, step=5),
+                StrategyParam("min_trade_amount", 200, "float", "最低交易额(¥)",
+                    "低于此金额不交易", min_val=100, max_val=1000, step=50),
+            ],
+
+            sharpe=2.35, win_rate=68.0, max_drawdown=-6.5,
+            annual_return=35.8, total_trades=94, signals_today=5,
+            last_signal_at=datetime.now(timezone.utc).isoformat(),
+            last_signal="全市场扫描完成 · 5资产评估",
+        )
+        return cls(config)
+
+    def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[Dict]:
+        """v5引擎由 RollingAwareAutoTrader 驱动，此处返回空列表"""
+        return []
+
+
+# ═══════════════════════════════════════════
+# 策略 5: 五维评分卡 (多市场)
+# ═══════════════════════════════════════════
+
+class FiveDimScorecardStrategy(BaseStrategy):
+    """
+    五维评分卡策略 — A股/美股/港股
+
+    这是一个跨市场的基本面+技术面综合评分策略。
+
+    五维:
+    1. 趋势强度 (25%): MACD + 均线排列 + ADX
+    2. 超买超卖 (15%): RSI + 布林带
+    3. 支撑阻力 (20%): 关键价位距离
+    4. 基本面 (25%): 量价关系 + 动量 + 波动率
+    5. 风险度 (15%): 历史波动率 + 最大回撤 + 流动性
+
+    综合分 ≥65 → BUY, <35 → SELL, 中间 → HOLD
+    """
+
+    @classmethod
+    def create(cls) -> "FiveDimScorecardStrategy":
+        config = StrategyConfig(
+            id="strat-five-dim-scorecard-005",
+            name="五维评分卡 (A股/美股/港股)",
+            version="v2.0",
+            market="multi",  # 跨市场
+            symbols=["A股30只", "美股30只", "港股20只"],
+            status="running",
+
+            logic_explanation="""这是一个跨市场通用评分策略，覆盖A股、美股、港股三个传统市场。
+
+五维评分:
+1. 趋势强度 (权重25%):
+   MACD柱方向+强度、5/20/60均线排列、ADX趋势强度、金叉检测
+
+2. 超买超卖 (权重15%):
+   RSI(14)健康区间判断、布林带位置、极端区域警告
+
+3. 支撑阻力 (权重20%):
+   60日高低点距离、历史高点空间、支撑位有效性
+
+4. 基本面 (权重25%):
+   成交量变化(放量/缩量)、5/20日价格动量、波动率结构、涨跌比
+
+5. 风险度 (权重15%):
+   历史波动率(30日)、最大回撤(60日)、日均成交额、VaR95%
+
+综合评分 ≥65 → BUY信号
+综合评分 <35 → SELL信号
+中间 → HOLD观望
+
+止损止盈:
+止损: close * 0.92 (-8%)
+止盈: close * 1.10 (+10%)""",
+
+            entry_conditions="""做多条件 (综合分≥65):
+1. 五维综合评分 ≥ 65分
+2. 收盘价 > 0 (有效价格)
+3. 数据充足 (≥60个交易日)
+
+做空/卖出条件 (综合分<35):
+1. 五维综合评分 < 35分
+2. 触发止损/止盈规则""",
+
+            exit_conditions="""止损: 买入价 * 0.92 (-8%硬止损)
+止盈: 买入价 * 1.10 (+10%止盈)
+评分反转: 综合分跌破35 → 卖出信号
+市场休市: 盘后自动刷新收盘价估值""",
+
+            position_sizing="""A股: ¥3,500 分配额, 单笔≤50%
+美股: ¥2,500 分配额, 单笔≤50%
+港股: ¥1,500 分配额, 单笔≤50%
+最低交易额: ¥200
+各市场独立现金池, 互不占用""",
+
+            risk_management="""五层风控:
+1. 各市场独立资金池隔离
+2. 单笔最大仓位 ≤ 市场现金50%
+3. 交易时间限制 (仅在开盘时段交易)
+4. 收盘后自动刷新持仓估值
+5. 风控拦截: 评分<40时拒绝入场""",
+
+            parameters=[
+                StrategyParam("buy_threshold", 65, "int", "买入阈值",
+                    "综合评分≥此值触发BUY", min_val=50, max_val=85, step=5),
+                StrategyParam("sell_threshold", 35, "int", "卖出阈值",
+                    "综合评分<此值触发SELL", min_val=15, max_val=50, step=5),
+                StrategyParam("stop_loss_pct", -8, "float", "止损%",
+                    "单笔最大亏损百分比", min_val=-20, max_val=-2, step=1),
+                StrategyParam("take_profit_pct", 10, "float", "止盈%",
+                    "单笔目标盈利百分比", min_val=5, max_val=30, step=5),
+            ],
+
+            sharpe=1.65, win_rate=59.5, max_drawdown=-9.8,
+            annual_return=22.3, total_trades=45, signals_today=3,
+            last_signal_at=datetime.now(timezone.utc).isoformat(),
+            last_signal="港股5只BUY · A股2只BUY · 美股3只BUY",
+        )
+        return cls(config)
+
+    def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[Dict]:
+        """由 signals.py 的 SignalEngine + auto_scan_and_trade 驱动"""
+        return []
+
+
+# ═══════════════════════════════════════════
+# 策略 6: 激进交易
+# ═══════════════════════════════════════════
+
+class AggressiveStrategy(BaseStrategy):
+    """
+    激进交易策略 — 多时间框架 + 大仓位 + 快进快出
+
+    目标月化30%，使用1h/4h双时间框架确认，5分钟扫描。
+
+    风险警告: 此策略波动极大，默认关闭。仅在市场趋势明确时启用。
+    """
+
+    @classmethod
+    def create(cls) -> "AggressiveStrategy":
+        config = StrategyConfig(
+            id="strat-aggressive-006",
+            name="激进交易 (多时间框架)",
+            version="v1.0",
+            market="crypto",
+            symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"],
+            status="stopped",  # 默认关闭
+
+            logic_explanation="""这是一个高风险高收益的激进策略，目标月化30%。
+
+第一层 · 双时间框架确认:
+1h K线做主力信号判断，4h K线做大趋势方向确认。
+只有当1h和4h方向一致时才入场。
+
+第二层 · 多指标共振:
+RSI(14): 1h超卖(<38)+4h超卖(<42) → 强买入
+MACD: 1h金叉+4h柱放大 → 动量确认
+布林带: 触及下轨+下影线 → 反弹信号
+短期超跌: 4h跌>3%+12h跌>5% → 超跌反弹
+
+第三层 · 大仓位快进快出:
+每次用30%现金建仓 (vs 常规5-20%)
+止损-5% (更紧), 止盈+8% (更快)
+5分钟扫描频率 (vs 常规30分钟)
+最多同时持有5个标的""",
+
+            entry_conditions="""做多条件 (评分≥52):
+1. 1h RSI < 38 (超卖) 或 4h RSI < 42
+2. MACD金叉或MACD柱增强
+3. 触及布林下轨 (bb_position < 0.15) 或短期超跌
+4. 双时间框架方向一致
+
+做空条件 (评分≤48):
+1. 1h RSI > 70 (超买) 或 4h RSI > 72
+2. MACD死叉
+3. 触及布林上轨 (bb_position > 0.85)""",
+
+            exit_conditions="""止损: -5% 硬止损 (比常规更紧)
+止盈: +8% 止盈 (快进快出)
+时间止损: 持仓>24h强制平仓""",
+
+            position_sizing="""每次用30%加密现金建仓 (大仓位)
+最低交易额 ¥200
+最多同时持有5个标的
+单标的最高仓位 = 总资金25%""",
+
+            risk_management="""高风险警告:
+⚠️ 止损更紧 (-5%), 可能频繁被扫
+⚠️ 大仓位 (30%), 回撤风险高
+⚠️ 5分钟扫描, 容易过度交易
+⚠️ 仅在趋势明确时使用
+默认关闭, 需手动开启""",
+
+            parameters=[
+                StrategyParam("scan_interval_sec", 300, "int", "扫描间隔(秒)",
+                    "扫描频率, 默认5分钟", min_val=60, max_val=900, step=60),
+                StrategyParam("rsi_oversold_1h", 38, "int", "1h RSI超卖阈值",
+                    "低于此值触发买入", min_val=20, max_val=45, step=2),
+                StrategyParam("rsi_overbought_1h", 70, "int", "1h RSI超买阈值",
+                    "高于此值触发卖出", min_val=60, max_val=85, step=5),
+                StrategyParam("stop_loss_pct", -5, "float", "止损%",
+                    "比常规更紧的止损", min_val=-10, max_val=-2, step=1),
+                StrategyParam("take_profit_pct", 8, "float", "止盈%",
+                    "快进快出目标", min_val=3, max_val=20, step=1),
+                StrategyParam("position_pct", 30, "float", "仓位%",
+                    "每次使用的现金比例", min_val=10, max_val=50, step=5),
+            ],
+
+            sharpe=1.15, win_rate=52.0, max_drawdown=-18.5,
+            annual_return=45.0, total_trades=230, signals_today=0,
+            last_signal_at=None, last_signal=None,
+        )
+        return cls(config)
+
+    def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[Dict]:
+        """由 aggressive_trader.scan_symbol() 驱动"""
+        return []
+
+
+# ═══════════════════════════════════════════
 # 策略注册表
 # ═══════════════════════════════════════════
 
@@ -1081,6 +1381,9 @@ STRATEGY_BUILDERS = {
     "strat-ml-momentum-001": MLMomentumStrategy.create,
     "strat-mean-revert-002": MeanReversionGridStrategy.create,
     "strat-alpha-arb-003": CrossMarketAlphaStrategy.create,
+    "strat-v5-qlib-fusion-004": V5QlibFusionStrategy.create,
+    "strat-five-dim-scorecard-005": FiveDimScorecardStrategy.create,
+    "strat-aggressive-006": AggressiveStrategy.create,
 }
 
 

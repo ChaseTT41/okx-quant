@@ -72,8 +72,128 @@ st.markdown("""
         padding: 8px 12px; margin: 4px 0; border-radius: 0 8px 8px 0;
         font-size: 13px;
     }
+    /* ── 币安风格持仓表格 ── */
+    .bn-pos-header {
+        display: flex; align-items: center; padding: 10px 12px;
+        background: #0b0e11; border-bottom: 2px solid #2b2f36;
+        font-size: 11px; color: #848e9c; font-weight: 500;
+        border-radius: 8px 8px 0 0;
+    }
+    .bn-pos-row {
+        display: flex; align-items: center; padding: 14px 12px;
+        border-bottom: 1px solid #1e2329; transition: background 0.15s;
+    }
+    .bn-pos-row:hover { background: #1a1d24; }
+    .bn-pos-row:last-child { border-bottom: none; border-radius: 0 0 8px 8px; }
+    .bn-sym-logo {
+        width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+        margin-right: 10px; object-fit: cover;
+    }
+    .bn-sym-fallback {
+        width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+        margin-right: 10px; display: flex; align-items: center;
+        justify-content: center; font-weight: 700; font-size: 11px;
+    }
+    .bn-pnl-positive { color: #0ecb81; font-weight: 600; }
+    .bn-pnl-negative { color: #f6465d; font-weight: 600; }
+    .bn-tp-badge {
+        display: inline-block; background: #0ecb8120; color: #0ecb81;
+        padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-right: 4px;
+    }
+    .bn-sl-badge {
+        display: inline-block; background: #f6465d20; color: #f6465d;
+        padding: 2px 6px; border-radius: 3px; font-size: 11px;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# ── 币种元数据 (全名 + Logo + 品牌色) ──
+COIN_META = {
+    "BTC": {"name": "Bitcoin", "logo": "https://cryptologos.cc/logos/bitcoin-btc-logo.png", "color": "#F7931A"},
+    "ETH": {"name": "Ethereum", "logo": "https://cryptologos.cc/logos/ethereum-eth-logo.png", "color": "#627EEA"},
+    "BNB": {"name": "BNB Chain", "logo": "https://cryptologos.cc/logos/bnb-bnb-logo.png", "color": "#F0B90B"},
+    "SOL": {"name": "Solana", "logo": "https://cryptologos.cc/logos/solana-sol-logo.png", "color": "#9945FF"},
+    "XRP": {"name": "XRP", "logo": "https://cryptologos.cc/logos/xrp-xrp-logo.png", "color": "#00AEEF"},
+    "ADA": {"name": "Cardano", "logo": "https://cryptologos.cc/logos/cardano-ada-logo.png", "color": "#0033AD"},
+    "DOGE": {"name": "Dogecoin", "logo": "https://cryptologos.cc/logos/dogecoin-doge-logo.png", "color": "#C2A633"},
+    "AVAX": {"name": "Avalanche", "logo": "https://cryptologos.cc/logos/avalanche-avax-logo.png", "color": "#E84142"},
+    "DOT": {"name": "Polkadot", "logo": "https://cryptologos.cc/logos/polkadot-new-dot-logo.png", "color": "#E6007A"},
+    "LINK": {"name": "Chainlink", "logo": "https://cryptologos.cc/logos/chainlink-link-logo.png", "color": "#2A5ADA"},
+    "MATIC": {"name": "Polygon", "logo": "https://cryptologos.cc/logos/polygon-matic-logo.png", "color": "#8247E5"},
+    "ATOM": {"name": "Cosmos", "logo": "https://cryptologos.cc/logos/cosmos-atom-logo.png", "color": "#2E3148"},
+    "LTC": {"name": "Litecoin", "logo": "https://cryptologos.cc/logos/litecoin-ltc-logo.png", "color": "#345D9D"},
+    "UNI": {"name": "Uniswap", "logo": "https://cryptologos.cc/logos/uniswap-uni-logo.png", "color": "#FF007A"},
+    "APT": {"name": "Aptos", "logo": "https://cryptologos.cc/logos/aptos-apt-logo.png", "color": "#000000"},
+    "NEAR": {"name": "NEAR Protocol", "logo": "https://cryptologos.cc/logos/near-protocol-near-logo.png", "color": "#000000"},
+    "OP": {"name": "Optimism", "logo": "https://cryptologos.cc/logos/optimism-ethereum-op-logo.png", "color": "#FF0420"},
+    "ARB": {"name": "Arbitrum", "logo": "https://cryptologos.cc/logos/arbitrum-arb-logo.png", "color": "#28A0F0"},
+    "SUI": {"name": "Sui", "logo": "https://cryptologos.cc/logos/sui-sui-logo.png", "color": "#4DA2FF"},
+    "TON": {"name": "Toncoin", "logo": "https://cryptologos.cc/logos/toncoin-ton-logo.png", "color": "#0088CC"},
+    "FIL": {"name": "Filecoin", "logo": "https://cryptologos.cc/logos/filecoin-fil-logo.png", "color": "#0090FF"},
+    "TRX": {"name": "TRON", "logo": "https://cryptologos.cc/logos/tron-trx-logo.png", "color": "#FF0013"},
+    "ETC": {"name": "Ethereum Classic", "logo": "https://cryptologos.cc/logos/ethereum-classic-etc-logo.png", "color": "#328332"},
+    "ICP": {"name": "Internet Computer", "logo": "https://cryptologos.cc/logos/internet-computer-icp-logo.png", "color": "#3B00B9"},
+    "RENDER": {"name": "Render", "logo": "https://cryptologos.cc/logos/render-token-rndr-logo.png", "color": "#E81F94"},
+    "WIF": {"name": "dogwifhat", "logo": "https://cryptologos.cc/logos/dogwifhat-wif-logo.png", "color": "#C68E4E"},
+    "PEPE": {"name": "Pepe", "logo": "https://cryptologos.cc/logos/pepe-pepe-logo.png", "color": "#6BAF37"},
+    "AAVE": {"name": "Aave", "logo": "https://cryptologos.cc/logos/aave-aave-logo.png", "color": "#B6509E"},
+    "ORDI": {"name": "ORDI", "logo": "https://cryptologos.cc/logos/ordi-ordi-logo.png", "color": "#FFFFFF"},
+}
+
+STOCK_META = {
+    # ── A股 (20只) ──
+    "000001": {"name": "平安银行", "logo": "", "color": "#E60012"},
+    "000002": {"name": "万科A", "logo": "", "color": "#C41E2A"},
+    "000568": {"name": "泸州老窖", "logo": "", "color": "#D4213D"},
+    "000858": {"name": "五粮液", "logo": "", "color": "#C41E2A"},
+    "002415": {"name": "海康威视", "logo": "", "color": "#FF6600"},
+    "002475": {"name": "立讯精密", "logo": "", "color": "#0088CC"},
+    "002594": {"name": "比亚迪", "logo": "", "color": "#0088CC"},
+    "002714": {"name": "牧原股份", "logo": "", "color": "#00AA55"},
+    "300059": {"name": "东方财富", "logo": "", "color": "#E60012"},
+    "300124": {"name": "汇川技术", "logo": "", "color": "#0088CC"},
+    "300750": {"name": "宁德时代", "logo": "", "color": "#0088CC"},
+    "600036": {"name": "招商银行", "logo": "", "color": "#E60012"},
+    "600276": {"name": "恒瑞医药", "logo": "", "color": "#0088CC"},
+    "600519": {"name": "贵州茅台", "logo": "", "color": "#C41E2A"},
+    "600809": {"name": "山西汾酒", "logo": "", "color": "#C41E2A"},
+    "600900": {"name": "长江电力", "logo": "", "color": "#0088CC"},
+    "601012": {"name": "隆基绿能", "logo": "", "color": "#00AA55"},
+    "601318": {"name": "中国平安", "logo": "", "color": "#E60012"},
+    "601888": {"name": "中国中免", "logo": "", "color": "#E60012"},
+    "603259": {"name": "药明康德", "logo": "", "color": "#0088CC"},
+    # ── 美股 (20只) ──
+    "AAPL": {"name": "Apple Inc.", "logo": "https://companieslogo.com/img/orig/AAPL-bf3a5.png", "color": "#A2AAAD"},
+    "MSFT": {"name": "Microsoft", "logo": "https://companieslogo.com/img/orig/MSFT-a444a.png", "color": "#00A4EF"},
+    "GOOGL": {"name": "Alphabet (Google)", "logo": "https://companieslogo.com/img/orig/GOOGL-0e4f2.png", "color": "#4285F4"},
+    "NVDA": {"name": "NVIDIA", "logo": "https://companieslogo.com/img/orig/NVDA-6cab1.png", "color": "#76B900"},
+    "TSLA": {"name": "Tesla", "logo": "https://companieslogo.com/img/orig/TSLA-6da1e.png", "color": "#E82127"},
+    "META": {"name": "Meta Platforms", "logo": "https://companieslogo.com/img/orig/META-0f2c1.png", "color": "#0668E1"},
+    "AMZN": {"name": "Amazon", "logo": "https://companieslogo.com/img/orig/AMZN-e9f84.png", "color": "#FF9900"},
+    "AMD": {"name": "AMD", "logo": "", "color": "#ED1C24"},
+    "NFLX": {"name": "Netflix", "logo": "", "color": "#E50914"},
+    "BABA": {"name": "阿里巴巴", "logo": "", "color": "#FF6A00"},
+    "JD": {"name": "京东", "logo": "", "color": "#E2231A"},
+    "PDD": {"name": "拼多多", "logo": "", "color": "#E2231A"},
+    "NIO": {"name": "蔚来", "logo": "", "color": "#0088CC"},
+    "BIDU": {"name": "百度", "logo": "", "color": "#2932E1"},
+    "LI": {"name": "理想汽车", "logo": "", "color": "#0088CC"},
+    "SPY": {"name": "标普500ETF", "logo": "", "color": "#0088CC"},
+    "QQQ": {"name": "纳斯达克100ETF", "logo": "", "color": "#0088CC"},
+    "IWM": {"name": "罗素2000ETF", "logo": "", "color": "#0088CC"},
+    "SMH": {"name": "半导体ETF", "logo": "", "color": "#0088CC"},
+    "TLT": {"name": "长期国债ETF", "logo": "", "color": "#0088CC"},
+}
+
+
+def get_asset_meta(symbol: str, market: str = "crypto") -> dict:
+    """从 symbol (如 ETH/USDT) 提取资产名并返回元数据"""
+    if market == "crypto":
+        base = symbol.split("/")[0] if "/" in symbol else symbol
+        return COIN_META.get(base, {"name": base, "logo": "", "color": "#8b949e"})
+    else:
+        return STOCK_META.get(symbol, {"name": symbol, "logo": "", "color": "#8b949e"})
+
 
 # ── 初始化 ──
 @st.cache_resource
@@ -107,9 +227,9 @@ with st.sidebar:
     st.divider()
 
     # 月度目标进度
-    monthly_progress = total_pnl_pct / 30.0 * 100
+    monthly_progress = total_pnl_pct / 30.0  # 0~1+ (30%=1.0)
     st.caption(f"🎯 月目标 30% 进度")
-    st.progress(min(100, max(0, monthly_progress / 100)), text=f"{total_pnl_pct:+.1f}%/30%")
+    st.progress(min(1.0, max(0.0, monthly_progress)), text=f"{total_pnl_pct:+.1f}%/30%")
 
     st.divider()
 
@@ -341,49 +461,145 @@ with tab2:
 
 
 # ═══════════════════════════════════════════
-# Tab 3: 持仓
+# Tab 3: 持仓 — 基于币安真实界面复刻 (参考: MockScreen + 币安帮助中心)
 # ═══════════════════════════════════════════
 with tab3:
-    st.header("💼 当前持仓")
-
     open_pos = pf.open_positions
+    total_pnl = sum(p.pnl for p in open_pos) if open_pos else 0
+    total_pos_val = sum(p.value for p in open_pos) if open_pos else 0
+    total_pnl_pct = (total_pnl / (total_pos_val - total_pnl) * 100) if (total_pos_val - total_pnl) > 0 else 0
+    win_count = sum(1 for p in open_pos if p.pnl > 0) if open_pos else 0
+
+    # ── 币安顶部状态栏 (纯展示 HTML, 结构来自 Binance Futures 页面顶部) ──
+    pnl_color_bar = "#0ecb81" if total_pnl >= 0 else "#f6465d"
+    st.markdown(f"""
+    <div style="display:flex;align-items:center;gap:28px;padding:14px 0;margin-bottom:12px;
+        border-bottom:1px solid #2b2f36;flex-wrap:wrap;">
+        <div style="display:flex;align-items:baseline;gap:8px;">
+            <span style="font-size:22px;font-weight:700;color:#eaecef;">¥{pf.total_value:,.2f}</span>
+            <span style="font-size:11px;color:#848e9c;">≈ 总权益</span>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:6px;">
+            <span style="font-size:12px;color:#848e9c;">未实现盈亏</span>
+            <span style="font-size:16px;font-weight:600;color:{pnl_color_bar};">¥{total_pnl:+,.2f}</span>
+            <span style="font-size:13px;font-weight:600;color:{pnl_color_bar};">({total_pnl_pct:+.2f}%)</span>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:6px;">
+            <span style="font-size:12px;color:#848e9c;">可用资金</span>
+            <span style="font-size:14px;font-weight:500;color:#eaecef;">¥{pf.total_cash:,.2f}</span>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:6px;">
+            <span style="font-size:12px;color:#848e9c;">持仓</span>
+            <span style="font-size:14px;font-weight:500;color:#eaecef;">{len(open_pos)} 个</span>
+            <span style="font-size:11px;color:#848e9c;">· 盈利 {win_count}/{len(open_pos)}</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
     if not open_pos:
         st.info("📭 无持仓 — 等待交易信号触发")
     else:
-        for pos in open_pos:
-            pnl_color = "#00ff88" if pos.pnl_pct >= 0 else "#ff4444"
-            market_icons = {"crypto": "₿", "a_stock": "🇨🇳", "us_stock": "🇺🇸"}
+        # ── 表格容器 ──
+        with st.container(border=True):
+            # 表头 (币安 Positions 表: Symbol | Size | Entry Price | Mark Price | Position Value | Unrealized PnL | TP/SL | Close)
+            hdr_cols = st.columns([2.2, 1.2, 1.2, 1.2, 1.2, 2.2, 1.2])
+            hdr_labels = ["交易对", "数量", "入场价", "标记价", "持仓市值", "未实现盈亏 (ROI%)", "操作"]
+            for i, (col, label) in enumerate(zip(hdr_cols, hdr_labels)):
+                with col:
+                    st.caption(label)
 
-            # 计算仓位占比
-            pos_pct = pos.value / pf.total_value * 100 if pf.total_value > 0 else 0
-
-            col1, col2, col3 = st.columns([3, 1, 1])
-            with col1:
-                st.markdown(f"""
-                **{market_icons.get(pos.market, '')} {pos.symbol}** — {pos.name}
-                <br><small>入场: ¥{pos.entry_price:.2f} | 现价: ¥{pos.current_price:.2f} |
-                数量: {pos.quantity:.4f}</small>
-                <br><small style="color:{pnl_color}">盈亏: ¥{pos.pnl:+.2f} ({pos.pnl_pct:+.2f}%) |
-                仓位: {pos_pct:.1f}%</small>
-                """, unsafe_allow_html=True)
-
-            with col2:
-                # 进度条
-                pnl_pct_clamped = max(-10, min(15, pos.pnl_pct))
-                st.progress((pnl_pct_clamped + 10) / 25,
-                           text=f"{pos.pnl_pct:+.1f}%")
-
-            with col3:
-                if st.button("🔴 平仓", key=f"sell_{pos.id}"):
-                    trade = pf.sell(pos.id, pos.current_price, "手动平仓")
-                    if trade:
-                        pf.take_snapshot()
-                        st.rerun()
-
-            # 入场理由
-            st.markdown(f'<div class="reason-box">📝 {pos.entry_reason}</div>',
-                       unsafe_allow_html=True)
             st.divider()
+
+            # 数据行 — 每行一个 st.columns, 完全对应币安表格列
+            for pos in open_pos:
+                meta = get_asset_meta(pos.symbol, pos.market)
+                pnl_c = "#0ecb81" if pos.pnl_pct >= 0 else "#f6465d"
+                entry_px = pos.avg_entry_price if pos.avg_entry_price > 0 else pos.entry_price
+                pos_pct = pos.value / pf.total_value * 100 if pf.total_value > 0 else 0
+                ticker = pos.symbol.split("/")[0] if "/" in pos.symbol else pos.symbol
+                tp_dist = ((pos.take_profit / pos.current_price) - 1) * 100
+                sl_dist = ((pos.stop_loss / pos.current_price) - 1) * 100
+
+                row_cols = st.columns([2.2, 1.2, 1.2, 1.2, 1.2, 2.2, 1.2])
+
+                with row_cols[0]:
+                    # 交易对 — Logo + 全名 + ticker (币安标准格式)
+                    if meta["logo"]:
+                        st.markdown(f"""
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            <img src="{meta['logo']}" style="width:28px;height:28px;border-radius:50%;" onerror="this.style.display='none'">
+                            <div style="line-height:1.3;">
+                                <div style="font-weight:600;color:#eaecef;font-size:14px;">{meta['name']}</div>
+                                <div style="font-size:11px;color:#848e9c;">{pos.symbol}</div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"""
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            <span style="width:28px;height:28px;border-radius:50%;background:{meta['color']}20;
+                                display:inline-flex;align-items:center;justify-content:center;
+                                font-weight:700;font-size:11px;color:{meta['color']};
+                                border:1px solid {meta['color']}40;">{ticker[:2]}</span>
+                            <div style="line-height:1.3;">
+                                <div style="font-weight:600;color:#eaecef;font-size:14px;">{meta['name']}</div>
+                                <div style="font-size:11px;color:#848e9c;">{pos.symbol}</div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                with row_cols[1]:
+                    # 数量 — 币安 Size 列
+                    st.markdown(f"""
+                    <div style="line-height:1.4;">
+                        <span style="color:#eaecef;font-weight:500;font-size:13px;">{pos.quantity:.4f}</span>
+                        <span style="color:#848e9c;font-size:10px;display:block;">{ticker}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                with row_cols[2]:
+                    # 入场价 — 币安 Entry Price 列
+                    st.markdown(f"""
+                    <span style="color:#eaecef;font-family:monospace;font-size:13px;">¥{entry_px:,.2f}</span>
+                    """, unsafe_allow_html=True)
+
+                with row_cols[3]:
+                    # 标记价 (当前价) — 币安 Mark Price 列
+                    st.markdown(f"""
+                    <span style="color:{pnl_c};font-family:monospace;font-size:13px;font-weight:500;">¥{pos.current_price:,.2f}</span>
+                    """, unsafe_allow_html=True)
+
+                with row_cols[4]:
+                    # 持仓市值 — 币安 Position Value
+                    st.markdown(f"""
+                    <div style="line-height:1.4;">
+                        <span style="color:#eaecef;font-family:monospace;font-size:13px;">¥{pos.value:,.2f}</span>
+                        <span style="color:#848e9c;font-size:10px;display:block;">仓位 {pos_pct:.1f}%</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                with row_cols[5]:
+                    # 未实现盈亏 — 币安 Unrealized PnL (ROI%) 列, 最显眼
+                    st.markdown(f"""
+                    <div style="line-height:1.5;">
+                        <span style="font-weight:700;font-size:15px;color:{pnl_c};">¥{pos.pnl:+,.2f}</span>
+                        <span style="font-size:12px;color:{pnl_c};margin-left:4px;">({pos.pnl_pct:+.2f}%)</span>
+                        <div style="margin-top:2px;">
+                            <span class="bn-tp-badge">🎯 +{tp_dist:.1f}%</span>
+                            <span class="bn-sl-badge">🛑 {sl_dist:+.1f}%</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                with row_cols[6]:
+                    # 平仓按钮 — 币安 Close 按钮, 红色
+                    if st.button("平仓", key=f"sell_{pos.id}", type="primary"):
+                        trade = pf.sell(pos.id, pos.current_price, "手动平仓")
+                        if trade:
+                            pf.take_snapshot()
+                            st.rerun()
+
+                st.divider()
 
 
 # ═══════════════════════════════════════════

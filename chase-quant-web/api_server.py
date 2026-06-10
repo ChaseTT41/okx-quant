@@ -41,7 +41,7 @@ except ImportError:
     CCXT_AVAILABLE = False
 
 # ── 信号引擎 ──
-from signals import SignalEngine, CryptoSignals
+from signals import SignalEngine, CryptoSignals, AStockSignals, USStockSignals, HKStockSignals
 
 try:
     from ml_signal_v5 import MLSignalEngineV5, FusionSignal
@@ -123,12 +123,75 @@ _exchange: Optional[object] = None
 _signal_engine: Optional[SignalEngine] = None
 _ml_engine: Optional[object] = None
 
+# ── 内存缓存 (减少重复API调用 + 加速图表加载) ──
+_market_data_cache: Dict[str, tuple] = {}  # key -> (data, expiry_timestamp)
+_CACHE_TTL = 5.0  # 秒，同一symbol+timeframe的缓存时间
+_MARKET_CACHE_TTL = {  # 各市场缓存TTL（股票变化慢，可用更长TTL）
+    "crypto": 5.0,
+    "a_stock": 15.0,
+    "us_stock": 15.0,
+    "hk_stock": 15.0,
+}
+_DASHBOARD_CACHE: Optional[tuple] = None  # (data, expiry_timestamp)
+_DASHBOARD_CACHE_TTL = 3.0  # 秒
+_ML_INSIGHTS_CACHE: Optional[tuple] = None  # ML insights 缓存（60s，防止事件循环阻塞）
+_ML_INSIGHTS_CACHE_TTL = 60.0
+_SIGNALS_CACHE: Dict[str, tuple] = {}  # signals 缓存（30s，各市场独立）
+
+
+def _run_in_thread(fn, *args):
+    """在默认线程池中执行同步函数，避免阻塞事件循环"""
+    import concurrent.futures
+    import asyncio
+    loop = asyncio.get_event_loop()
+    return loop.run_in_executor(None, fn, *args)
+
+
+def _cache_key(prefix: str, *args) -> str:
+    """生成缓存 key，所有参数用 : 连接"""
+    return f"{prefix}:" + ":".join(str(a) for a in args)
+
+
+def _sanitize_float(v) -> float:
+    """清理 NaN/Inf 值为 JSON 安全的 float"""
+    try:
+        f = float(v)
+        import math
+        if math.isnan(f) or math.isinf(f):
+            return 0.0
+        return f
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _sanitize_candle(c: dict) -> dict:
+    """清理一根K线中的所有 float 字段"""
+    for key in ("open", "high", "low", "close", "volume"):
+        if key in c:
+            c[key] = _sanitize_float(c[key])
+    return c
+
+
+def _get_cached(cache_dict: Dict, key: str) -> Optional[any]:
+    """从缓存读取，过期返回 None"""
+    entry = cache_dict.get(key)
+    if entry is None:
+        return None
+    data, expiry = entry
+    if datetime.now(timezone.utc).timestamp() > expiry:
+        del cache_dict[key]
+        return None
+    return data
+
+
+def _set_cache(cache_dict: Dict, key: str, data: any, ttl: float):
+    """写入缓存"""
+    cache_dict[key] = (data, datetime.now(timezone.utc).timestamp() + ttl)
+
 
 def get_pf() -> PortfolioManager:
-    global _pf
-    if _pf is None:
-        _pf = PortfolioManager()
-    return _pf
+    """每次创建新实例, 确保读取最新磁盘数据 (守护进程可能已更新)"""
+    return PortfolioManager()
 
 
 def get_risk() -> RiskController:
@@ -541,6 +604,7 @@ async def get_dashboard():
     for pos in pf.open_positions:
         positions.append({
             "id": pos.id,
+            "market": pos.market,
             "symbol": pos.symbol,
             "name": pos.name,
             "entry_price": pos.entry_price,
@@ -560,6 +624,7 @@ async def get_dashboard():
     for t in recent_trades:
         trades_list.append({
             "id": t.id,
+            "market": t.market,
             "symbol": t.symbol,
             "name": t.name,
             "side": t.side,
@@ -702,51 +767,164 @@ async def get_market_snapshots():
         return {"snapshots": [], "count": 0, "error": str(e)}
 
 
+# ═══════════════════════════════════════════
+# 多市场 K线数据源 (Crypto / A股 / 美股 / 港股)
+# ═══════════════════════════════════════════
+
+def _fetch_klines_crypto(symbol: str, timeframe: str, limit: int) -> dict:
+    """加密货币 K线 — Binance via CCXT"""
+    exchange = get_exchange()
+    if exchange is None:
+        raise RuntimeError("CCXT exchange unavailable")
+    ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+    candles = []
+    for row in ohlcv:
+        candles.append(_sanitize_candle({
+            "time": int(row[0] / 1000),
+            "open": float(row[1]),
+            "high": float(row[2]),
+            "low": float(row[3]),
+            "close": float(row[4]),
+            "volume": float(row[5]),
+        }))
+    return {
+        "symbol": symbol, "timeframe": timeframe,
+        "candles": candles, "count": len(candles), "source": "binance",
+    }
+
+
+def _fetch_klines_usstock(symbol: str, timeframe: str, limit: int) -> dict:
+    """美股 K线 — yfinance"""
+    import yfinance as yf
+    tf_map = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+              "1h": "1h", "4h": "1h", "1d": "1d", "1w": "1wk"}
+    yf_interval = tf_map.get(timeframe, "1d")
+    # yfinance intraday 限制: 1m→7d, 5m/15m/30m/1h→60d
+    if yf_interval in ("1m",):
+        period = "7d"
+    elif yf_interval in ("5m", "15m", "30m", "1h"):
+        period = "60d"
+    elif yf_interval == "1wk":
+        period = f"{limit * 7}d"
+    else:
+        period = f"{limit}d"
+    ticker = yf.Ticker(symbol)
+    df = ticker.history(period=period, interval=yf_interval)
+    if df is None or len(df) == 0:
+        raise RuntimeError(f"yfinance returned empty data for {symbol}")
+    candles = []
+    for idx, row in df.iterrows():
+        t = int(idx.timestamp()) if hasattr(idx, 'timestamp') else int(pd.Timestamp(idx).timestamp())
+        candles.append(_sanitize_candle({
+            "time": t, "open": float(row["Open"]),
+            "high": float(row["High"]), "low": float(row["Low"]),
+            "close": float(row["Close"]), "volume": float(row["Volume"]),
+        }))
+    # 截取最近 limit 根
+    candles = candles[-limit:] if len(candles) > limit else candles
+    return {
+        "symbol": symbol, "timeframe": timeframe,
+        "candles": candles, "count": len(candles), "source": "yfinance",
+    }
+
+
+def _fetch_klines_astock(symbol: str, timeframe: str, limit: int) -> dict:
+    """A股 K线 — akshare (腾讯源, 仅日线)"""
+    import akshare as ak
+    # sh/sz 前缀
+    prefix = "sh" if symbol.startswith("6") else "sz"
+    symbol_tx = f"{prefix}{symbol}"
+    # stock_zh_a_hist_tx 仅支持日线；日内周期回退 mock
+    if timeframe not in ("1d", "1w"):
+        raise RuntimeError(f"akshare 仅支持日线/周线，{timeframe} 暂不支持")
+    start = (datetime.now() - timedelta(days=max(365, limit * 2))).strftime("%Y%m%d")
+    end = datetime.now().strftime("%Y%m%d")
+    df = ak.stock_zh_a_hist_tx(symbol=symbol_tx, start_date=start, end_date=end)
+    if df is None or len(df) == 0:
+        raise RuntimeError(f"akshare returned empty data for {symbol}")
+    candles = []
+    for _, row in df.iterrows():
+        t = int(pd.Timestamp(row["date"]).timestamp())
+        vol = float(row.get("amount", row.get("volume", 0)))
+        candles.append(_sanitize_candle({
+            "time": t, "open": float(row["open"]),
+            "high": float(row["high"]), "low": float(row["low"]),
+            "close": float(row["close"]), "volume": vol,
+        }))
+    candles = candles[-limit:] if len(candles) > limit else candles
+    return {
+        "symbol": symbol, "timeframe": timeframe,
+        "candles": candles, "count": len(candles), "source": "akshare",
+    }
+
+
+def _fetch_klines_hkstock(symbol: str, timeframe: str, limit: int) -> dict:
+    """港股 K线 — yfinance (.HK, 4位补零)"""
+    # 00700 → 0700.HK, 03690 → 3690.HK
+    yf_sym = f"{int(symbol):04d}.HK"
+    result = _fetch_klines_usstock(yf_sym, timeframe, limit)
+    result["symbol"] = symbol  # 还原为原始代码
+    return result
+
+
+def _fetch_klines(market: str, symbol: str, timeframe: str, limit: int) -> dict:
+    """多市场 K线调度"""
+    fetchers = {
+        "crypto": _fetch_klines_crypto,
+        "a_stock": _fetch_klines_astock,
+        "us_stock": _fetch_klines_usstock,
+        "hk_stock": _fetch_klines_hkstock,
+    }
+    return fetchers[market](symbol, timeframe, limit)
+
+
 @app.get("/api/market-data")
 async def get_market_data(
-    symbol: str = Query(..., description="交易对，如 BTC/USDT"),
+    symbol: str = Query(..., description="交易对/股票代码"),
     timeframe: str = Query("1h", regex="^(1m|5m|15m|30m|1h|4h|1d|1w)$"),
     limit: int = Query(200, ge=1, le=500),
+    market: str = Query("crypto", regex="^(crypto|a_stock|us_stock|hk_stock)$"),
 ):
-    """获取K线数据 — symbol 通过 query 参数传递（避免 / 路径问题）"""
-    sym = symbol.replace("-", "/")
-    exchange = get_exchange()
+    """获取多市场K线数据 — 带缓存加速"""
+    sym = symbol.replace("-", "/") if market == "crypto" else symbol.upper()
 
-    if exchange is None:
-        # 生成模拟K线
-        return _mock_klines(sym, timeframe, limit)
+    # ━━ 检查缓存 ━━
+    ck = _cache_key("klines", market, sym, timeframe, limit)
+    cached = _get_cached(_market_data_cache, ck)
+    if cached is not None:
+        cached["source"] = cached.get("source", "unknown") + "_cached"
+        return cached
 
+    ttl = _MARKET_CACHE_TTL.get(market, _CACHE_TTL)
     try:
-        ohlcv = exchange.fetch_ohlcv(sym, timeframe, limit=limit)
-        candles = []
-        for row in ohlcv:
-            candles.append({
-                "time": int(row[0] / 1000),  # 转为秒级Unix时间戳
-                "open": float(row[1]),
-                "high": float(row[2]),
-                "low": float(row[3]),
-                "close": float(row[4]),
-                "volume": float(row[5]),
-            })
-        return {
-            "symbol": sym,
-            "timeframe": timeframe,
-            "candles": candles,
-            "count": len(candles),
-            "source": "binance",
-        }
+        result = _fetch_klines(market, sym, timeframe, limit)
+        _set_cache(_market_data_cache, ck, result, ttl)
+        return result
     except Exception as e:
-        return _mock_klines(sym, timeframe, limit)
+        result = _mock_klines(sym, timeframe, limit, market)
+        _set_cache(_market_data_cache, ck, result, ttl)
+        return result
 
 
-def _mock_klines(symbol: str, timeframe: str, limit: int) -> dict:
-    """生成模拟K线数据"""
-    base_prices = {
+def _mock_klines(symbol: str, timeframe: str, limit: int, market: str = "crypto") -> dict:
+    """生成模拟K线数据 (多市场)"""
+    # 各市场基准价格
+    crypto_bases = {
         "BTC/USDT": 87200, "ETH/USDT": 3210, "BNB/USDT": 710,
         "SOL/USDT": 185, "XRP/USDT": 2.45, "DOGE/USDT": 0.32,
         "ADA/USDT": 0.85, "AVAX/USDT": 38.5, "DOT/USDT": 8.2, "LINK/USDT": 22.5,
     }
-    base = base_prices.get(symbol, 100)
+    if market == "crypto":
+        base = crypto_bases.get(symbol, 100)
+    elif market == "us_stock":
+        base = 150 * (1 + hash(symbol) % 100 / 200)
+    elif market == "a_stock":
+        base = 50 * (1 + hash(symbol) % 100 / 200)
+    elif market == "hk_stock":
+        base = 80 * (1 + hash(symbol) % 100 / 200)
+    else:
+        base = 100
+
     tf_seconds = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800}
     interval = tf_seconds.get(timeframe, 3600)
 
@@ -778,26 +956,80 @@ def _mock_klines(symbol: str, timeframe: str, limit: int) -> dict:
         "timeframe": timeframe,
         "candles": candles,
         "count": len(candles),
-        "source": "mock",
+        "source": f"mock_{market}",
+    }
+
+
+# ── 市场标的列表 ──
+
+@app.get("/api/market-symbols")
+async def get_market_symbols(
+    market: str = Query("crypto", regex="^(crypto|a_stock|us_stock|hk_stock)$"),
+):
+    """返回各市场标的列表: 用户持仓排前 + watchlist 排后"""
+    # 各市场 watchlist (从 signals.py)
+    watchlist_map = {
+        "crypto": [w if isinstance(w, str) else w[0] for w in CryptoSignals.WATCHLIST],
+        "a_stock": [w[0] for w in AStockSignals.WATCHLIST],
+        "us_stock": [w[0] for w in USStockSignals.WATCHLIST],
+        "hk_stock": [w[0] for w in HKStockSignals.WATCHLIST],
+    }
+    watchlist = watchlist_map.get(market, [])
+
+    # 用户持仓 (该市场)
+    pf = get_pf()
+    position_symbols = []
+    for p in pf.open_positions:
+        if p.market == market:
+            position_symbols.append(p.symbol)
+
+    # 合并: 持仓在前, watchlist 在后 (去重)
+    seen = set()
+    symbols = []
+    for s in position_symbols:
+        if s not in seen:
+            seen.add(s)
+            symbols.append(s)
+    for s in watchlist:
+        if s not in seen:
+            seen.add(s)
+            symbols.append(s)
+
+    return {
+        "market": market,
+        "symbols": symbols,
+        "position_symbols": position_symbols,
+        "count": len(symbols),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
 # ── 信号 ──
 
 @app.get("/api/signals")
-async def get_signals(market: str = Query("crypto", regex="^(crypto|a_stock|us_stock|all)$")):
-    """获取交易信号"""
-    try:
+async def get_signals(market: str = Query("crypto", regex="^(crypto|a_stock|us_stock|hk_stock|all)$")):
+    """获取交易信号 — 带30s缓存 + 线程池执行，防止阻塞事件循环"""
+    # ── 缓存命中直接返回 ──
+    cache_key = f"signals:{market}"
+    cached = _get_cached(_SIGNALS_CACHE, cache_key)
+    if cached is not None:
+        return cached
+
+    def _compute():
         engine = get_signal_engine()
-        all_signals = engine.scan_all()
+        # 按需扫描：只扫请求的市场，避免串行拉75个标的数据
+        if market == "all":
+            all_signals = engine.scan_all()
+        else:
+            scanner = getattr(engine, market, None)
+            if scanner:
+                sigs = scanner.scan()
+                all_signals = {market: [s for s in sigs if s.action == "BUY"]}
+            else:
+                all_signals = {market: []}
 
         result = {}
-        if market == "all":
-            target = all_signals
-        else:
-            target = {market: all_signals.get(market, [])}
-
-        for mkt, signals in target.items():
+        for mkt, signals in all_signals.items():
             result[mkt] = []
             for s in signals[:10]:
                 result[mkt].append({
@@ -816,21 +1048,34 @@ async def get_signals(market: str = Query("crypto", regex="^(crypto|a_stock|us_s
                     "adjusted_score": round(s.adjusted_score, 1),
                 })
 
-        return {
+        output = {
             "signals": result,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        # 存入缓存（30s TTL）
+        _SIGNALS_CACHE[cache_key] = (output, datetime.now(timezone.utc).timestamp() + 35.0)
+        return output
+
+    try:
+        result = await _run_in_thread(_compute)
+        return result
     except Exception as e:
         return {"signals": {}, "error": str(e)}
 
 
 @app.get("/api/ml-insights")
 async def get_ml_insights():
-    """获取ML信号洞察"""
+    """获取ML信号洞察 — 带60s缓存 + 线程池执行，防止阻塞事件循环"""
+    # ── 缓存命中直接返回 ──
+    cached = _get_cached({"_ml": _ML_INSIGHTS_CACHE} if _ML_INSIGHTS_CACHE else {}, "_ml")
+    if cached is not None:
+        return cached
+
     if not ML_V5_AVAILABLE:
         return {"insights": [], "error": "ML Signal Engine V5 不可用"}
 
-    try:
+    def _compute():
+        """在后台线程中执行重计算"""
         engine = get_ml_engine()
         if engine is None:
             return {"insights": [], "error": "ML引擎初始化失败"}
@@ -838,14 +1083,12 @@ async def get_ml_insights():
         insights = []
         for sym in ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "DOGE/USDT"]:
             try:
-                # 获取OHLCV数据
                 exchange = get_exchange()
                 if exchange:
                     ohlcv = exchange.fetch_ohlcv(sym, "1d", limit=365)
                     df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
                     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
                 else:
-                    # 模拟数据
                     dates = pd.date_range(end=datetime.now(), periods=365, freq="D")
                     np.random.seed(hash(sym) % 2**31)
                     base = {"BTC/USDT": 87200, "ETH/USDT": 3210, "SOL/USDT": 185, "BNB/USDT": 710, "XRP/USDT": 2.45, "DOGE/USDT": 0.32}.get(sym, 100)
@@ -884,11 +1127,19 @@ async def get_ml_insights():
                     "reasoning": "数据获取失败",
                 })
 
-        return {
+        result = {
             "insights": insights,
             "count": len(insights),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        # 存入缓存
+        global _ML_INSIGHTS_CACHE
+        _ML_INSIGHTS_CACHE = (result, datetime.now(timezone.utc).timestamp() + _ML_INSIGHTS_CACHE_TTL)
+        return result
+
+    try:
+        result = await _run_in_thread(_compute)
+        return result
     except Exception as e:
         return {"insights": [], "error": str(e)}
 
@@ -1005,7 +1256,7 @@ async def execute_trade(body: dict):
         raise HTTPException(status_code=400, detail="无效的交易对符号")
     if side not in ("buy", "sell"):
         raise HTTPException(status_code=400, detail="side 必须是 buy 或 sell")
-    if market not in ("crypto", "a_stock", "us_stock"):
+    if market not in ("crypto", "a_stock", "us_stock", "hk_stock"):
         raise HTTPException(status_code=400, detail="无效的市场类型")
 
     try:

@@ -85,6 +85,8 @@ def is_market_open(market: str) -> bool:
 
     if market == "a_stock":
         return (9.5 <= hour <= 11.5) or (13.0 <= hour <= 15.0)
+    elif market == "hk_stock":
+        return (9.5 <= hour <= 12.0) or (13.0 <= hour <= 16.0)
     elif market == "us_stock":
         # 美股夏令时 21:30-04:00 CST
         return hour >= 21.5 or hour <= 4.0
@@ -884,16 +886,30 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
     engine = SignalEngine()
 
     for market in markets:
-        if not is_market_open(market):
-            continue
-
         scanners = {
             "crypto": engine.crypto,
             "a_stock": engine.a_stock,
             "us_stock": engine.us_stock,
+            "hk_stock": engine.hk_stock,
         }
         scanner = scanners.get(market)
         if not scanner:
+            continue
+
+        # ── 收盘后价格刷新 ──
+        if not is_market_open(market):
+            # 市场关闭时仍然拉取最新收盘价更新持仓估值
+            try:
+                all_sigs_closed = scanner.scan()
+                for pos in pf.open_positions:
+                    if pos.market != market or pos.status == "closed":
+                        continue
+                    for sig in all_sigs_closed:
+                        if sig.symbol == pos.symbol:
+                            pf.update_price(pos.id, sig.price)
+                            break
+            except Exception:
+                pass
             continue
 
         all_sigs = scanner.scan()
@@ -902,7 +918,7 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
 
         # ── 第一步: 检查持仓止损/止盈 ──
         for pos in pf.open_positions:
-            if pos.market != market or pos.status != "closed":
+            if pos.market != market or pos.status == "closed":
                 continue
             for sig in all_sigs:
                 if sig.symbol == pos.symbol:
