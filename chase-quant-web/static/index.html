@@ -97,6 +97,34 @@
   .market-tab:hover { border-color: #30363d; color: #e6edf3; }
   .market-tab.active { background: #00d4aa; color: #0a0e14; border-color: #00d4aa; }
 
+  /* ── Scrollable Symbol Chips ── */
+  .symbol-chips-scroll {
+    display: flex; gap: 4px; overflow-x: auto; max-width: 100%;
+    padding-bottom: 2px; scroll-behavior: smooth;
+    scrollbar-width: thin; scrollbar-color: #1e2430 transparent;
+  }
+  .symbol-chips-scroll::-webkit-scrollbar { height: 4px; }
+  .symbol-chips-scroll::-webkit-scrollbar-track { background: transparent; }
+  .symbol-chips-scroll::-webkit-scrollbar-thumb { background: #1e2430; border-radius: 2px; }
+  .symbol-chips-scroll::-webkit-scrollbar-thumb:hover { background: #30363d; }
+  .symbol-chip {
+    padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;
+    cursor: pointer; border: 1px solid #1e2430; background: transparent;
+    color: #8b949e; transition: all 0.15s; white-space: nowrap; user-select: none;
+    flex-shrink: 0;
+  }
+  .symbol-chip:hover { border-color: #3b82f6; color: #e6edf3; }
+  .symbol-chip.active { background: rgba(0,212,170,0.15); border-color: #00d4aa; color: #00d4aa; }
+  .symbol-quick-nav {
+    background: #0d1117; border: 1px solid #1e2430; border-radius: 6px;
+    color: #e6edf3; font-size: 11px; padding: 3px 6px; outline: none;
+    cursor: pointer; max-width: 140px; flex-shrink: 0;
+    appearance: none; -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%238b949e' d='M4 5.5L1 2h6z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 6px center; padding-right: 20px;
+  }
+  .symbol-quick-nav:focus { border-color: #00d4aa; }
+
   /* ── Page visibility ── */
   .page { display: none; }
   .page.active { display: block; }
@@ -1144,7 +1172,8 @@
             <button class="market-tab" onclick="selectTradeMarket('hk_stock')" data-market="hk_stock">🇭🇰 港股</button>
           </div>
           <div class="flex items-center gap-1 flex-wrap">
-            <div id="trade-symbol-chips" class="flex gap-1 mr-2"></div>
+            <div id="trade-symbol-chips" class="symbol-chips-scroll mr-1" style="flex:1;min-width:0;"></div>
+            <select id="trade-symbol-quick-nav" class="symbol-quick-nav" onchange="onQuickNavSymbol(this.value)" title="快速切换标的"><option value="">📋 切换标的</option></select>
             <select id="trade-tf" onchange="switchTradeTF()" class="input-field w-auto text-xs py-1">
               <option value="5m">5m</option><option value="15m">15m</option>
               <option value="1h" selected>1h</option><option value="4h">4h</option><option value="1d">1d</option>
@@ -2637,22 +2666,49 @@ function buildTradeSymbolChips() {
   const entry = _marketSymbolsCache[`market-syms-${tradeMarket}`];
   const symbols = entry?.symbols || MARKET_FALLBACKS[tradeMarket] || MARKET_FALLBACKS['crypto'];
   const posSyms = entry?.positions || [];
+
+  // Build chips with proper names from STOCK_META
   container.innerHTML = symbols.map(s => {
-    const displayName = tradeMarket === 'crypto' ? s.replace('/USDT','') : s;
+    const meta = getAssetMeta(s, tradeMarket, s);
+    const displayName = meta.name || s;
     const isPosition = posSyms.includes(s);
-    const activeClass = (s === tradeSymbol)
-      ? 'bg-[rgba(0,212,170,0.15)] border-[#00d4aa] text-[#00d4aa]'
-      : 'bg-transparent border-[#1e2430] text-[#8b949e] hover:border-[#3b82f6]';
+    const activeClass = (s === tradeSymbol) ? 'active' : '';
     const posMark = isPosition ? ' 💼' : '';
-    return `<button class="text-xs px-2 py-1 rounded-md border cursor-pointer transition whitespace-nowrap ${activeClass}"
-      onclick="selectTradeSymbol('${s}')">${displayName}${posMark}</button>`;
+    return `<button class="symbol-chip ${activeClass}"
+      onclick="selectTradeSymbol('${s}')" title="${displayName}">${displayName}${posMark}</button>`;
   }).join('');
+
+  // Populate quick-nav dropdown
+  const nav = document.getElementById('trade-symbol-quick-nav');
+  if (nav) {
+    nav.innerHTML = '<option value="">📋 切换标的</option>' + symbols.map(s => {
+      const meta = getAssetMeta(s, tradeMarket, s);
+      const name = meta.name || s;
+      const sel = (s === tradeSymbol) ? ' selected' : '';
+      return `<option value="${s}"${sel}>${name}</option>`;
+    }).join('');
+  }
+}
+
+function onQuickNavSymbol(sym) {
+  if (!sym) return;
+  selectTradeSymbol(sym);
+  // Scroll selected chip into view
+  setTimeout(() => {
+    const activeChip = document.querySelector('#trade-symbol-chips .symbol-chip.active');
+    if (activeChip) activeChip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }, 50);
 }
 
 function selectTradeSymbol(sym) {
   tradeSymbol = sym;
   tradeMarket = tradeMarket || 'crypto';
   buildTradeSymbolChips();
+  // Scroll selected chip into view
+  setTimeout(() => {
+    const activeChip = document.querySelector('#trade-symbol-chips .symbol-chip.active');
+    if (activeChip) activeChip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }, 50);
   loadTradeKlineData();
   loadAIDecision();  // Update AI panel for selected symbol
 }
@@ -2689,7 +2745,8 @@ async function loadTradeKlineData() {
     tradeLivePrice = last.close;
     updateLivePriceDisplay(last);
     const marketLabel = {crypto:'Crypto', a_stock:'A股', us_stock:'美股', hk_stock:'港股'}[mkt] || '';
-    document.getElementById('trade-symbol-label').textContent = `${tradeSymbol} · ${tradeTF} · ${marketLabel}`;
+    const symbolDisplay = getAssetMeta(tradeSymbol, mkt, tradeSymbol).name || tradeSymbol;
+    document.getElementById('trade-symbol-label').textContent = `${symbolDisplay} · ${tradeTF} · ${marketLabel}`;
   } catch(e) { document.getElementById('trade-chart-loader')?.classList.add('hidden'); console.error('K-line data error:', e); }
 }
 
@@ -2911,11 +2968,12 @@ async function loadTradeLog() {
 // ── AI Decision Panel ──
 
 async function loadAIDecision() {
+  const mkt = tradeMarket || 'crypto';
   // Update signal symbol label
-  document.getElementById('ai-signal-symbol').textContent = tradeSymbol;
+  const symbolDisplay = getAssetMeta(tradeSymbol, mkt, tradeSymbol).name || tradeSymbol;
+  document.getElementById('ai-signal-symbol').textContent = symbolDisplay;
   document.getElementById('ai-update-time').textContent = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
 
-  const mkt = tradeMarket || 'crypto';
   try {
     // Fetch signals + ML insights in parallel
     const [sigRes, mlRes, riskRes] = await Promise.all([
