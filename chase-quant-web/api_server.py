@@ -829,27 +829,28 @@ def _fetch_klines_usstock(symbol: str, timeframe: str, limit: int) -> dict:
 
 
 def _fetch_klines_astock(symbol: str, timeframe: str, limit: int) -> dict:
-    """A股 K线 — akshare (腾讯源, 仅日线)"""
+    """A股 K线 — akshare 东方财富源 (日线/周线, 含成交量+成交额)"""
     import akshare as ak
-    # sh/sz 前缀
-    prefix = "sh" if symbol.startswith("6") else "sz"
-    symbol_tx = f"{prefix}{symbol}"
-    # stock_zh_a_hist_tx 仅支持日线；日内周期回退 mock
-    if timeframe not in ("1d", "1w"):
-        raise RuntimeError(f"akshare 仅支持日线/周线，{timeframe} 暂不支持")
-    start = (datetime.now() - timedelta(days=max(365, limit * 2))).strftime("%Y%m%d")
+    # stock_zh_a_hist 仅支持日线/周线；日内周期暂不支持
+    period_map = {"1d": "daily", "1w": "weekly"}
+    period = period_map.get(timeframe)
+    if not period:
+        raise RuntimeError(f"A股仅支持日线/周线，{timeframe} 暂不支持")
+    start = (datetime.now() - timedelta(days=min(250, max(60, limit)))).strftime("%Y%m%d")
     end = datetime.now().strftime("%Y%m%d")
-    df = ak.stock_zh_a_hist_tx(symbol=symbol_tx, start_date=start, end_date=end)
+    df = ak.stock_zh_a_hist(symbol=symbol, period=period, start_date=start, end_date=end, adjust="qfq")
     if df is None or len(df) == 0:
         raise RuntimeError(f"akshare returned empty data for {symbol}")
     candles = []
     for _, row in df.iterrows():
-        t = int(pd.Timestamp(row["date"]).timestamp())
-        vol = float(row.get("amount", row.get("volume", 0)))
+        t = int(pd.Timestamp(row["日期"]).timestamp())
+        # 成交量单位: 手 (100股), 转为股数
+        vol_shou = float(row.get("成交量", 0))
+        vol = vol_shou * 100 if vol_shou > 0 else 0
         candles.append(_sanitize_candle({
-            "time": t, "open": float(row["open"]),
-            "high": float(row["high"]), "low": float(row["low"]),
-            "close": float(row["close"]), "volume": vol,
+            "time": t, "open": float(row["开盘"]),
+            "high": float(row["最高"]), "low": float(row["最低"]),
+            "close": float(row["收盘"]), "volume": vol,
         }))
     candles = candles[-limit:] if len(candles) > limit else candles
     return {
