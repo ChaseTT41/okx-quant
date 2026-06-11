@@ -1172,8 +1172,8 @@
             <button class="market-tab" onclick="selectTradeMarket('hk_stock')" data-market="hk_stock">🇭🇰 港股</button>
           </div>
           <div class="flex items-center gap-1 flex-wrap">
-            <div id="trade-symbol-chips" class="symbol-chips-scroll mr-1" style="flex:1;min-width:0;"></div>
             <select id="trade-symbol-quick-nav" class="symbol-quick-nav" onchange="onQuickNavSymbol(this.value)" title="快速切换标的"><option value="">📋 切换标的</option></select>
+            <div id="trade-symbol-chips" class="symbol-chips-scroll mr-1" style="flex:1;min-width:0;"></div>
             <select id="trade-tf" onchange="switchTradeTF()" class="input-field w-auto text-xs py-1">
               <option value="5m">5m</option><option value="15m">15m</option>
               <option value="1h" selected>1h</option><option value="4h">4h</option><option value="1d">1d</option>
