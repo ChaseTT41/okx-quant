@@ -1,6 +1,6 @@
 """
 Chase的量化策略 🐾 — 自主量化交易仪表板
-Streamlit 本地 Web APP · 虚拟盘 · 三市场
+Streamlit 本地 Web APP · 虚拟盘 · 四市场
 """
 from __future__ import annotations
 import streamlit as st
@@ -18,6 +18,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 from portfolio import PortfolioManager, ALLOCATION, INITIAL_CAPITAL
 from signals import SignalEngine
 from risk import RiskController
+
+# MPT 组合优化引擎 (Phase 15)
+try:
+    from mpt_engine import MPTPortfolioOptimizer, ensemble_to_bl_views, RISK_PROFILES as MPT_RISK_PROFILES
+    MPT_AVAILABLE = True
+except ImportError:
+    MPT_AVAILABLE = False
 
 # ML增强信号引擎
 try:
@@ -41,6 +48,13 @@ try:
     ROLLING_AVAILABLE = True
 except ImportError:
     ROLLING_AVAILABLE = False
+
+# 裸K价格行为扫描引擎 (Phase 16)
+try:
+    from naked_k_scanner import NakedKScanner, scan_symbol, scan_multi_timeframe
+    NAKED_K_AVAILABLE = True
+except ImportError:
+    NAKED_K_AVAILABLE = False
 
 # ── 页面配置 ──
 st.set_page_config(
@@ -183,6 +197,35 @@ STOCK_META = {
     "IWM": {"name": "罗素2000ETF", "logo": "", "color": "#0088CC"},
     "SMH": {"name": "半导体ETF", "logo": "", "color": "#0088CC"},
     "TLT": {"name": "长期国债ETF", "logo": "", "color": "#0088CC"},
+    # ── 港股 (20只) ──
+    "00700": {"name": "腾讯控股", "logo": "", "color": "#E60012"},
+    "09988": {"name": "阿里巴巴", "logo": "", "color": "#FF6A00"},
+    "03690": {"name": "美团", "logo": "", "color": "#FFD100"},
+    "02318": {"name": "中国平安", "logo": "", "color": "#E60012"},
+    "00388": {"name": "港交所", "logo": "", "color": "#DC143C"},
+    "01299": {"name": "友邦保险", "logo": "", "color": "#DC143C"},
+    "00939": {"name": "建设银行", "logo": "", "color": "#E60012"},
+    "01398": {"name": "工商银行", "logo": "", "color": "#E60012"},
+    "00941": {"name": "中国移动", "logo": "", "color": "#DC143C"},
+    "00883": {"name": "中海油", "logo": "", "color": "#DC143C"},
+    "01211": {"name": "比亚迪股份", "logo": "", "color": "#00AA55"},
+    "01024": {"name": "快手", "logo": "", "color": "#FF6A00"},
+    "09618": {"name": "京东", "logo": "", "color": "#E2231A"},
+    "09999": {"name": "网易", "logo": "", "color": "#E2231A"},
+    "01810": {"name": "小米集团", "logo": "", "color": "#FF6A00"},
+    "09888": {"name": "百度集团", "logo": "", "color": "#2932E1"},
+    "02269": {"name": "药明生物", "logo": "", "color": "#0088CC"},
+    "01109": {"name": "华润置地", "logo": "", "color": "#0088CC"},
+    "02020": {"name": "安踏体育", "logo": "", "color": "#E60012"},
+    "03968": {"name": "招商银行", "logo": "", "color": "#E60012"},
+}
+
+# ── 市场标签 ──
+MARKET_LABELS = {
+    "crypto": "₿ 加密货币",
+    "a_stock": "🇨🇳 A股",
+    "us_stock": "🇺🇸 美股",
+    "hk_stock": "🇭🇰 港股",
 }
 
 
@@ -249,14 +292,14 @@ with st.sidebar:
     st.caption(f"📅 运行中 · 实时监控")
 
     # 刷新按钮
-    if st.button("🔄 刷新数据", use_container_width=True):
+    if st.button("🔄 刷新数据", width='stretch'):
         st.cache_data.clear()
         st.rerun()
 
 
 # ── Tab 页 ──
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "📊 总览", "📈 信号", "💼 持仓", "📋 交易记录", "🛡️ 风控", "🧬 ML信号", "🧠 Qlib深度模型"
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    "📊 总览", "📈 信号", "💼 持仓", "📋 交易记录", "🛡️ 风控", "🧬 ML信号", "🧠 Qlib深度模型", "🕯️ 裸K扫描"
 ])
 
 # ═══════════════════════════════════════════
@@ -307,7 +350,7 @@ with tab1:
                 height=300, margin=dict(l=0, r=0, t=10, b=0),
                 xaxis_title="", yaxis_title="¥",
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
     else:
         # 初始快照
         pf.take_snapshot()
@@ -334,7 +377,7 @@ with tab1:
                 hole=0.4, textinfo="label+percent",
             )])
             fig.update_layout(template="plotly_dark", height=280, margin=dict(l=0, r=0, t=10, b=0))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
     with col_right:
         st.subheader("📊 各市场盈亏")
@@ -354,7 +397,121 @@ with tab1:
             textposition="outside",
         )])
         fig.update_layout(template="plotly_dark", height=280, margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
+
+    # ── MPT 组合优化速览 (Phase 15) ──
+    if MPT_AVAILABLE:
+        st.divider()
+        mpt_col1, mpt_col2 = st.columns([1, 1.5])
+
+        with mpt_col1:
+            st.subheader("🎯 最优组合权重 (最大夏普)")
+            try:
+                # 从持仓中取 crypto 资产
+                crypto_positions = [p for p in pf.open_positions if p.market == "crypto"]
+                crypto_symbols = list(set(p.symbol for p in crypto_positions))
+
+                # 如果 crypto 持仓不够，用默认列表
+                if len(crypto_symbols) < 2:
+                    crypto_symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
+
+                cache_key = f"mpt_tab1_{'_'.join(sorted(crypto_symbols))}"
+                if cache_key not in st.session_state:
+                    import ccxt
+                    exchange = ccxt.binance()
+                    prices = {}
+                    for sym in crypto_symbols:
+                        try:
+                            ohlcv = exchange.fetch_ohlcv(sym, '1d', limit=90)
+                            df = pd.DataFrame(ohlcv, columns=['ts','open','high','low','close','volume'])
+                            df['ts'] = pd.to_datetime(df['ts'], unit='ms')
+                            df.set_index('ts', inplace=True)
+                            prices[sym] = df['close']
+                        except Exception:
+                            continue
+
+                    if len(prices) >= 2:
+                        prices_df = pd.DataFrame(prices).dropna()
+                        opt = MPTPortfolioOptimizer(prices_df=prices_df, risk_profile="moderate")
+                        result = opt.optimize_max_sharpe()
+                        st.session_state[cache_key] = result
+                    else:
+                        st.session_state[cache_key] = None
+
+                result = st.session_state.get(cache_key)
+                if result:
+                    # 权重横向柱状图
+                    weights_sorted = sorted(result.weights.items(), key=lambda x: x[1], reverse=True)
+                    w_df = pd.DataFrame(weights_sorted, columns=["资产", "权重"])
+                    w_df["权重%"] = w_df["权重"] * 100
+                    short_names = {a: a.split("/")[0] if "/" in a else a for a in w_df["资产"]}
+                    w_df["资产"] = w_df["资产"].map(short_names)
+
+                    fig_w = go.Figure(data=[go.Bar(
+                        x=w_df["资产"], y=w_df["权重%"],
+                        marker_color=["#00ff88" if w > 0.05 else "#4488ff" for w in w_df["权重"]],
+                        text=[f"{w:.1f}%" for w in w_df["权重%"]],
+                        textposition="outside",
+                    )])
+                    fig_w.update_layout(
+                        template="plotly_dark", height=220,
+                        margin=dict(l=0, r=0, t=5, b=0),
+                        yaxis_title="权重 %", xaxis_title="",
+                    )
+                    st.plotly_chart(fig_w, width='stretch')
+
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("预期年化收益", f"{result.expected_return:+.1%}")
+                    m2.metric("预期年化波动", f"{result.expected_volatility:.1%}")
+                    m3.metric("夏普比率", f"{result.sharpe_ratio:.2f}")
+                else:
+                    st.info("📡 正在获取市场数据...")
+            except Exception as e:
+                st.caption(f"MPT数据获取中: {e}")
+
+        with mpt_col2:
+            st.subheader("📐 有效边界")
+            try:
+                ef_cache_key = f"ef_tab1_{cache_key}" if 'cache_key' in dir() else None
+                if result and result.efficient_frontier_points:
+                    ef = result.efficient_frontier_points
+                    # 找最大夏普点
+                    max_sharpe_pt = max(ef, key=lambda p: p["sharpe"])
+                    vols = [p["volatility"] for p in ef]
+                    rets = [p["return"] for p in ef]
+
+                    fig_ef = go.Figure()
+                    fig_ef.add_trace(go.Scatter(
+                        x=vols, y=rets, mode="lines",
+                        line=dict(color="#4488ff", width=2),
+                        name="有效边界",
+                    ))
+                    fig_ef.add_trace(go.Scatter(
+                        x=[max_sharpe_pt["volatility"]], y=[max_sharpe_pt["return"]],
+                        mode="markers",
+                        marker=dict(color="#00ff88", size=14, symbol="star"),
+                        name=f'最大夏普 (SR={max_sharpe_pt["sharpe"]:.2f})',
+                    ))
+                    # 标记当前组合
+                    if result.expected_volatility > 0:
+                        fig_ef.add_trace(go.Scatter(
+                            x=[result.expected_volatility], y=[result.expected_return],
+                            mode="markers",
+                            marker=dict(color="#ffaa00", size=12, symbol="diamond"),
+                            name="当前组合",
+                        ))
+                    fig_ef.update_layout(
+                        template="plotly_dark", height=280,
+                        margin=dict(l=0, r=0, t=5, b=0),
+                        xaxis_title="波动率 (年化)", yaxis_title="收益 (年化)",
+                        showlegend=True,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                    )
+                    st.plotly_chart(fig_ef, width='stretch')
+                else:
+                    st.info("📐 有效边界需要更多数据点...")
+            except Exception as e:
+                st.caption(f"边界计算中: {e}")
 
     # 最近交易
     st.subheader("🔄 最近交易")
@@ -364,7 +521,7 @@ with tab1:
         for t in recent:
             trade_data.append({
                 "时间": pd.to_datetime(t.time).strftime("%m-%d %H:%M"),
-                "市场": t.market, "标的": f"{t.symbol} {t.name}",
+                "市场": MARKET_LABELS.get(t.market, t.market), "标的": f"{t.symbol} {t.name}",
                 "方向": "🟢 买入" if t.side == "buy" else "🔴 卖出",
                 "价格": f"¥{t.price:.2f}",
                 "金额": f"¥{t.amount:.0f}",
@@ -373,7 +530,7 @@ with tab1:
             })
         st.dataframe(
             pd.DataFrame(trade_data),
-            use_container_width=True,
+            width='stretch',
             column_config={"原因": st.column_config.TextColumn(width="large")},
         )
     else:
@@ -387,12 +544,12 @@ with tab2:
     st.header("📈 今日交易信号")
 
     if st.button("🔍 扫描全市场", type="primary"):
-        with st.spinner("正在扫描三大市场..."):
+        with st.spinner("正在扫描四大市场..."):
             engine = SignalEngine()
             all_signals = engine.scan_all()
 
             for market, signals in all_signals.items():
-                market_names = {"crypto": "₿ 加密货币", "a_stock": "🇨🇳 A股", "us_stock": "🇺🇸 美股"}
+                market_names = MARKET_LABELS
                 st.subheader(f"{market_names.get(market, market)} — Top 5 买入信号")
 
                 if not signals:
@@ -601,6 +758,108 @@ with tab3:
 
                 st.divider()
 
+    # ── MPT 组合诊断 (Tab 3 底部, Phase 15) ──
+    if MPT_AVAILABLE and open_pos:
+        st.divider()
+        st.subheader("🔬 MPT 组合诊断")
+
+        # 收集 crypto 持仓
+        crypto_holdings = {p.symbol: p.value for p in open_pos if p.market == "crypto"}
+        if crypto_holdings:
+            try:
+                import ccxt
+                exchange = ccxt.binance()
+                prices = {}
+                for sym in crypto_holdings:
+                    try:
+                        ohlcv = exchange.fetch_ohlcv(sym, '1d', limit=90)
+                        df = pd.DataFrame(ohlcv, columns=['ts','open','high','low','close','volume'])
+                        df['ts'] = pd.to_datetime(df['ts'], unit='ms')
+                        df.set_index('ts', inplace=True)
+                        prices[sym] = df['close']
+                    except Exception:
+                        continue
+
+                if len(prices) >= 2:
+                    prices_df = pd.DataFrame(prices).dropna()
+                    opt = MPTPortfolioOptimizer(prices_df=prices_df, risk_profile="moderate")
+
+                    # 从持仓值算当前权重
+                    total_crypto_val = sum(crypto_holdings.values())
+                    current_weights = {s: v / max(total_crypto_val, 1) for s, v in crypto_holdings.items()}
+
+                    # 综合诊断
+                    diag = opt.comprehensive_diagnosis(current_weights)
+
+                    diag_cols = st.columns(6)
+                    with diag_cols[0]:
+                        cond_color = "normal" if diag["condition_number"] < 50 else "off" if diag["condition_number"] < 100 else "inverse"
+                        st.metric("协方差条件数", f"{diag['condition_number']:.0f}",
+                                  delta="🟢 健康" if diag["condition_number"] < 50 else ("🟡 偏高" if diag["condition_number"] < 100 else "🔴 接近奇异"))
+                    with diag_cols[1]:
+                        st.metric("有效资产数", f"{diag['effective_n']:.1f}")
+                    with diag_cols[2]:
+                        st.metric("分散化评分", f"{diag['diversification_score']:.0f}/100",
+                                  delta="✅ 好" if diag["diversification_score"] > 60 else ("⚠️ 一般" if diag["diversification_score"] > 30 else "❌ 差"))
+                    with diag_cols[3]:
+                        st.metric("集中度 HHI", f"{diag['herfindahl']:.3f}")
+                    with diag_cols[4]:
+                        st.metric("95% VaR (日)", f"{diag['var_95']:+.2%}")
+                    with diag_cols[5]:
+                        st.metric("95% CVaR (日)", f"{diag['cvar_95']:+.2%}")
+
+                    # 风险贡献饼图
+                    if diag["risk_contribution"]:
+                        rc_col1, rc_col2 = st.columns([1, 2])
+                        with rc_col1:
+                            st.caption("🎯 风险贡献分布")
+                            rc_data = diag["risk_contribution"]
+                            short_names = {a: a.split("/")[0] if "/" in a else a for a in rc_data}
+                            rc_df = pd.DataFrame({
+                                "资产": [short_names.get(a, a) for a in rc_data],
+                                "风险贡献%": [v * 100 for v in rc_data.values()],
+                            }).sort_values("风险贡献%", ascending=False)
+
+                            fig_rc = go.Figure(data=[go.Pie(
+                                labels=rc_df["资产"], values=rc_df["风险贡献%"],
+                                hole=0.4, textinfo="label+percent",
+                            )])
+                            fig_rc.update_layout(template="plotly_dark", height=200,
+                                                margin=dict(l=0, r=0, t=5, b=0))
+                            st.plotly_chart(fig_rc, width='stretch')
+
+                        with rc_col2:
+                            # 最优 vs 当前权重对比
+                            st.caption("📊 当前 vs 最优权重")
+                            try:
+                                best_result = opt.optimize_max_sharpe()
+                                compare_data = []
+                                for sym in crypto_holdings:
+                                    sn = sym.split("/")[0] if "/" in sym else sym
+                                    cw = current_weights.get(sym, 0)
+                                    ow = best_result.weights.get(sym, 0)
+                                    compare_data.append({
+                                        "资产": sn,
+                                        "当前权重": f"{cw:.1%}",
+                                        "最优权重": f"{ow:.1%}",
+                                        "差异": f"{(ow - cw):+.1%}",
+                                        "建议": "📈 加仓" if (ow - cw) > 0.05 else ("📉 减仓" if (ow - cw) < -0.05 else "➡️ 维持"),
+                                    })
+                                st.dataframe(pd.DataFrame(compare_data),
+                                            width='stretch', hide_index=True)
+                            except Exception:
+                                st.caption("最优权重计算中...")
+
+                    # 诊断建议
+                    if diag.get("recommendations"):
+                        for rec in diag["recommendations"]:
+                            icon = "🔴" if "🔴" in rec else "🟡" if "🟡" in rec else "ℹ️"
+                            st.markdown(f'<div class="alert-warning">{icon} {rec}</div>',
+                                       unsafe_allow_html=True)
+
+            except Exception as e:
+                st.caption(f"MPT诊断数据获取中: {e}")
+
 
 # ═══════════════════════════════════════════
 # Tab 4: 交易记录
@@ -616,7 +875,7 @@ with tab4:
         for t in trades_sorted:
             data.append({
                 "时间": pd.to_datetime(t.time).strftime("%m-%d %H:%M:%S"),
-                "市场": t.market,
+                "市场": MARKET_LABELS.get(t.market, t.market),
                 "代码": t.symbol,
                 "名称": t.name,
                 "方向": "买入" if t.side == "buy" else "卖出",
@@ -643,7 +902,7 @@ with tab4:
             total_realized = df[df["方向"] == "卖出"]["盈亏"].sum()
             st.metric("已实现盈亏", f"¥{total_realized:+.2f}")
 
-        st.dataframe(df, use_container_width=True, height=400)
+        st.dataframe(df, width='stretch', height=400)
 
 
 # ═══════════════════════════════════════════
@@ -849,7 +1108,7 @@ with tab6:
                         margin=dict(l=0, r=40, t=10, b=0),
                         xaxis=dict(range=[-3.5, 3.5], title="信号值"),
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
 
                     # ── 子信号详情 ──
                     st.subheader("🔍 子信号推理")
@@ -867,8 +1126,8 @@ with tab6:
 
                     st.divider()
 
-                    # ── 三市场扫描 ──
-                    st.subheader("🌍 三市场ML扫描")
+                    # ── 全市场扫描 ──
+                    st.subheader("🌍 全市场ML扫描")
 
                     markets = {
                         "₿ 加密货币": [
@@ -914,7 +1173,7 @@ with tab6:
                                 feat_df = pd.DataFrame(feats[:5])
                                 feat_df.columns = ["特征", "重要性"]
                                 feat_df["特征"] = feat_df["特征"].apply(lambda x: f"`{x}`")
-                                st.dataframe(feat_df, hide_index=True, use_container_width=True)
+                                st.dataframe(feat_df, hide_index=True, width='stretch')
 
                 except ImportError:
                     st.error("❌ ccxt 未安装 — 无法获取实时数据")
@@ -1009,7 +1268,7 @@ with tab6:
                             })
                         st.dataframe(
                             pd.DataFrame(trade_rows),
-                            hide_index=True, use_container_width=True,
+                            hide_index=True, width='stretch',
                             column_config={
                                 "盈亏": st.column_config.NumberColumn(format="%.2f%%"),
                             }
@@ -1057,7 +1316,7 @@ with tab6:
                             "最优值": f"{bv:.3f}" if isinstance(bv, float) else str(int(bv)),
                             "变化": change,
                         })
-                    st.dataframe(pd.DataFrame(comp_rows), hide_index=True, use_container_width=True)
+                    st.dataframe(pd.DataFrame(comp_rows), hide_index=True, width='stretch')
 
                     # 参数重要性
                     imp = opt.get("param_importance", {})
@@ -1065,7 +1324,7 @@ with tab6:
                         st.caption("📊 参数重要性 (得分方差贡献)")
                         imp_sorted = sorted(imp.items(), key=lambda x: abs(x[1]), reverse=True)
                         imp_df = pd.DataFrame(imp_sorted, columns=["参数", "重要性"])
-                        st.bar_chart(imp_df.set_index("参数"), use_container_width=True)
+                        st.bar_chart(imp_df.set_index("参数"), width='stretch')
 
                     # 敏感性热力图
                     sens_html = Path(__file__).parent / "data" / "optimization_results" / "sensitivity_heatmap.html"
@@ -1091,7 +1350,7 @@ with tab6:
                                 "Warm": int(t.get('warmup_days', 0)),
                                 "#Tr": int(t.get('n_trades', 0)),
                             })
-                        st.dataframe(pd.DataFrame(top_rows), hide_index=True, use_container_width=True)
+                        st.dataframe(pd.DataFrame(top_rows), hide_index=True, width='stretch')
 
                 except Exception as e:
                     st.caption(f"⚠️ 优化结果加载失败: {e}")
@@ -1146,7 +1405,7 @@ with tab6:
                                 "基准收益": f"{w.get('benchmark_return', 0):+.1f}%",
                                 "交易数": w.get("n_trades", 0),
                             })
-                        st.dataframe(pd.DataFrame(wf_rows), hide_index=True, use_container_width=True)
+                        st.dataframe(pd.DataFrame(wf_rows), hide_index=True, width='stretch')
 
                 except Exception as e:
                     st.caption(f"⚠️ W-F结果加载失败: {e}")
@@ -1173,7 +1432,7 @@ with tab6:
                             "年龄": s["age_label"],
                             "版本数": s["n_versions"],
                         })
-                    st.dataframe(pd.DataFrame(model_rows), hide_index=True, use_container_width=True)
+                    st.dataframe(pd.DataFrame(model_rows), hide_index=True, width='stretch')
 
                     # 老化提醒
                     stale = [s for s in model_summary if s["age_days"] > 30]
@@ -1317,7 +1576,7 @@ with tab7:
                                 "vs LGBM": vs_lgbm,
                                 "特征数": r.n_features_used,
                             })
-                        st.dataframe(pd.DataFrame(result_rows), hide_index=True, use_container_width=True)
+                        st.dataframe(pd.DataFrame(result_rows), hide_index=True, width='stretch')
                     else:
                         st.warning("⚠️ 训练未产生结果, 检查数据是否充足")
 
@@ -1422,7 +1681,7 @@ with tab7:
                             "ICIR": f"{p.oos_icir:.3f}",
                         })
                     if pred_data:
-                        st.dataframe(pd.DataFrame(pred_data), hide_index=True, use_container_width=True)
+                        st.dataframe(pd.DataFrame(pred_data), hide_index=True, width='stretch')
                     else:
                         st.info("📭 Qlib 模型预测数据未生成 — 请先训练模型")
 
@@ -1450,7 +1709,7 @@ with tab7:
                             margin=dict(l=0, r=0, t=10, b=0),
                             title="各模型平均信号 (跨7主题)",
                         )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width='stretch')
 
                     # 分歧检测
                     if signal_v5.divergence > 0.2:
@@ -1483,7 +1742,7 @@ with tab7:
                         "大小": f"{size_kb:.0f}KB",
                         "修改时间": mtime.strftime("%m-%d %H:%M"),
                     })
-                st.dataframe(pd.DataFrame(mf_data), hide_index=True, use_container_width=True)
+                st.dataframe(pd.DataFrame(mf_data), hide_index=True, width='stretch')
             else:
                 st.caption("💡 尚未训练 Qlib 模型 — 点击上方训练按钮")
 
@@ -1551,7 +1810,7 @@ with tab7:
                         "趋势": s["trend"],
                         "漂移": f"{s['drift']:.2f}",
                     })
-                st.dataframe(pd.DataFrame(freshness_data), hide_index=True, use_container_width=True)
+                st.dataframe(pd.DataFrame(freshness_data), hide_index=True, width='stretch')
 
             # 滚动训练操作
             st.caption("🎮 滚动训练控制")
@@ -1615,7 +1874,7 @@ with tab7:
                                             "版本": f"v{tp['version']}",
                                             "趋势": tp["icir_trend"],
                                         })
-                                    st.dataframe(pd.DataFrame(top_data), hide_index=True, use_container_width=True)
+                                    st.dataframe(pd.DataFrame(top_data), hide_index=True, width='stretch')
 
                             # 刷新状态
                             st.rerun()
@@ -1788,7 +2047,7 @@ with tab7:
                         "强度": abs(pred) if pred else 0,
                     })
                 if pred_data:
-                    st.dataframe(pd.DataFrame(pred_data), hide_index=True, use_container_width=True)
+                    st.dataframe(pd.DataFrame(pred_data), hide_index=True, width='stretch')
 
             # 显示图详情
             if existing_snapshot:
@@ -1803,7 +2062,7 @@ with tab7:
                                 "目标资产": e["target"],
                                 "权重": f"{e['weight']:.4f}",
                             })
-                        st.dataframe(pd.DataFrame(edges_data), hide_index=True, use_container_width=True)
+                        st.dataframe(pd.DataFrame(edges_data), hide_index=True, width='stretch')
 
                     # 邻接矩阵热力图
                     st.caption("🔥 邻接矩阵热力图")
@@ -1819,7 +2078,7 @@ with tab7:
                         title=f"资产关系邻接矩阵 (密度={existing_snapshot.graph_density:.4f})",
                     )
                     fig_heat.update_layout(template="plotly_dark", height=400)
-                    st.plotly_chart(fig_heat, use_container_width=True)
+                    st.plotly_chart(fig_heat, width='stretch')
 
                     # 社区结构
                     if existing_snapshot.n_communities > 1:
@@ -1831,7 +2090,7 @@ with tab7:
                                 "资产": sym,
                                 "社区": f"社区 {label}",
                             })
-                        st.dataframe(pd.DataFrame(comm_data), hide_index=True, use_container_width=True)
+                        st.dataframe(pd.DataFrame(comm_data), hide_index=True, width='stretch')
 
             # Graph Drift 结果
             if "graph_drift_ui" in st.session_state:
@@ -1947,7 +2206,7 @@ with tab7:
                         fig.update_layout(title="IC Decay", xaxis_title="Forward Days",
                                           yaxis_title="Rank IC", height=300,
                                           template="plotly_dark", margin=dict(l=0, r=0, t=30, b=0))
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width='stretch')
 
             # ── Mine Alphas ──
             mining_clicked = mine_grid_clicked or mine_gen_clicked or mine_rand_clicked
@@ -2011,7 +2270,7 @@ with tab7:
                             "Turnover": f"{a.turnover:.3f}",
                             "Category": a.category,
                         })
-                    st.dataframe(pd.DataFrame(rows), use_container_width=True,
+                    st.dataframe(pd.DataFrame(rows), width='stretch',
                                  hide_index=True, height=400)
 
                     # Best alpha detail
@@ -2041,7 +2300,7 @@ with tab7:
                                 "Cat": a.category,
                                 "Gen": a.generation,
                             })
-                        st.dataframe(pd.DataFrame(rows2), use_container_width=True, hide_index=True)
+                        st.dataframe(pd.DataFrame(rows2), width='stretch', hide_index=True)
                     else:
                         st.info("📭 暂无入库Alpha, 运行挖掘后自动保存")
                 else:
@@ -2085,7 +2344,7 @@ with tab7:
                                       format="%.3f", key="exec_est_qty",
                                       help="BTC/ETH/SOL 等单位")
 
-            if st.button("💰 估算执行成本", use_container_width=True):
+            if st.button("💰 估算执行成本", width='stretch'):
                 try:
                     from execution import ExecutionEngine, ExecutionConfig
                     mock_data = {
@@ -2137,7 +2396,7 @@ with tab7:
                                           color_discrete_sequence=px.colors.qualitative.Set2)
                         fig_comp.update_layout(height=280, margin=dict(l=10, r=10, t=30, b=10),
                                                showlegend=False, xaxis_title="", yaxis_title="IS (bps)")
-                        st.plotly_chart(fig_comp, use_container_width=True)
+                        st.plotly_chart(fig_comp, width='stretch')
 
                     # 最近执行记录
                     st.caption("📋 最近执行")
@@ -2156,7 +2415,7 @@ with tab7:
                                 "成交": f"{r['fill_rate']:.0%}",
                                 "切片": f"{r['n_slices_filled']}/{r['n_slices_total']}",
                             })
-                        st.dataframe(pd.DataFrame(rec_rows), use_container_width=True, hide_index=True)
+                        st.dataframe(pd.DataFrame(rec_rows), width='stretch', hide_index=True)
                 else:
                     st.info("📭 暂无执行记录。运行一次模拟执行来填充数据:")
                     st.code("python3 execution.py --simulate BTC/USDT --qty 0.1 --strategy smart")
@@ -2177,7 +2436,7 @@ with tab7:
             with sim_col3:
                 sim_qty = st.number_input("数量", min_value=0.001, value=0.05, step=0.01, format="%.3f", key="exec_sim_qty")
 
-            if st.button("🔪 模拟拆单执行", use_container_width=True):
+            if st.button("🔪 模拟拆单执行", width='stretch'):
                 try:
                     from execution import ExecutionEngine, ExecutionConfig
                     mock_data = {
@@ -2224,13 +2483,13 @@ with tab7:
                                       color_discrete_sequence=["#4488ff", "#ffaa00", "#ff4444", "#888888"])
                     fig_cost.update_layout(height=200, margin=dict(l=10, r=10, t=30, b=10),
                                            showlegend=False)
-                    st.plotly_chart(fig_cost, use_container_width=True)
+                    st.plotly_chart(fig_cost, width='stretch')
 
                     # 切片明细
                     if report.slice_details:
                         with st.expander("📋 切片成交明细", expanded=False):
                             sl_df = pd.DataFrame(report.slice_details)
-                            st.dataframe(sl_df, use_container_width=True, hide_index=True)
+                            st.dataframe(sl_df, width='stretch', hide_index=True)
 
                 except Exception as e:
                     st.error(f"模拟执行失败: {e}")
@@ -2276,7 +2535,7 @@ with tab7:
                 )
                 dry_run = st.checkbox("🔇 Dry-run (只预览不推送)", value=True, key="wechat_dry")
 
-                if st.button("🚀 生成并推送日报", type="primary", use_container_width=True, key="wechat_push_btn"):
+                if st.button("🚀 生成并推送日报", type="primary", width='stretch', key="wechat_push_btn"):
                     with st.spinner("🔍 正在采集数据 & 生成报告..."):
                         try:
                             from wechat_report import DailyReportEngine
@@ -2339,11 +2598,686 @@ with tab7:
             > 包含: 本次决策/执行信息/持仓变动/风控状态
             """)
 
+        # ═══════════════════════════════════════════
+        # Phase 15: MPT 组合优化引擎
+        # ═══════════════════════════════════════════
+        st.divider()
+        st.subheader("🎯 MPT 组合优化引擎 — Phase 15 🆕")
+
+        st.markdown("""
+        > 🎯 **MPT引擎**: 马科维茨有效边界 + Black-Litterman AI观点融合 + HRP稳健优化
+        >
+        > 从"单币选优"升级到"组合数学优化" — 考虑资产间相关性, 给定风险下最大化收益
+        """)
+
+        if not MPT_AVAILABLE:
+            st.warning("⚠️ MPT引擎未安装 (需要 riskfolio-lib, sklearn). 运行: `pip install riskfolio-lib`")
+        else:
+            # ── 资产选择 ──
+            mpt_col1, mpt_col2, mpt_col3 = st.columns([2, 1, 1])
+            with mpt_col1:
+                DEFAULT_MPT_ASSETS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
+                                      "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT"]
+                mpt_assets = st.multiselect(
+                    "🎯 选择优化资产",
+                    options=DEFAULT_MPT_ASSETS,
+                    default=["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"],
+                    key="mpt_assets",
+                    help="至少选2个资产, 建议4-10个"
+                )
+            with mpt_col2:
+                mpt_risk_profile = st.selectbox(
+                    "⚙️ 风险偏好",
+                    options=list(MPT_RISK_PROFILES.keys()),
+                    format_func=lambda k: MPT_RISK_PROFILES[k]["label"],
+                    index=1,  # moderate
+                    key="mpt_risk_profile",
+                )
+            with mpt_col3:
+                mpt_lookback = st.selectbox(
+                    "📅 回看窗口",
+                    options=[30, 60, 90, 180, 365],
+                    index=2,  # 90 days
+                    format_func=lambda d: f"{d}天",
+                    key="mpt_lookback",
+                )
+
+            # ── AI 观点输入 (可选) ──
+            with st.expander("🧠 Black-Litterman AI观点 (可选)", expanded=False):
+                bl_col1, bl_col2 = st.columns([3, 1])
+                with bl_col1:
+                    st.caption("输入对特定资产的预期超额收益观点 (小数, 如 0.10 = 年化+10%)")
+                    bl_views_input = {}
+                    bl_view_cols = st.columns(min(len(mpt_assets), 5))
+                    for i, asset in enumerate(mpt_assets[:5]):
+                        with bl_view_cols[i]:
+                            sn = asset.split("/")[0] if "/" in asset else asset
+                            val = st.number_input(
+                                f"{sn} 观点",
+                                min_value=-0.50, max_value=0.50, value=0.0,
+                                step=0.01, format="%.2f",
+                                key=f"bl_view_{asset}",
+                                help=f"对 {sn} 的预期年化超额收益 (0=无观点)"
+                            )
+                            if abs(val) > 0.005:
+                                bl_views_input[asset] = val
+                with bl_col2:
+                    bl_conf = st.slider("全局置信度", 0.1, 1.0, 0.5, 0.05,
+                                       key="bl_global_conf",
+                                       help="AI观点置信度 (0.1=几乎不信, 1.0=完全相信)")
+
+            # ── 优化方法选择 + 执行 ──
+            mpt_method_cols = st.columns(5)
+            optimize_clicked = None
+
+            with mpt_method_cols[0]:
+                if st.button("📈 最大夏普", type="primary", width='stretch', key="mpt_max_sharpe"):
+                    optimize_clicked = "max_sharpe"
+            with mpt_method_cols[1]:
+                if st.button("🛡️ 最小风险", width='stretch', key="mpt_min_risk"):
+                    optimize_clicked = "min_risk"
+            with mpt_method_cols[2]:
+                if st.button("⚖️ 风险平价", width='stretch', key="mpt_risk_parity"):
+                    optimize_clicked = "risk_parity"
+            with mpt_method_cols[3]:
+                if st.button("🌳 HRP", width='stretch', key="mpt_hrp"):
+                    optimize_clicked = "hrp"
+            with mpt_method_cols[4]:
+                bl_disabled = len(bl_views_input) == 0
+                if st.button("🧠 Black-Litterman", width='stretch',
+                            key="mpt_bl", disabled=bl_disabled,
+                            help="需要至少一个非零AI观点"):
+                    optimize_clicked = "black_litterman"
+
+            # ── 一键全对比 ──
+            compare_clicked = st.button("🔬 一键全方法对比", width='stretch', key="mpt_compare_all")
+
+            # ── 执行优化 ──
+            if optimize_clicked or compare_clicked:
+                if len(mpt_assets) < 2:
+                    st.warning("至少选择2个资产")
+                else:
+                    with st.spinner("⏳ 获取市场数据 & 计算协方差矩阵..."):
+                        try:
+                            import ccxt
+                            exchange = ccxt.binance()
+                            prices = {}
+                            for sym in mpt_assets:
+                                try:
+                                    ohlcv = exchange.fetch_ohlcv(sym, '1d', limit=mpt_lookback)
+                                    df = pd.DataFrame(ohlcv, columns=['ts','open','high','low','close','volume'])
+                                    df['ts'] = pd.to_datetime(df['ts'], unit='ms')
+                                    df.set_index('ts', inplace=True)
+                                    prices[sym] = df['close']
+                                except Exception:
+                                    continue
+
+                            if len(prices) < 2:
+                                st.error("获取数据失败, 资产不足2个")
+                            else:
+                                prices_df = pd.DataFrame(prices).dropna()
+                                opt = MPTPortfolioOptimizer(
+                                    prices_df=prices_df,
+                                    risk_profile=mpt_risk_profile,
+                                )
+
+                                # 存储供后续使用
+                                st.session_state.mpt_optimizer = opt
+
+                                if compare_clicked:
+                                    # 全方法对比
+                                    bl_views_to_use = bl_views_input if bl_views_input else None
+                                    bl_confs_to_use = {a: bl_conf for a in bl_views_input} if bl_views_input else None
+                                    all_results = opt.compare_all_methods(bl_views_to_use, bl_confs_to_use)
+                                    st.session_state.mpt_all_results = all_results
+                                    st.session_state.mpt_result = all_results.get("max_sharpe")
+                                    st.session_state.mpt_show_compare = True
+                                elif optimize_clicked == "max_sharpe":
+                                    st.session_state.mpt_result = opt.optimize_max_sharpe()
+                                    st.session_state.mpt_show_compare = False
+                                elif optimize_clicked == "min_risk":
+                                    st.session_state.mpt_result = opt.optimize_min_risk()
+                                    st.session_state.mpt_show_compare = False
+                                elif optimize_clicked == "risk_parity":
+                                    st.session_state.mpt_result = opt.optimize_risk_parity()
+                                    st.session_state.mpt_show_compare = False
+                                elif optimize_clicked == "hrp":
+                                    st.session_state.mpt_result = opt.optimize_hrp()
+                                    st.session_state.mpt_show_compare = False
+                                elif optimize_clicked == "black_litterman":
+                                    bl_confs_dict = {a: bl_conf for a in bl_views_input}
+                                    st.session_state.mpt_result = opt.optimize_black_litterman(
+                                        bl_views_input, bl_confs_dict
+                                    )
+                                    st.session_state.mpt_show_compare = False
+
+                                st.success(f"✅ 优化完成! 方法: {st.session_state.mpt_result.method}")
+
+                        except Exception as e:
+                            st.error(f"❌ 优化失败: {e}")
+
+            # ── 显示结果 ──
+            if "mpt_result" in st.session_state and st.session_state.mpt_result:
+                result = st.session_state.mpt_result
+                opt = st.session_state.get("mpt_optimizer")
+
+                # ── 权重柱状图 + 指标 ──
+                res_col1, res_col2 = st.columns([1, 1.5])
+
+                with res_col1:
+                    st.caption(f"🎯 最优权重 — {result.method}")
+                    weights_sorted = sorted(result.weights.items(), key=lambda x: x[1], reverse=True)
+                    w_df = pd.DataFrame(weights_sorted, columns=["资产", "权重"])
+                    short_names = {a: a.split("/")[0] if "/" in a else a for a in w_df["资产"]}
+                    w_df["资产"] = w_df["资产"].map(short_names)
+                    w_df = w_df[w_df["权重"] > 0.001]  # 过滤零权重
+
+                    colors = []
+                    for w in w_df["权重"]:
+                        if w > 0.2:
+                            colors.append("#00ff88")
+                        elif w > 0.1:
+                            colors.append("#4488ff")
+                        else:
+                            colors.append("#888888")
+
+                    fig_w = go.Figure(data=[go.Bar(
+                        x=w_df["资产"], y=w_df["权重"] * 100,
+                        marker_color=colors,
+                        text=[f"{w*100:.1f}%" for w in w_df["权重"]],
+                        textposition="outside",
+                    )])
+                    fig_w.update_layout(
+                        template="plotly_dark", height=250,
+                        margin=dict(l=0, r=0, t=5, b=0),
+                        yaxis_title="权重 %", xaxis_title="",
+                    )
+                    st.plotly_chart(fig_w, width='stretch')
+
+                    # 关键指标
+                    rm1, rm2, rm3, rm4 = st.columns(4)
+                    rm1.metric("夏普比率", f"{result.sharpe_ratio:.2f}")
+                    rm2.metric("年化收益", f"{result.expected_return:+.1%}")
+                    rm3.metric("年化波动", f"{result.expected_volatility:.1%}")
+                    rm4.metric("分散化", f"{result.diversification_score:.0f}/100")
+
+                with res_col2:
+                    # 有效边界图
+                    if result.efficient_frontier_points:
+                        st.caption("📐 有效边界")
+                        ef = result.efficient_frontier_points
+                        max_sharpe_pt = max(ef, key=lambda p: p["sharpe"])
+
+                        fig_ef = go.Figure()
+                        fig_ef.add_trace(go.Scatter(
+                            x=[p["volatility"] for p in ef],
+                            y=[p["return"] for p in ef],
+                            mode="lines",
+                            line=dict(color="#4488ff", width=2),
+                            name="有效边界",
+                        ))
+                        fig_ef.add_trace(go.Scatter(
+                            x=[max_sharpe_pt["volatility"]], y=[max_sharpe_pt["return"]],
+                            mode="markers",
+                            marker=dict(color="#00ff88", size=16, symbol="star"),
+                            name=f'最优 (SR={max_sharpe_pt["sharpe"]:.2f})',
+                        ))
+                        fig_ef.add_trace(go.Scatter(
+                            x=[result.expected_volatility], y=[result.expected_return],
+                            mode="markers",
+                            marker=dict(color="#ffaa00", size=12, symbol="diamond"),
+                            name="当前组合",
+                        ))
+                        fig_ef.update_layout(
+                            template="plotly_dark", height=300,
+                            margin=dict(l=0, r=0, t=5, b=0),
+                            xaxis_title="波动率 (年化)", yaxis_title="收益 (年化)",
+                            showlegend=True,
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                        )
+                        st.plotly_chart(fig_ef, width='stretch')
+                    else:
+                        st.info("📐 有效边界不可用 (尝试用最大夏普或最小风险方法)")
+
+                    # Black-Litterman 后验信息
+                    if result.method == "black_litterman" and result.bl_posterior_returns:
+                        st.caption("🧠 BL 后验收益 vs 先验")
+                        bl_post = result.bl_posterior_returns
+                        bl_prior = opt.mu.to_dict() if opt else {}
+                        bl_data = []
+                        for a in mpt_assets:
+                            sn = a.split("/")[0] if "/" in a else a
+                            post = bl_post.get(a, 0)
+                            prior = bl_prior.get(a, 0)
+                            bl_data.append({
+                                "资产": sn,
+                                "先验收益": f"{prior:+.2%}",
+                                "后验收益": f"{post:+.2%}",
+                                "AI调整": f"{(post - prior):+.2%}",
+                            })
+                        st.dataframe(pd.DataFrame(bl_data), width='stretch', hide_index=True)
+
+                # ── 风险贡献 + 诊断 ──
+                st.divider()
+                diag_col1, diag_col2 = st.columns(2)
+
+                with diag_col1:
+                    st.caption("🎯 风险贡献 (等风险=理想分散)")
+                    if result.risk_contributions:
+                        rc_data = result.risk_contributions
+                        sn_rc = {a.split("/")[0] if "/" in a else a: v for a, v in rc_data.items()}
+                        rc_df = pd.DataFrame({
+                            "资产": list(sn_rc.keys()),
+                            "风险贡献%": [v * 100 for v in sn_rc.values()],
+                        }).sort_values("风险贡献%", ascending=True)
+
+                        fig_rc = go.Figure(data=[go.Bar(
+                            y=rc_df["资产"], x=rc_df["风险贡献%"],
+                            orientation="h",
+                            marker_color=["#00ff88" if v < 30 else "#ffaa00" if v < 50 else "#ff4444"
+                                         for v in rc_df["风险贡献%"]],
+                        )])
+                        fig_rc.update_layout(
+                            template="plotly_dark", height=200,
+                            margin=dict(l=0, r=0, t=5, b=0),
+                            xaxis_title="风险贡献 %",
+                        )
+                        st.plotly_chart(fig_rc, width='stretch')
+
+                with diag_col2:
+                    st.caption("🔍 组合诊断")
+                    diag_items = [
+                        ("协方差条件数", f"{result.condition_number:.0f}",
+                         "🟢 好" if result.condition_number < 50 else ("🟡 注意" if result.condition_number < 100 else "🔴 差 (建议HRP)")),
+                        ("有效资产数", f"{result.effective_n:.1f}",
+                         "✅" if result.effective_n > 3 else "⚠️"),
+                        ("集中度 HHI", f"{result.herfindahl:.3f}",
+                         "✅ 分散" if result.herfindahl < 0.2 else ("⚠️ 中度" if result.herfindahl < 0.4 else "🔴 集中")),
+                        ("95% VaR (日)", f"{result.var_95:+.2%}", ""),
+                        ("95% CVaR (日)", f"{result.cvar_95:+.2%}", ""),
+                    ]
+                    for label, val, note in diag_items:
+                        st.markdown(f"""
+                        <div style="display:flex;justify-content:space-between;padding:6px 0;
+                            border-bottom:1px solid #1e2329;">
+                            <span style="color:#848e9c;">{label}</span>
+                            <span style="font-weight:600;color:#eaecef;">{val}</span>
+                            <span style="font-size:11px;color:#848e9c;">{note}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                # 警告
+                if result.warnings:
+                    st.divider()
+                    for w in result.warnings:
+                        st.markdown(f'<div class="alert-warning">⚠️ {w}</div>',
+                                   unsafe_allow_html=True)
+
+                # ── 再平衡指令 ──
+                if open_pos:
+                    st.divider()
+                    st.caption("🔄 再平衡指令 (当前持仓 → 最优权重)")
+
+                    crypto_positions = {p.symbol: p.value for p in open_pos if p.market == "crypto"}
+                    if crypto_positions:
+                        total_crypto = sum(crypto_positions.values())
+                        # 只对也在优化列表里的资产生成指令
+                        relevant_holdings = {s: v for s, v in crypto_positions.items() if s in result.weights}
+                        # 添加未持仓但有目标权重的资产
+                        for s in result.weights:
+                            if s not in relevant_holdings:
+                                relevant_holdings[s] = 0
+
+                        if opt:
+                            rebalance = opt.rebalance_check(
+                                relevant_holdings, result.weights, total_crypto,
+                                min_trade=30, max_turnover=0.5,
+                            )
+
+                            if rebalance["instructions"]:
+                                reb_data = []
+                                for inst in rebalance["instructions"]:
+                                    reb_data.append({
+                                        "操作": f'🟢 {inst["action"]}' if inst["action"] == "BUY" else f'🔴 {inst["action"]}',
+                                        "资产": inst["asset"].split("/")[0] if "/" in inst["asset"] else inst["asset"],
+                                        "金额(USDT)": f'${inst["amount_usdt"]:,.0f}',
+                                        "当前权重": f'{inst["current_weight"]:.1%}',
+                                        "目标权重": f'{inst["target_weight"]:.1%}',
+                                        "变化": f'{inst["weight_change"]:+.1%}',
+                                    })
+                                st.dataframe(pd.DataFrame(reb_data),
+                                            width='stretch', hide_index=True)
+                                st.caption(f"📊 {rebalance['n_trades']}笔交易 | "
+                                          f"总换手率: {rebalance['total_turnover']:.1%}")
+                            else:
+                                st.info("✅ 当前权重已在目标范围内, 无需再平衡")
+
+                # ── 方法对比表 ──
+                if "mpt_all_results" in st.session_state and st.session_state.get("mpt_show_compare"):
+                    st.divider()
+                    st.caption("🔬 全方法对比")
+                    all_r = st.session_state.mpt_all_results
+                    summary_df = opt.compare_summary(all_r) if opt else None
+                    if summary_df is not None:
+                        st.dataframe(summary_df, width='stretch', hide_index=True)
+
+                        # 权重对比热力图
+                        st.caption("🔥 各方法权重对比")
+                        all_weights = {}
+                        short_asset_names = [a.split("/")[0] if "/" in a else a for a in mpt_assets]
+                        for method, r in all_r.items():
+                            if r is None:
+                                continue
+                            method_label = {
+                                "max_sharpe": "最大夏普", "min_risk": "最小风险",
+                                "risk_parity": "风险平价", "hrp": "HRP",
+                                "black_litterman": "BL",
+                            }.get(method, method)
+                            all_weights[method_label] = [r.weights.get(a, 0) * 100 for a in mpt_assets]
+
+                        w_heatmap = pd.DataFrame(all_weights, index=short_asset_names).T
+                        fig_hm = px.imshow(
+                            w_heatmap, text_auto=".1f",
+                            color_continuous_scale="Greens",
+                            aspect="auto",
+                        )
+                        fig_hm.update_layout(template="plotly_dark", height=200 + len(all_weights) * 30,
+                                            margin=dict(l=10, r=10, t=5, b=10))
+                        st.plotly_chart(fig_hm, width='stretch')
+
+        # ── 架构对比更新 ──
+        st.divider()
+        with st.expander("📐 与 Qlib 原框架对比 (含 MPT)", expanded=False):
+            st.markdown("""
+            ### Chase Quant vs Microsoft Qlib — 架构对比
+
+            | 维度 | Chase Quant (v2.6) | Microsoft Qlib |
+            |------|:---:|:---:|
+            | **时序模型** | ALSTM (自实现) | ALSTM + GRU + LSTM |
+            | **注意力模型** | Transformer (自实现) | Transformer + HIST |
+            | **特征选择** | TabNet (自实现) | TabNet + 表达式引擎 |
+            | **图模型** | GATs (自实现) + **真实资产关系图** | GATs + RGCN + RSRL |
+            | **集成方法** | DoubleEnsemble (自实现) | DoubleEnsemble + 更多变体 |
+            | **组合优化** | ✅ **NEW! 马科维茨MPT + Black-Litterman + HRP** | ⚠️ 基础等权/市值加权 |
+            | **优化引擎** | ✅ **Riskfolio-Lib 7.0.1 + Ledoit-Wolf收缩** | ❌ |
+            | **AI观点融合** | ✅ **Black-Litterman × Multi-LLM Ensemble** | ❌ |
+            | **自动因子挖掘** | ✅ 表达式引擎+遗传算法 | ✅ Alpha Mining Pipeline |
+            | **订单执行优化** | ✅ 拆单算法 (TWAP/VWAP/Adaptive/Iceberg) | ❌ 研究为主 |
+            | **企业微信日报推送** | ✅ 智能日报+算法洞察+企微推送 | ❌ |
+            | **在线学习** | ✅ 滚动在线学习 | ✅ Rolling Training |
+            | **资产关系图** | ✅ 6维关系+图漂移检测 | ⚠️ 研究为主 |
+            | **市场覆盖** | ✅ 4市场 (Crypto+A股+美股+港股) | ❌ A股为主 |
+            | **实盘交易** | ✅ 自动交易 + 五层风控 | ❌ 研究为主 |
+            | **可视化** | ✅ Streamlit 仪表板 | ⚠️ Jupyter/CLI |
+            | **开源** | ✅ (本仓库) | ✅ MIT License |
+
+            > 💡 **我们的定位**: 用 Qlib 的 AI 能力武装我们的实盘系统 — 取其精华, 为我所用。
+            > 🆕 **Phase 15 新增**: MPT组合优化 — 填补了 Qlib 在组合层面的空白。
+            """)
+
+# ═══════════════════════════════════════════
+# Tab 8: 裸K扫描 — 熊猫教练价格行为体系
+# ═══════════════════════════════════════════
+with tab8:
+    st.header("🕯️ 裸K价格行为扫描")
+
+    if not NAKED_K_AVAILABLE:
+        st.warning("⚠️ 裸K扫描引擎暂不可用 — 请检查 naked_k_scanner.py")
+    else:
+        st.markdown("""
+        <div style="background:#151820; border-left:3px solid #ffaa00; padding:10px 16px;
+                    border-radius:0 8px 8px 0; margin-bottom:16px; font-size:13px;">
+        🐼 <b>熊猫教练「熊猫讲裸K」交易体系</b> — 三步法:
+        ①识支撑阻力 → ②判趋势方向 → ③读K线确认 (2+3评分)
+        | 核心理念: <b>"看见了再交易"</b>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── 控制面板 ──
+        col_ctrl1, col_ctrl2, col_ctrl3, col_ctrl4 = st.columns([2, 2, 2, 3])
+
+        with col_ctrl1:
+            scan_symbols = st.multiselect(
+                "🔍 扫描币种",
+                ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
+                 "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "LINK/USDT", "DOT/USDT",
+                 "MATIC/USDT", "ATOM/USDT", "LTC/USDT", "UNI/USDT", "APT/USDT"],
+                default=["BTC/USDT", "ETH/USDT"],
+            )
+
+        with col_ctrl2:
+            scan_tf = st.selectbox(
+                "⏱️ K线周期",
+                ["5m", "15m", "30m", "1h", "4h", "1d"],
+                index=3,  # 默认1h
+            )
+
+        with col_ctrl3:
+            scan_limit = st.selectbox(
+                "📊 K线数量",
+                [100, 200, 300, 500],
+                index=1,  # 默认200
+            )
+
+        with col_ctrl4:
+            use_mtf = st.checkbox("🔗 多周期验证 (不逆4倍原则)", value=True,
+                                 help="用4倍以上大周期确认趋势方向，逆大周期信号扣分")
+
+        # ── 扫描按钮 ──
+        if st.button("🔍 裸K扫描", type="primary", width='stretch'):
+            with st.spinner("正在获取K线数据 + 裸K扫描中..."):
+
+                # 获取数据
+                import ccxt
+                exchange = ccxt.binance()
+
+                all_results = {}
+                mtf_results = {}  # 多周期结果
+
+                for sym in scan_symbols:
+                    try:
+                        ohlcv = exchange.fetch_ohlcv(sym, scan_tf, limit=scan_limit)
+                        df = pd.DataFrame(
+                            ohlcv, columns=['date', 'open', 'high', 'low', 'close', 'volume']
+                        )
+                        df['date'] = pd.to_datetime(df['date'], unit='ms')
+
+                        # 多周期: 获取4倍以上大周期数据
+                        higher_df = None
+                        if use_mtf:
+                            tf_order = ['5m', '15m', '30m', '1h', '4h', '1d']
+                            tf_min_map = {'5m': 5, '15m': 15, '30m': 30,
+                                          '1h': 60, '4h': 240, '1d': 1440}
+                            current_min = tf_min_map.get(scan_tf, 60)
+
+                            for htf in reversed(tf_order):
+                                htf_min = tf_min_map.get(htf, 60)
+                                if htf_min >= current_min * 4:
+                                    try:
+                                        htf_ohlcv = exchange.fetch_ohlcv(
+                                            sym, htf, limit=scan_limit)
+                                        higher_df = pd.DataFrame(
+                                            htf_ohlcv,
+                                            columns=['date','open','high','low','close','volume']
+                                        )
+                                        higher_df['date'] = pd.to_datetime(
+                                            higher_df['date'], unit='ms')
+                                        break
+                                    except Exception:
+                                        continue
+
+                        scanner = NakedKScanner(
+                            df, symbol=sym, timeframe=scan_tf,
+                            higher_tf_df=higher_df
+                        )
+                        result = scanner.scan()
+                        all_results[sym] = result
+
+                    except Exception as e:
+                        st.error(f"❌ {sym}: {e}")
+
+                # ── 显示结果 ──
+                if all_results:
+                    st.divider()
+                    st.subheader("📊 市场结构全景")
+
+                    # 市场倾向总览
+                    bias_cols = st.columns(min(4, len(all_results)))
+                    for i, (sym, result) in enumerate(all_results.items()):
+                        with bias_cols[i % 4]:
+                            bias_emoji = {
+                                'BULLISH': '🟢', 'BEARISH': '🔴',
+                                'CHANNEL_UP': '🟡', 'CHANNEL_DOWN': '🟠',
+                                'RANGE': '⚪', 'TRANSITION': '🟣'
+                            }
+                            st.metric(
+                                f"{bias_emoji.get(result.market_bias.value, '')} {sym}",
+                                result.market_bias.value,
+                                delta=f"能量 {result.structure.trend_energy}/10 | "
+                                      f"趋势K {result.structure.trend_k_ratio:.0%}"
+                            )
+
+                    st.divider()
+                    st.subheader("🎯 入场信号")
+
+                    all_signals = []
+                    for sym, result in all_results.items():
+                        for sig in result.signals:
+                            all_signals.append((sym, sig))
+
+                    if all_signals:
+                        all_signals.sort(key=lambda x: x[1].score_3step, reverse=True)
+
+                        for sym, sig in all_signals:
+                            action_color = "#00ff88" if sig.action.value == "BUY" else "#ff4444"
+                            score_color = ("#00ff88" if sig.score_3step >= 8
+                                          else "#ffaa00" if sig.score_3step >= 6
+                                          else "#ff4444")
+
+                            with st.expander(
+                                f"{'🟢' if sig.action.value == 'BUY' else '🔴'} "
+                                f"**{sym}** — {sig.action.value} @ "
+                                f"{sig.entry_price:.2f} | "
+                                f"评分: {sig.score_3step}/10 | "
+                                f"盈亏比: {sig.risk_reward:.1f}:1 | "
+                                f"置信度: {sig.confidence:.0%}",
+                                expanded=(sig.score_3step >= 8)
+                            ):
+                                col_l, col_r = st.columns([1, 1])
+                                with col_l:
+                                    st.markdown(f"""
+                                    | 参数 | 值 |
+                                    |------|-----|
+                                    | **入场价** | {sig.entry_price:.4f} |
+                                    | **止损价** | {sig.stop_loss:.4f} |
+                                    | **止盈价** | {sig.take_profit:.4f} |
+                                    | **盈亏比** | {sig.risk_reward:.1f}:1 |
+                                    | **K线类型** | {sig.kline_type.value} |
+                                    | **关键位** | {sig.sr_zone or '无'} |
+                                    """)
+
+                                with col_r:
+                                    st.markdown("**📋 评分明细:**")
+                                    for reason in sig.reasons:
+                                        icon = "✅" if "✅" in reason else ("⚠️" if "⚠️" in reason else "❌")
+                                        st.caption(f"{icon} {reason}")
+
+                                    st.markdown(f"""
+                                    <div style="margin-top:10px; padding:8px 12px;
+                                                border-radius:8px; font-size:14px;
+                                                background:{'#0a2a0a' if sig.action.value == 'BUY' else '#2a0a0a'};
+                                                border:1px solid {action_color};">
+                                    <b style="color:{action_color}">
+                                    {'🐂 做多信号' if sig.action.value == 'BUY' else '🐻 做空信号'}
+                                    </b>
+                                    &nbsp;综合评分: <b style="color:{score_color}">{sig.score_3step}/10</b>
+                                    &nbsp;| 置信度: <b>{sig.confidence:.0%}</b>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                    else:
+                        st.info("🔍 当前无符合条件的入场信号 — "
+                               "三步法评分不足或未在关键位出现有效信号K")
+
+                    # ── K线分类统计 ──
+                    st.divider()
+                    st.subheader("🔬 K线分类统计")
+
+                    kline_cols = st.columns(min(4, len(all_results)))
+                    for i, (sym, result) in enumerate(all_results.items()):
+                        with kline_cols[i % 4]:
+                            st.caption(f"**{sym}**")
+                            counts = result.kline_summary
+                            # 只显示主要类型
+                            key_types = ['TREND_BULL', 'TREND_BEAR', 'NON_TREND', 'DOJI',
+                                        'PINBAR_BULL', 'PINBAR_BEAR', 'ENGULFING_BULL',
+                                        'ENGULFING_BEAR', 'OUTSIDE_BULL', 'OUTSIDE_BEAR']
+                            for kt in key_types:
+                                cnt = counts.get(kt, 0)
+                                if cnt > 0:
+                                    emoji_map = {
+                                        'TREND_BULL': '📈', 'TREND_BEAR': '📉',
+                                        'NON_TREND': '➖', 'DOJI': '✝️',
+                                        'PINBAR_BULL': '🔺', 'PINBAR_BEAR': '🔻',
+                                        'ENGULFING_BULL': '🟢', 'ENGULFING_BEAR': '🔴',
+                                        'OUTSIDE_BULL': '⬆️', 'OUTSIDE_BEAR': '⬇️',
+                                    }
+                                    st.caption(f"{emoji_map.get(kt,'')} {kt}: {cnt}根")
+
+                    # ── 支撑阻力Zone ──
+                    st.divider()
+                    st.subheader("📍 支撑阻力Zone")
+
+                    zone_cols = st.columns(min(4, len(all_results)))
+                    for i, (sym, result) in enumerate(all_results.items()):
+                        with zone_cols[i % 4]:
+                            st.caption(f"**{sym}** ({len(result.structure.sr_zones)}个Zone)")
+                            for zone in result.structure.sr_zones[:8]:
+                                z_type = "🟢 支撑" if zone.kind == 'support' else "🔴 阻力"
+                                strength_bar = "█" * int(zone.strength * 10)
+                                st.caption(
+                                    f"{z_type} {zone.bottom:.2f}-{zone.top:.2f} "
+                                    f"| {strength_bar} "
+                                    f"| 触及{zone.touches}次"
+                                    f"{' | ⚡最近测试' if zone.recent_test else ''}"
+                                )
+
+                    # ── BMS/SMS 结构信号 ──
+                    bms_all = []
+                    for sym, result in all_results.items():
+                        for bms in result.structure.bms_signals:
+                            bms_all.append((sym, bms))
+
+                    if bms_all:
+                        st.divider()
+                        st.subheader("🏗️ 市场结构信号 (BMS/SMS)")
+                        for sym, bms in bms_all:
+                            icon = "✅" if bms.kind.startswith("BMS") else "⚠️"
+                            st.info(f"{icon} **{sym}** — {bms.kind}: {bms.description} "
+                                   f"(置信度={bms.confidence:.0%})")
+
+                else:
+                    st.warning("未能获取任何数据, 请检查网络或稍后重试")
+
+        else:
+            # 初始状态: 显示使用说明
+            st.info("""
+            👆 **点击「裸K扫描」按钮开始分析**
+
+            选择币种和周期后, 引擎将:
+            1. 🏗️ 识别市场结构 (HH/HL/LH/LL + BMS/SMS)
+            2. 🔬 分类每根K线 (趋势K/非趋势K/信号K)
+            3. 📍 构建支撑阻力Zone
+            4. 🎯 三步法评分 (①趋势→②关键位→③2+3信号K确认)
+            5. 📋 输出结构化入场信号 (含止损/止盈/盈亏比)
+
+            > 🐼 基于熊猫教练「熊猫讲裸K」300+集交易体系 + Al Brooks价格行为四部曲
+            """)
+
 # ═══════════════════════════════════════════
 # 底部
 # ═══════════════════════════════════════════
 st.divider()
-st.caption("🐾 Chase的量化策略 v2.5 | 由 Yina 为 Chase哥 打造 | Qlib增强 + 在线学习 + 资产关系图 + Alpha挖掘 + 订单执行优化 + 企微日报推送 · 虚拟盘 · 风险自负")
+st.caption("🐾 Chase的量化策略 v2.7 | 由 Yina 为 Chase哥 打造 | Qlib增强 + 在线学习 + 资产关系图 + Alpha挖掘 + 订单执行优化 + 企微日报推送 + MPT组合优化 + 裸K扫描 🆕 · 虚拟盘 · 风险自负")
 
 # 自动快照 (每60秒)
 if "last_snapshot" not in st.session_state:

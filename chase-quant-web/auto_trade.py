@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from portfolio import PortfolioManager, ALLOCATION
 from risk import RiskController
-from signals import SignalEngine, CryptoSignals, AStockSignals, USStockSignals
+from signals import SignalEngine, CryptoSignals, AStockSignals, USStockSignals, HKStockSignals
 
 # 偏差修正
 try:
@@ -913,7 +913,9 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
             continue
 
         all_sigs = scanner.scan()
-        buy_sigs = [s for s in all_sigs if s.action == "BUY" and s.score >= 50]
+        # 股票市场降低门槛 (A股/港股波动小, 需要更灵敏的入场)
+        min_score = 40 if market in ("a_stock", "hk_stock") else 50
+        buy_sigs = [s for s in all_sigs if s.action == "BUY" and s.score >= min_score]
         buy_sigs.sort(key=lambda s: s.score, reverse=True)
 
         # ── 第一步: 检查持仓止损/止盈 ──
@@ -939,7 +941,9 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
                 continue
 
             cash = pf.cash.get(market, 0)
-            max_size = min(sig.suggested_size, cash * 0.5)
+            # 股票市场用更大仓位 (波动小, 需要更多资金才能看到收益)
+            cash_pct = 0.6 if market in ("a_stock", "hk_stock") else 0.5
+            max_size = min(sig.suggested_size, cash * cash_pct)
 
             if max_size < 200:
                 continue
@@ -1025,7 +1029,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Chase量化策略 · 自动交易")
     parser.add_argument("--markets", nargs="+", default=["crypto"],
-                       choices=["crypto", "a_stock", "us_stock", "all"])
+                       choices=["crypto", "a_stock", "us_stock", "hk_stock", "all"])
     parser.add_argument("--report", action="store_true",
                        help="仅生成状态报告")
     parser.add_argument("--ml", action="store_true",
@@ -1097,7 +1101,7 @@ if __name__ == "__main__":
             print("❌ ML信号引擎不可用")
         sys.exit(0)
 
-    markets = ["crypto", "a_stock", "us_stock"] if args.markets == ["all"] else args.markets
+    markets = ["crypto", "a_stock", "us_stock", "hk_stock"] if args.markets == ["all"] else args.markets
     results, pf = auto_scan_and_trade(markets, use_ml=args.ml, use_rolling=args.rolling)
 
     print(generate_status_report())

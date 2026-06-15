@@ -1,6 +1,6 @@
 """
 Chase量化策略 — 虚拟盘组合管理器
-三个市场: A股 / 美股 / 加密货币 | 总本金 ¥10,000
+四个市场: A股 / 美股 / 加密货币 / 港股 | 总本金 ¥10,000
 """
 from __future__ import annotations
 import json
@@ -55,7 +55,7 @@ def _coin_full_name(ticker: str) -> str:
 class Position:
     """单笔持仓"""
     id: str
-    market: str           # crypto / a_stock / us_stock
+    market: str           # crypto / a_stock / us_stock / hk_stock
     symbol: str           # 代码 e.g. BTC/USDT, 000001, AAPL
     name: str             # 名称
     entry_price: float

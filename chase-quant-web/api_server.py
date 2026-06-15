@@ -16,6 +16,26 @@ from typing import Optional, List, Dict
 warnings.filterwarnings("ignore")
 sys.path.insert(0, str(Path(__file__).parent))
 
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  🩺 OpenMP/BLAS 线程安全修复                                ║
+# ║  macOS 上多个 C 扩展库各自链接不同版本 OpenMP               ║
+# ║  (libomp.dylib / Intel OpenMP / Apple Accelerate)            ║
+# ║  线程池初始化时冲突 → SIGSEGV 段错误 (地址 0x540)            ║
+# ║  必须在 import numpy/pandas/sklearn 之前设置！               ║
+# ╚══════════════════════════════════════════════════════════════╝
+_omp_vars = {
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1",
+    "KMP_DUPLICATE_LIB_OK": "TRUE",
+    "OMP_DYNAMIC": "FALSE",
+}
+for _k, _v in _omp_vars.items():
+    if not os.environ.get(_k):
+        os.environ[_k] = _v
+
 import numpy as np
 import pandas as pd
 
