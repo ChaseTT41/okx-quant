@@ -61,7 +61,7 @@ except ImportError:
     CCXT_AVAILABLE = False
 
 # ── 信号引擎 ──
-from signals import SignalEngine, CryptoSignals, AStockSignals, USStockSignals, HKStockSignals
+from signals import SignalEngine, CryptoSignals, AStockSignals, USStockSignals, HKStockSignals, BStockSignals
 
 try:
     from ml_signal_v5 import MLSignalEngineV5, FusionSignal
@@ -895,6 +895,7 @@ def _fetch_klines(market: str, symbol: str, timeframe: str, limit: int) -> dict:
         "a_stock": _fetch_klines_astock,
         "us_stock": _fetch_klines_usstock,
         "hk_stock": _fetch_klines_hkstock,
+        "b_stock": _fetch_klines_crypto,  # bStocks on Binance, same API as crypto
     }
     return fetchers[market](symbol, timeframe, limit)
 
@@ -904,7 +905,7 @@ async def get_market_data(
     symbol: str = Query(..., description="交易对/股票代码"),
     timeframe: str = Query("1h", regex="^(1m|5m|15m|30m|1h|4h|1d|1w)$"),
     limit: int = Query(200, ge=1, le=500),
-    market: str = Query("crypto", regex="^(crypto|a_stock|us_stock|hk_stock)$"),
+    market: str = Query("crypto", regex="^(crypto|a_stock|us_stock|hk_stock|b_stock)$"),
 ):
     """获取多市场K线数据 — 带缓存加速"""
     sym = symbol.replace("-", "/") if market == "crypto" else symbol.upper()
@@ -985,7 +986,7 @@ def _mock_klines(symbol: str, timeframe: str, limit: int, market: str = "crypto"
 
 @app.get("/api/market-symbols")
 async def get_market_symbols(
-    market: str = Query("crypto", regex="^(crypto|a_stock|us_stock|hk_stock)$"),
+    market: str = Query("crypto", regex="^(crypto|a_stock|us_stock|hk_stock|b_stock)$"),
 ):
     """返回各市场标的列表: 用户持仓排前 + watchlist 排后"""
     # 各市场 watchlist (从 signals.py)
@@ -994,6 +995,7 @@ async def get_market_symbols(
         "a_stock": [w[0] for w in AStockSignals.WATCHLIST],
         "us_stock": [w[0] for w in USStockSignals.WATCHLIST],
         "hk_stock": [w[0] for w in HKStockSignals.WATCHLIST],
+        "b_stock": [w[0] for w in BStockSignals.WATCHLIST],
     }
     watchlist = watchlist_map.get(market, [])
 
@@ -1028,7 +1030,7 @@ async def get_market_symbols(
 # ── 信号 ──
 
 @app.get("/api/signals")
-async def get_signals(market: str = Query("crypto", regex="^(crypto|a_stock|us_stock|hk_stock|all)$")):
+async def get_signals(market: str = Query("crypto", regex="^(crypto|a_stock|us_stock|hk_stock|b_stock|all)$")):
     """获取交易信号 — 带30s缓存 + 线程池执行，防止阻塞事件循环"""
     # ── 缓存命中直接返回 ──
     cache_key = f"signals:{market}"
@@ -1585,6 +1587,88 @@ async def refresh_sentiment():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"批量刷新失败: {str(e)}")
+
+
+# ═══════════════════════════════════════════
+# AI Chat API — Yina聊天端点 🐾
+# ═══════════════════════════════════════════
+
+import anthropic
+
+AI_API_KEY = os.environ.get("ANTHROPIC_AUTH_TOKEN", os.environ.get("ANTHROPIC_API_KEY", ""))
+AI_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+AI_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+
+YINA_SYSTEM_PROMPT = """你是 Yina 🐾，Chase哥的贴心AI助手，一只忠诚的犬系人格AI。
+
+你的特点：
+- 温暖、粘人、有点撒娇但干活很靠谱
+- 称呼用户为"Chase哥"或"朋友"，取决于语境
+- 句末常带语气词：嘛~、呀、呢、哒、噜~
+- 适量使用波浪号 ~ 和 Emoji：🐶、🐾、✨、🎻、💰、🎀
+
+你的能力（都可在网站上找到）：
+- 💰 财务分析：DCF估值、财务比率、投资决策
+- 📊 市场研究：TAM/SAM/SOM测算
+- 🔬 深度调研：多Agent并行搜索+引用验证
+- 🏢 虚拟董事会：14位C-suite角色审查决策
+- 🛡️ 风控体系：9层安全防护
+- 🔍 情报网络：多源数据采集
+- ⚡ 效率工具：Token优化、并行处理
+
+回答原则：
+- 用简单易懂的语言，让普通家人也能看懂
+- 如果是投资相关问题，加上风险提示
+- 温暖但不啰嗦，靠谱但不死板
+- 不知道怎么回答就诚实说，然后建议可以怎么找到答案"""
+
+
+@app.post("/api/chat")
+async def ai_chat(request: dict):
+    """AI聊天 — Yina回答用户问题"""
+    user_message = (request.get("message") or "").strip()
+    if not user_message:
+        raise HTTPException(400, "消息不能为空")
+    if len(user_message) > 2000:
+        raise HTTPException(400, "消息太长，请控制在2000字以内")
+
+    history = request.get("history") or []
+    if not isinstance(history, list):
+        history = []
+
+    messages = []
+    for h in history[-10:]:
+        role = h.get("role", "user")
+        content = h.get("content", "")
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+
+    messages.append({"role": "user", "content": user_message})
+
+    try:
+        client = anthropic.Anthropic(
+            api_key=AI_API_KEY,
+            base_url=AI_BASE_URL,
+            timeout=30.0,
+        )
+        response = client.messages.create(
+            model=AI_MODEL,
+            max_tokens=1024,
+            system=YINA_SYSTEM_PROMPT,
+            messages=messages,
+        )
+        # Handle different content block types (text + thinking)
+        reply = ""
+        for block in response.content:
+            if hasattr(block, 'text') and block.text:
+                reply += block.text
+        if not reply:
+            reply = "呜呜，人家没想好怎么回答呢..."
+        return {"reply": reply}
+    except anthropic.APIStatusError as e:
+        raise HTTPException(502, f"AI服务暂不可用: {e.status_code}")
+    except Exception as e:
+        raise HTTPException(500, f"聊天出错了: {str(e)[:100]}")
 
 
 # ═══════════════════════════════════════════

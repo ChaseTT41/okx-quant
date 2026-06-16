@@ -306,7 +306,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
 
     # 不需要防护的路径 (健康检查 / 监控 / 鉴权)
-    EXEMPT_PATHS = {"/api/health", "/health", "/ping", "/api/auth/verify", "/api/auth/status"}
+    EXEMPT_PATHS = {"/", "/api/chat", "/api/health", "/health", "/ping", "/api/auth/verify", "/api/auth/status"}
 
     # Mutation 方法
     MUTATION_METHODS = {"POST", "PUT", "DELETE", "PATCH"}

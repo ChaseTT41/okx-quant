@@ -966,6 +966,187 @@ class ExecutionEngine:
 
         return report
 
+    def execute_live(self, symbol: str, side: str, quantity: float,
+                     price: float, market_data: dict,
+                     binance_trader) -> ExecutionReport:
+        """
+        实盘执行 — 通过 BinanceLiveTrader 在币安真实下单
+
+        与 execute_paper() 同签名，复用:
+          - 预交易分析（策略选择、拆片）
+          - 执行层风控检查
+          - ExecutionReport 格式
+
+        Args:
+            symbol: 交易对 (e.g. BTC/USDT)
+            side: buy | sell
+            quantity: 总数量
+            price: 当前价格 (arrival price)
+            market_data: {avg_daily_volume, volatility, spread, ...}
+            binance_trader: BinanceLiveTrader 实例
+
+        Returns:
+            ExecutionReport
+        """
+        from binance_live import LiveTradingBlockedError, LiveAPIError
+
+        parent_id = f"live_{uuid.uuid4().hex[:12]}"
+        adv = market_data.get("avg_daily_volume", 1e6)
+        vol = market_data.get("volatility", 0.02)
+        spread = market_data.get("spread", 0.001)
+
+        # 1. 预交易分析（复用现有逻辑）
+        impact_est = self.impact_model.estimate_impact(
+            quantity, adv, vol, spread,
+            horizon_hours=self.config.horizon_minutes / 60
+        )
+
+        # 2. 执行层风控检查
+        from risk import RiskController
+        rc = RiskController(None)  # 实盘模式不需要 paper portfolio
+        exec_check = rc.execution_risk_check(
+            quantity, adv, spread, vol,
+            n_slices=self.config.n_slices or 5
+        )
+        if not exec_check.passed:
+            # 风控不通过 → 拒绝执行
+            report = ExecutionReport(
+                parent_id=parent_id, symbol=symbol, side=side,
+                total_quantity=quantity, arrival_price=price,
+                avg_execution_price=price,
+                implementation_shortfall_bps=0, vwap_slippage_bps=0,
+                market_impact_bps=impact_est.get("total_bps", 0),
+                spread_cost_bps=spread * 0.5 * 10000,
+                delay_cost_bps=0, fill_rate=0,
+                duration_seconds=0, n_slices_total=0, n_slices_filled=0,
+                strategy_used="rejected",
+                notes=f"执行层风控拦截: {exec_check.reason}"
+            )
+            return report
+
+        # 3. 实盘下单
+        start_time = datetime.now(timezone.utc)
+        try:
+            # 计算 USDT 金额
+            amount_usdt = quantity * price if price > 0 else 0
+
+            if amount_usdt < 10:
+                # 低于币安最小交易额
+                report = ExecutionReport(
+                    parent_id=parent_id, symbol=symbol, side=side,
+                    total_quantity=quantity, arrival_price=price,
+                    avg_execution_price=price,
+                    implementation_shortfall_bps=0, vwap_slippage_bps=0,
+                    market_impact_bps=0, spread_cost_bps=0,
+                    delay_cost_bps=0, fill_rate=0,
+                    duration_seconds=0, n_slices_total=0, n_slices_filled=0,
+                    strategy_used="rejected",
+                    notes=f"金额 ${amount_usdt:.2f} 低于最小交易额 $10"
+                )
+                return report
+
+            # 执行市价单
+            if side == "buy":
+                result = binance_trader.market_buy(
+                    symbol, amount_usdt,
+                    note=f"[{parent_id}] {self.config.strategy.upper()} 实盘执行"
+                )
+            else:
+                result = binance_trader.market_sell(
+                    symbol, quantity,
+                    note=f"[{parent_id}] {self.config.strategy.upper()} 实盘执行"
+                )
+
+            elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+            avg_px = result.price if result.price > 0 else price
+            fill_rate = 1.0 if result.is_filled else 0.0
+
+            # Implementation Shortfall
+            if side == "buy":
+                is_bps = (avg_px / price - 1) * 10000 if price > 0 else 0
+            else:
+                is_bps = (1 - avg_px / price) * 10000 if price > 0 else 0
+
+            spread_cost = spread * 0.5 * 10000
+            market_impact = max(0, abs(is_bps) - spread_cost)
+
+            report = ExecutionReport(
+                parent_id=parent_id, symbol=symbol, side=side,
+                total_quantity=quantity, arrival_price=price,
+                avg_execution_price=round(avg_px, 4),
+                implementation_shortfall_bps=round(is_bps, 2),
+                vwap_slippage_bps=round(is_bps * 0.9, 2),
+                market_impact_bps=round(market_impact, 2),
+                spread_cost_bps=round(spread_cost, 2),
+                delay_cost_bps=0,
+                fill_rate=round(fill_rate, 4),
+                duration_seconds=elapsed,
+                n_slices_total=1, n_slices_filled=1 if fill_rate > 0 else 0,
+                slice_details=[{
+                    "slice_id": 1, "quantity": quantity,
+                    "filled_qty": result.quantity if fill_rate > 0 else 0,
+                    "fill_price": round(avg_px, 2),
+                    "status": "filled" if fill_rate > 0 else "failed",
+                    "order_id": result.order_id,
+                }],
+                strategy_used=f"live_{self.config.strategy}",
+                notes=f"订单ID: {result.order_id} | 手续费: {result.fee:.4f} {result.fee_currency}"
+            )
+
+            # 保存执行记录
+            store = ExecutionStore()
+            store.save(report)
+
+            return report
+
+        except LiveTradingBlockedError as e:
+            # 紧急停止/熔断 — 返回拒绝报告
+            report = ExecutionReport(
+                parent_id=parent_id, symbol=symbol, side=side,
+                total_quantity=quantity, arrival_price=price,
+                avg_execution_price=price,
+                implementation_shortfall_bps=0, vwap_slippage_bps=0,
+                market_impact_bps=0, spread_cost_bps=0,
+                delay_cost_bps=0, fill_rate=0,
+                duration_seconds=0, n_slices_total=0, n_slices_filled=0,
+                strategy_used="blocked",
+                notes=f"交易被阻止: {e}"
+            )
+            return report
+
+        except LiveAPIError as e:
+            # API 错误 — 返回失败报告
+            elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+            report = ExecutionReport(
+                parent_id=parent_id, symbol=symbol, side=side,
+                total_quantity=quantity, arrival_price=price,
+                avg_execution_price=price,
+                implementation_shortfall_bps=0, vwap_slippage_bps=0,
+                market_impact_bps=0, spread_cost_bps=0,
+                delay_cost_bps=0, fill_rate=0,
+                duration_seconds=elapsed, n_slices_total=0, n_slices_filled=0,
+                strategy_used="failed",
+                notes=f"API错误: {e}"
+            )
+            return report
+
+        except Exception as e:
+            # 未知错误
+            elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+            print(f"  ❌ 实盘执行异常: {e}")
+            report = ExecutionReport(
+                parent_id=parent_id, symbol=symbol, side=side,
+                total_quantity=quantity, arrival_price=price,
+                avg_execution_price=price,
+                implementation_shortfall_bps=0, vwap_slippage_bps=0,
+                market_impact_bps=0, spread_cost_bps=0,
+                delay_cost_bps=0, fill_rate=0,
+                duration_seconds=elapsed, n_slices_total=0, n_slices_filled=0,
+                strategy_used="error",
+                notes=f"未知错误: {e}"
+            )
+            return report
+
     def _simulate_slice_fill(self, slice_obj: OrderSlice, current_price: float,
                              side: str, volatility: float, spread: float) -> Tuple[float, float, float]:
         """

@@ -26,6 +26,13 @@ data/optimization_results/
 data/qlib_reports/
 data/executions/
 data/cross_market_cache/
+data/daemon_state.json
+data/daemon_logs/
+data/hourly/
+data/ai_results/
+data/sentiment/
+data/live_fuse_state.json
+data/live_risk_state.json
 
 # IDE
 .vscode/

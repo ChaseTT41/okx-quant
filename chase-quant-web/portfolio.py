@@ -1,6 +1,6 @@
 """
 Chase量化策略 — 虚拟盘组合管理器
-四个市场: A股 / 美股 / 加密货币 / 港股 | 总本金 ¥10,000
+五个市场: A股 / 美股 / 加密货币 / 港股 / bStocks(币安代币化美股) | 总本金 ¥10,000
 """
 from __future__ import annotations
 import json
@@ -18,10 +18,11 @@ SNAPSHOT_FILE = DATA_DIR / "snapshots.json"
 # 初始资金分配
 INITIAL_CAPITAL = 10000.0  # RMB
 ALLOCATION = {
-    "crypto":  4000.0,   # 加密货币 (Binance/OKX)
-    "a_stock": 3500.0,   # A股 (同花顺标准)
-    "us_stock": 2500.0,   # 美股 (VSTrader)
-    "hk_stock": 1500.0,   # 港股 (港交所)
+    "crypto":  3500.0,   # 加密货币 (Binance/OKX)
+    "a_stock": 3000.0,   # A股 (同花顺标准)
+    "us_stock": 2000.0,   # 美股 (VSTrader)
+    "hk_stock": 1000.0,   # 港股 (港交所)
+    "b_stock": 1500.0,   # bStocks (币安代币化美股, 24/7, USDT计价)
 }
 
 # 手续费
@@ -30,6 +31,7 @@ FEES = {
     "a_stock": 0.0003,   # 万三佣金 + 千一印花税(卖) ≈ 综合0.03%
     "us_stock": 0.005,   # 0.5% 含汇损
     "hk_stock": 0.003,   # 0.1%印花税 + 0.1%佣金 + 0.1%杂费 ≈ 综合0.3%
+    "b_stock": 0.000,    # bStocks挂单费豁免至2026-09-01, 吃单0.01%暂忽略
 }
 
 # 币种全名映射 (ticker → full name)
@@ -180,7 +182,7 @@ class PortfolioManager:
 
     @property
     def positions_value(self) -> float:
-        return sum(p.value for p in self.positions.values())
+        return sum(p.value for p in self.open_positions)
 
     @property
     def total_value(self) -> float:
@@ -457,6 +459,7 @@ class PortfolioManager:
             ("a_stock", "🇨🇳 A股", "#FF0000"),
             ("us_stock", "🇺🇸 美股", "#1E90FF"),
             ("hk_stock", "🇭🇰 港股", "#DC143C"),
+            ("b_stock", "🏦 bStocks", "#00D4AA"),
         ]:
             positions_val = sum(p.value for p in self.open_positions if p.market == market)
             cash_val = self.cash.get(market, 0)

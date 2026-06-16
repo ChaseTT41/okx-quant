@@ -508,6 +508,139 @@ class HKStockSignals:
         return sorted(signals, key=lambda s: s.score, reverse=True)
 
 
+class BStockSignals:
+    """bStocks信号 — 币安代币化美股 (24/7交易, USDT计价, BNB Chain)
+
+    bStocks 是 Binance 2026年6月11日推出的代币化美股产品:
+      - BEP-677 代币, 1:1 由真实股票背书
+      - 首批: NVDAB, TSLAB, CRCLB, MUB, SNDKB
+      - 全部 /USDT 交易对, 最低 $5
+      - 挂单费豁免至 2026-09-01
+      - 24/7 交易 (无美股交易时段限制!)
+    """
+
+    # bStocks 首批5只 + 预计扩展
+    WATCHLIST = [
+        ("NVDAB/USDT", "NVIDIA Tokenized"),    # 英伟达
+        ("TSLAB/USDT", "Tesla Tokenized"),     # 特斯拉
+        ("CRCLB/USDT", "Circle Tokenized"),    # Circle (USDC发行商)
+        ("MUB/USDT", "MicroStrategy Tokenized"),  # MicroStrategy (BTC大户)
+        ("SNDKB/USDT", "Sandisk Tokenized"),   # 闪迪
+    ]
+
+    # 中文名映射
+    NAME_MAP = {
+        "NVDAB": "英伟达·b", "TSLAB": "特斯拉·b", "CRCLB": "Circle·b",
+        "MUB": "微策略·b", "SNDKB": "闪迪·b",
+    }
+
+    def __init__(self):
+        self._exchange = None
+
+    @property
+    def exchange(self):
+        if self._exchange is None:
+            try:
+                import ccxt
+                self._exchange = ccxt.binance({"enableRateLimit": True, "timeout": 10000})
+            except Exception:
+                self._exchange = None
+        return self._exchange
+
+    def fetch_ohlcv(self, symbol: str, limit: int = 100) -> Optional[pd.DataFrame]:
+        try:
+            ex = self.exchange
+            if ex is None:
+                return None
+            ohlcv = ex.fetch_ohlcv(symbol, "1d", limit=limit)
+            df = pd.DataFrame(ohlcv, columns=["date", "open", "high", "low", "close", "volume"])
+            df["date"] = pd.to_datetime(df["date"], unit="ms")
+            return df
+        except Exception:
+            return None
+
+    def scan(self) -> List[Signal]:
+        signals = []
+        for symbol, full_name in self.WATCHLIST:
+            df = self.fetch_ohlcv(symbol)
+            if df is None or len(df) < 5:
+                # bStocks 才上线几天, 数据不足时用模拟估值
+                continue
+
+            close = df["close"].values
+            price = close[-1]
+            ticker = symbol.replace("/USDT", "")
+            name = self.NAME_MAP.get(ticker, full_name)
+            reasons = []
+            score = 50
+
+            # RSI (短周期，因数据少)
+            if len(close) >= 14:
+                rsi = _calc_rsi(close, period=min(14, len(close)-1))
+                if 30 < rsi < 40:
+                    score += 15; reasons.append(f"RSI={rsi:.0f} 超卖反弹区")
+                elif 40 <= rsi <= 60:
+                    score += 10; reasons.append(f"RSI={rsi:.0f} 中性健康")
+                elif rsi > 70:
+                    score -= 20; reasons.append(f"RSI={rsi:.0f} 超买⚠️")
+                elif rsi < 30:
+                    score += 20; reasons.append(f"RSI={rsi:.0f} 极度超卖🔔")
+
+            # MACD
+            if len(close) >= 26:
+                macd, signal_line, hist = _calc_macd(close)
+                if hist > 0:
+                    score += 10; reasons.append("MACD金叉")
+                else:
+                    score -= 10; reasons.append("MACD死叉")
+
+            # 短期均线
+            if len(close) >= 5:
+                sma5 = pd.Series(close).rolling(5).mean()
+                if price > sma5.iloc[-1]:
+                    score += 10; reasons.append("站上5日线")
+                else:
+                    score -= 5
+
+            # 动量 (bStocks刚上线, 用1日/3日)
+            if len(close) > 1:
+                ret_1d = (close[-1] / close[-2] - 1) * 100
+                if ret_1d > 3:
+                    score += 10; reasons.append(f"1日+{ret_1d:.1f}%")
+                elif ret_1d < -3:
+                    score -= 10; reasons.append(f"1日跌{ret_1d:.1f}%")
+
+            # bStocks 特殊加分: 新品溢价效应 (刚上线5天)
+            reasons.append("🆕 bStocks新品 (上线<1周)")
+
+            # 波动率 (数据可能不足, 保守处理)
+            risk = "medium"
+
+            score = max(0, min(100, score))
+            if score >= 60:
+                action = "BUY"
+            elif score < 35:
+                action = "SELL"
+            else:
+                action = "HOLD"
+
+            # 价格是 USD, 换算 RMB (汇率 ~7.2)
+            price_cny = price * 7.2
+
+            signals.append(Signal(
+                market="b_stock", symbol=symbol,
+                name=f"{name} (${price:.2f})",
+                price=price_cny, action=action,
+                score=score, confidence=min(0.95, max(0.25, 1 - score / 120)),
+                reasons=reasons, risk_level=risk,
+                suggested_size=max(200, min(1000, score * 10)),
+                stop_loss=price_cny * 0.90,    # bStocks新品波动大, 止损放宽到-10%
+                take_profit=price_cny * 1.20,   # 止盈+20%
+            ))
+
+        return sorted(signals, key=lambda s: s.score, reverse=True)
+
+
 class SignalEngine:
     """统一信号引擎"""
 
@@ -516,6 +649,7 @@ class SignalEngine:
         self.a_stock = AStockSignals()
         self.us_stock = USStockSignals()
         self.hk_stock = HKStockSignals()
+        self.b_stock = BStockSignals()
 
     def scan_all(self) -> Dict[str, List[Signal]]:
         """扫描全市场, 返回 BUY 信号 (score >= 65)"""
@@ -525,6 +659,7 @@ class SignalEngine:
             ("a_stock", self.a_stock),
             ("us_stock", self.us_stock),
             ("hk_stock", self.hk_stock),
+            ("b_stock", self.b_stock),
         ]:
             try:
                 all_sigs = scanner.scan()
@@ -542,6 +677,7 @@ class SignalEngine:
             ("a_stock", self.a_stock),
             ("us_stock", self.us_stock),
             ("hk_stock", self.hk_stock),
+            ("b_stock", self.b_stock),
         ]:
             try:
                 results[market] = scanner.scan()

@@ -44,10 +44,10 @@ class RiskController:
         if score < MIN_SCORE_FOR_ENTRY:
             return RiskCheck(False, f"信号分{score:.0f}<{MIN_SCORE_FOR_ENTRY}最低门槛", "warning")
 
-        # 2. 持仓上限
-        open_count = len(self.pf.open_positions)
+        # 2. 持仓上限 (每市场独立, 避免单一市场占满全局额度)
+        open_count = len([p for p in self.pf.open_positions if p.market == market])
         if open_count >= MAX_POSITIONS:
-            return RiskCheck(False, f"已持仓{open_count}只, 达上限{MAX_POSITIONS}", "warning")
+            return RiskCheck(False, f"{market}已持仓{open_count}只, 达上限{MAX_POSITIONS}", "warning")
 
         # 3. 单仓位上限
         pos_pct = amount / total_value * 100 if total_value > 0 else 100
@@ -168,3 +168,284 @@ class RiskController:
             "survival_score": max(0, 100 - max(0, pf.total_pnl_pct) * 2),  # 亏损越多分越低
             "alerts": pf.check_risk(),
         }
+
+
+# ═══════════════════════════════════════════
+# Phase 15: 实盘专属风控
+# ═══════════════════════════════════════════
+
+# 实盘风控参数（100-300 USDT 小额适配）
+LIVE_MAX_DAILY_TRADES = 5           # 每日最大交易次数
+LIVE_MAX_DRAWDOWN_PCT = -0.10       # 最大回撤 10%（从峰值）
+LIVE_COOLDOWN_AFTER_STOP_MIN = 30   # 止损后冷静期（分钟）
+LIVE_MIN_NOTIONAL_USDT = 10.0       # 币安最低名义交易额
+LIVE_MAX_SINGLE_POSITION_PCT = 0.50 # 单币最大仓位 50%
+LIVE_API_ERROR_FUSE_COUNT = 3       # 连续 API 错误熔断次数
+
+from datetime import datetime, timezone, timedelta
+from collections import defaultdict
+
+
+@dataclass
+class LiveRiskState:
+    """实盘风控状态（持久化到 data/live_risk_state.json）"""
+    peak_equity: float = 0.0                    # 峰值权益
+    current_equity: float = 0.0                 # 当前权益
+    drawdown_pct: float = 0.0                   # 当前回撤
+    daily_trades_today: int = 0                 # 今日交易次数
+    last_trade_date: str = ""                   # 上次交易日期
+    consecutive_api_errors: int = 0             # 连续 API 错误
+    last_stop_loss_time: dict = field(          # {symbol: iso_timestamp}
+        default_factory=dict)
+    positions_concentration: dict = field(       # {symbol: pct}
+        default_factory=dict)
+    updated_at: str = ""
+
+
+class LiveRiskController:
+    """
+    实盘专属风控控制器
+
+    在现有五层风控（RiskController）基础上叠加实盘专属规则:
+      1. API 错误熔断 — 连续 N 次 → 停 30 分钟
+      2. 最大回撤限制 — 从峰值回撤 10% → 阻止新开仓
+      3. 止损后冷静期 — 30 分钟内禁止同 symbol 开仓
+      4. 每日交易次数上限 — 5 笔（保守）
+      5. 最小交易额检查 — ≥ $10
+      6. 持仓集中度 — 单币 ≤ 50%
+    """
+
+    def __init__(self, total_equity_usdt: float = 0.0):
+        self.state = LiveRiskState()
+        self.state.peak_equity = total_equity_usdt
+        self.state.current_equity = total_equity_usdt
+        self._load_state()
+
+    def _load_state(self):
+        """加载持久化风控状态"""
+        import json
+        from pathlib import Path
+        state_file = Path(__file__).parent / "data" / "live_risk_state.json"
+        try:
+            if state_file.exists():
+                data = json.loads(state_file.read_text())
+                self.state.peak_equity = data.get("peak_equity", self.state.peak_equity)
+                self.state.current_equity = data.get("current_equity", self.state.current_equity)
+                self.state.daily_trades_today = data.get("daily_trades_today", 0)
+                self.state.last_trade_date = data.get("last_trade_date", "")
+                self.state.consecutive_api_errors = data.get("consecutive_api_errors", 0)
+                self.state.last_stop_loss_time = data.get("last_stop_loss_time", {})
+                self.state.positions_concentration = data.get("positions_concentration", {})
+        except Exception:
+            pass
+
+    def _save_state(self):
+        """持久化风控状态"""
+        import json
+        from pathlib import Path
+        state_file = Path(__file__).parent / "data" / "live_risk_state.json"
+        try:
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            self.state.updated_at = datetime.now(timezone.utc).isoformat()
+            state_file.write_text(json.dumps({
+                "peak_equity": self.state.peak_equity,
+                "current_equity": self.state.current_equity,
+                "daily_trades_today": self.state.daily_trades_today,
+                "last_trade_date": self.state.last_trade_date,
+                "consecutive_api_errors": self.state.consecutive_api_errors,
+                "last_stop_loss_time": self.state.last_stop_loss_time,
+                "positions_concentration": self.state.positions_concentration,
+                "updated_at": self.state.updated_at,
+            }, ensure_ascii=False, indent=2))
+        except Exception:
+            pass
+
+    # ── 规则 1: 最大回撤限制 ──
+
+    def update_equity(self, current_equity: float):
+        """更新权益并检查回撤"""
+        self.state.current_equity = current_equity
+        if current_equity > self.state.peak_equity:
+            self.state.peak_equity = current_equity
+        if self.state.peak_equity > 0:
+            self.state.drawdown_pct = (current_equity - self.state.peak_equity) / self.state.peak_equity
+        self._save_state()
+
+    def check_drawdown(self) -> RiskCheck:
+        """检查是否触发回撤限制"""
+        if self.state.drawdown_pct <= LIVE_MAX_DRAWDOWN_PCT:
+            return RiskCheck(
+                False,
+                f"最大回撤 {self.state.drawdown_pct:.1%} 超过 {LIVE_MAX_DRAWDOWN_PCT:.0%} 限制! "
+                f"峰值 ${self.state.peak_equity:.0f} → 当前 ${self.state.current_equity:.0f}",
+                "danger"
+            )
+        return RiskCheck(True, f"回撤 {self.state.drawdown_pct:.1%} (限制 {LIVE_MAX_DRAWDOWN_PCT:.0%})", "info")
+
+    # ── 规则 2: 每日交易次数 ──
+
+    def check_daily_trade_limit(self) -> RiskCheck:
+        """检查每日交易次数上限"""
+        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        if self.state.last_trade_date != today:
+            self.state.daily_trades_today = 0
+            self.state.last_trade_date = today
+            self._save_state()
+
+        if self.state.daily_trades_today >= LIVE_MAX_DAILY_TRADES:
+            return RiskCheck(
+                False,
+                f"今日交易 {self.state.daily_trades_today}/{LIVE_MAX_DAILY_TRADES} 已达上限",
+                "warning"
+            )
+        return RiskCheck(True, f"今日 {self.state.daily_trades_today}/{LIVE_MAX_DAILY_TRADES} 笔", "info")
+
+    def record_trade(self):
+        """记录一笔交易"""
+        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        if self.state.last_trade_date != today:
+            self.state.daily_trades_today = 0
+            self.state.last_trade_date = today
+        self.state.daily_trades_today += 1
+        self._save_state()
+
+    # ── 规则 3: 止损后冷静期 ──
+
+    def record_stop_loss(self, symbol: str):
+        """记录止损事件"""
+        self.state.last_stop_loss_time[symbol] = datetime.now(timezone.utc).isoformat()
+        self._save_state()
+
+    def check_cooldown(self, symbol: str) -> RiskCheck:
+        """检查止损后冷静期"""
+        if symbol not in self.state.last_stop_loss_time:
+            return RiskCheck(True, "", "info")
+
+        try:
+            last_stop = datetime.fromisoformat(self.state.last_stop_loss_time[symbol])
+            elapsed = (datetime.now(timezone.utc) - last_stop).total_seconds() / 60
+            if elapsed < LIVE_COOLDOWN_AFTER_STOP_MIN:
+                remaining = int(LIVE_COOLDOWN_AFTER_STOP_MIN - elapsed)
+                return RiskCheck(
+                    False,
+                    f"{symbol} 止损后冷静期: 还需 {remaining} 分钟 (共{LIVE_COOLDOWN_AFTER_STOP_MIN}分钟)",
+                    "warning"
+                )
+        except (ValueError, TypeError):
+            pass
+
+        return RiskCheck(True, "", "info")
+
+    # ── 规则 4: 最小交易额 ──
+
+    @staticmethod
+    def check_min_notional(amount_usdt: float) -> RiskCheck:
+        """检查是否满足币安最小交易额"""
+        if amount_usdt < LIVE_MIN_NOTIONAL_USDT:
+            return RiskCheck(
+                False,
+                f"交易金额 ${amount_usdt:.2f} 低于币安最小交易额 ${LIVE_MIN_NOTIONAL_USDT}",
+                "warning"
+            )
+        return RiskCheck(True, "", "info")
+
+    # ── 规则 5: 持仓集中度 ──
+
+    def check_concentration(self, symbol: str, new_position_pct: float,
+                           current_positions: dict = None) -> RiskCheck:
+        """
+        检查持仓集中度
+
+        Args:
+            symbol: 交易对
+            new_position_pct: 新仓位占比 (0-1)
+            current_positions: 现有持仓 {symbol: pct}
+        """
+        if current_positions:
+            self.state.positions_concentration.update(current_positions)
+
+        total_pct = self.state.positions_concentration.get(symbol, 0) + new_position_pct
+        if total_pct > LIVE_MAX_SINGLE_POSITION_PCT:
+            return RiskCheck(
+                False,
+                f"{symbol} 仓位 {total_pct:.0%} 超过 {LIVE_MAX_SINGLE_POSITION_PCT:.0%} 上限",
+                "danger"
+            )
+        return RiskCheck(True, "", "info")
+
+    # ── 规则 6: API 错误熔断 ──
+
+    def record_api_error(self):
+        """记录 API 错误"""
+        self.state.consecutive_api_errors += 1
+        self._save_state()
+
+    def record_api_success(self):
+        """记录 API 成功"""
+        if self.state.consecutive_api_errors > 0:
+            self.state.consecutive_api_errors = 0
+            self._save_state()
+
+    def check_api_fuse(self) -> RiskCheck:
+        """检查 API 错误熔断"""
+        if self.state.consecutive_api_errors >= LIVE_API_ERROR_FUSE_COUNT:
+            return RiskCheck(
+                False,
+                f"连续 {self.state.consecutive_api_errors} 次 API 错误, 触发熔断!",
+                "danger"
+            )
+        return RiskCheck(True, "", "info")
+
+    # ── 综合检查 ──
+
+    def live_pre_trade_check(self, symbol: str, amount_usdt: float,
+                            position_pct: float = 0.0,
+                            current_positions: dict = None) -> list[RiskCheck]:
+        """
+        实盘交易前综合风控检查
+
+        Returns:
+            [RiskCheck, ...] — 全部通过才可交易
+        """
+        checks = []
+
+        # 1. 最小交易额
+        checks.append(self.check_min_notional(amount_usdt))
+
+        # 2. 回撤限制
+        checks.append(self.check_drawdown())
+
+        # 3. 每日交易次数
+        checks.append(self.check_daily_trade_limit())
+
+        # 4. 止损冷静期
+        checks.append(self.check_cooldown(symbol))
+
+        # 5. 持仓集中度
+        if position_pct > 0:
+            checks.append(self.check_concentration(symbol, position_pct, current_positions))
+
+        # 6. API 熔断
+        checks.append(self.check_api_fuse())
+
+        return checks
+
+    def all_checks_passed(self, checks: list[RiskCheck]) -> bool:
+        """所有检查是否通过"""
+        return all(c.passed for c in checks)
+
+    def get_failed_checks(self, checks: list[RiskCheck]) -> list[RiskCheck]:
+        """获取失败的检查"""
+        return [c for c in checks if not c.passed]
+
+    def get_status_summary(self) -> str:
+        """风控状态摘要"""
+        lines = [
+            f"🛡️ 实盘风控状态",
+            f"  峰值权益: ${self.state.peak_equity:.2f}",
+            f"  当前权益: ${self.state.current_equity:.2f}",
+            f"  当前回撤: {self.state.drawdown_pct:.1%} (限制 {LIVE_MAX_DRAWDOWN_PCT:.0%})",
+            f"  今日交易: {self.state.daily_trades_today}/{LIVE_MAX_DAILY_TRADES} 笔",
+            f"  连续API错误: {self.state.consecutive_api_errors}/{LIVE_API_ERROR_FUSE_COUNT}",
+        ]
+        return "\n".join(lines)

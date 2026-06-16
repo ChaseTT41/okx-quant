@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from portfolio import PortfolioManager, ALLOCATION
 from risk import RiskController
-from signals import SignalEngine, CryptoSignals, AStockSignals, USStockSignals, HKStockSignals
+from signals import SignalEngine, CryptoSignals, AStockSignals, USStockSignals, HKStockSignals, BStockSignals
 
 # 偏差修正
 try:
@@ -72,6 +72,14 @@ try:
 except ImportError:
     EXECUTION_AVAILABLE = False
 
+# 实盘交易 (Phase 15: 币安实盘)
+try:
+    from trading_config import TradingConfig, TradingMode, create_exchange
+    from binance_live import BinanceLiveTrader
+    LIVE_TRADING_AVAILABLE = True
+except ImportError:
+    LIVE_TRADING_AVAILABLE = False
+
 
 def is_market_open(market: str) -> bool:
     """判断市场是否交易时段"""
@@ -92,6 +100,8 @@ def is_market_open(market: str) -> bool:
         return hour >= 21.5 or hour <= 4.0
     elif market == "crypto":
         return True
+    elif market == "b_stock":
+        return True  # bStocks 24/7 交易
     return False
 
 
@@ -222,7 +232,8 @@ class RollingAwareAutoTrader:
 
     def __init__(self, use_v5: bool = True, use_rolling: bool = True,
                  auto_retrain: bool = False, use_graph: bool = True,
-                 use_alphas: bool = False, execution_config: "ExecutionConfig" = None):
+                 use_alphas: bool = False, execution_config: "ExecutionConfig" = None,
+                 trading_mode: "TradingMode" = None):
         """
         Args:
             use_v5: 是否使用 MLSignalEngineV5 (Qlib融合)
@@ -231,6 +242,7 @@ class RollingAwareAutoTrader:
             use_graph: 是否使用资产关系图增强 (Phase 11)
             use_alphas: 是否使用Alpha挖掘增强 (Phase 12)
             execution_config: 执行优化配置 (Phase 13), None=单笔市价
+            trading_mode: 交易模式 (Phase 15), None=自动从环境变量读取
         """
         self.use_v5 = use_v5 and ML_V5_AVAILABLE
         self.use_rolling = use_rolling and ROLLING_AVAILABLE
@@ -239,6 +251,25 @@ class RollingAwareAutoTrader:
         self.use_alphas = use_alphas and ALPHA_AVAILABLE
         self.use_execution = execution_config is not None and EXECUTION_AVAILABLE
         self.execution_config = execution_config
+
+        # ── Phase 15: 实盘交易 ──
+        if trading_mode is None:
+            trading_mode = TradingMode.PAPER
+        self.trading_mode = trading_mode
+        self.live_trader = None
+
+        if self.trading_mode.is_real and LIVE_TRADING_AVAILABLE:
+            try:
+                trading_cfg = TradingConfig.from_env()
+                self.live_trader = BinanceLiveTrader(trading_cfg)
+                print(f"🔗 实盘连接: {trading_mode.label}")
+                usdt = self.live_trader.get_usdt_balance()
+                print(f"💰 USDT 余额: ${usdt:.2f}")
+            except Exception as e:
+                print(f"⚠️ 实盘连接失败: {e}")
+                print("  ⬇️ 降级为模拟盘模式")
+                self.trading_mode = TradingMode.PAPER
+                self.live_trader = None
 
         # 初始化执行引擎
         if self.use_execution:
@@ -629,9 +660,72 @@ class RollingAwareAutoTrader:
                 f"活跃={sig['n_active']}"
             )
 
-            # Phase 13: 拆单执行 vs 单笔市价
-            if self.use_execution and self.execution_engine is not None:
+            # Phase 15: 实盘交易 vs 模拟盘
+            if self.trading_mode.is_real and self.live_trader is not None:
+                # ── 实盘路径 ──
+                amount_usdt = quantity * sig["price"]
+                mdata = {
+                    "price": sig["price"],
+                    "avg_daily_volume": 35000 if "BTC" in sig["symbol"] else 500000,
+                    "volatility": 0.025,
+                    "spread": 0.0005,
+                }
+
                 # 执行层风控
+                if self.use_execution and self.execution_engine is not None:
+                    exec_check = rc.execution_risk_check(
+                        quantity, mdata["avg_daily_volume"],
+                        mdata["spread"], mdata["volatility"],
+                        n_slices=self.execution_config.n_slices or 10
+                    )
+                    if not exec_check.passed:
+                        print(f"  ⚠️ 执行层风控拦截 ({sig['symbol']}): {exec_check.reason}")
+                        continue
+
+                    exec_report = self.execution_engine.execute_live(
+                        symbol=sig["symbol"], side="buy",
+                        quantity=quantity, price=sig["price"],
+                        market_data=mdata, binance_trader=self.live_trader
+                    )
+                else:
+                    # 单笔市价实盘
+                    try:
+                        exec_report = self.live_trader.market_buy(
+                            sig["symbol"], amount_usdt,
+                            note=reasoning
+                        )
+                    except Exception as e:
+                        print(f"  ❌ 实盘买入失败 ({sig['symbol']}): {e}")
+                        continue
+
+                # 判断结果
+                if hasattr(exec_report, 'fill_rate') and exec_report.fill_rate > 0:
+                    results.append(
+                        f"🔴实盘 买入 {sig['symbol']} ${amount_usdt:.0f} | "
+                        f"IS={exec_report.implementation_shortfall_bps:+.1f}bps"
+                    )
+                    # 同步更新模拟盘（用于统一展示）
+                    if hasattr(exec_report, 'avg_execution_price'):
+                        actual_px = exec_report.avg_execution_price
+                    else:
+                        actual_px = exec_report.price if hasattr(exec_report, 'price') else sig["price"]
+                    pf.buy(market="crypto", symbol=sig["symbol"],
+                           name=sig["name"], price=actual_px,
+                           quantity=quantity, reason=f"[实盘] {reasoning}")
+                    print(f"  ✅ 实盘成交: ${amount_usdt:.0f}")
+                elif isinstance(exec_report, dict):
+                    # market_buy 返回 dict 的情况（兼容）
+                    results.append(
+                        f"🔴实盘 买入 {sig['symbol']} ${amount_usdt:.0f}"
+                    )
+                    pf.buy(market="crypto", symbol=sig["symbol"],
+                           name=sig["name"], price=sig["price"],
+                           quantity=quantity, reason=f"[实盘] {reasoning}")
+                else:
+                    print(f"  ❌ 实盘执行失败 ({sig['symbol']})")
+
+            elif self.use_execution and self.execution_engine is not None:
+                # ── 模拟盘: 拆单执行 ──
                 mdata = {
                     "price": sig["price"],
                     "avg_daily_volume": 35000 if "BTC" in sig["symbol"] else 500000,
@@ -645,7 +739,6 @@ class RollingAwareAutoTrader:
                 )
                 if not exec_check.passed:
                     print(f"  ⚠️ 执行层风控拦截 ({sig['symbol']}): {exec_check.reason}")
-                    # 降级为单笔市价
                     print(f"  ⬇️ 降级为单笔市价单")
                     trade = pf.buy(market="crypto", symbol=sig["symbol"],
                                    name=sig["name"], price=sig["price"],
@@ -654,7 +747,6 @@ class RollingAwareAutoTrader:
                         results.append(f"🧠 买入 {sig['symbol']} ¥{max_size:.0f} (降级市价) | {reasoning}")
                     continue
 
-                # 拆单执行
                 print(f"  🔪 拆单执行 [{self.execution_config.strategy.upper()}] "
                       f"{quantity:.4f} {sig['symbol']}...")
                 exec_report = self.execution_engine.execute_paper(
@@ -677,7 +769,7 @@ class RollingAwareAutoTrader:
                 else:
                     print(f"  ❌ 执行失败: 0% 成交率")
             else:
-                # 标准单笔市价
+                # ── 模拟盘: 标准单笔市价 ──
                 trade = pf.buy(
                     market="crypto", symbol=sig["symbol"],
                     name=sig["name"],
@@ -757,7 +849,7 @@ class RollingAwareAutoTrader:
 
 
 def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
-                       use_rolling: bool = False):
+                       use_rolling: bool = False, trading_mode=None):
     """
     自动扫描 → 决策 → 执行
 
@@ -765,9 +857,13 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
         markets: 市场列表 (默认["crypto"])
         use_ml: True=ML信号引擎, False=传统RSI/MACD引擎
         use_rolling: True=滚动训练感知模式 (Phase 10), 自动检查模型新鲜度
+        trading_mode: TradingMode (Phase 15), None=paper
     Returns:
         (results, pf)
     """
+    if trading_mode is None:
+        trading_mode = TradingMode.PAPER
+
     if markets is None:
         markets = ["crypto"]  # 默认只扫24/7市场
 
@@ -792,7 +888,8 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
                     urgency=args.execution_urgency,
                 )
             trader = RollingAwareAutoTrader(use_v5=True, use_rolling=True, auto_retrain=False,
-                                            use_alphas=args.alphas, execution_config=exec_cfg)
+                                            use_alphas=args.alphas, execution_config=exec_cfg,
+                                            trading_mode=trading_mode)
             print(trader.get_status_summary())
 
             results, pf = trader.run()
@@ -891,6 +988,7 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
             "a_stock": engine.a_stock,
             "us_stock": engine.us_stock,
             "hk_stock": engine.hk_stock,
+            "b_stock": engine.b_stock,
         }
         scanner = scanners.get(market)
         if not scanner:
@@ -914,7 +1012,8 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
 
         all_sigs = scanner.scan()
         # 股票市场降低门槛 (A股/港股波动小, 需要更灵敏的入场)
-        min_score = 40 if market in ("a_stock", "hk_stock") else 50
+        # bStocks 新品波动大, 也降低门槛
+        min_score = 40 if market in ("a_stock", "hk_stock", "b_stock") else 50
         buy_sigs = [s for s in all_sigs if s.action == "BUY" and s.score >= min_score]
         buy_sigs.sort(key=lambda s: s.score, reverse=True)
 
@@ -1051,7 +1150,23 @@ if __name__ == "__main__":
                        help="仅ML扫描, 不执行交易 (调试用)")
     parser.add_argument("--wechat-report", action="store_true",
                        help="交易后推送日报到企业微信 (Phase 14)")
+    parser.add_argument("--testnet", action="store_true",
+                       help="使用币安测试网实盘交易 (Phase 15)")
+    parser.add_argument("--live", action="store_true",
+                       help="使用币安实盘交易 (Phase 15, 真金白银!)")
+    parser.add_argument("--once", action="store_true",
+                       help="单次扫描+执行后退出")
     args = parser.parse_args()
+
+    # 确定交易模式 (Phase 15)
+    if args.live:
+        trading_mode = TradingMode.LIVE
+        print(f"🔴 币安实盘交易模式! USDT 真金白银!")
+    elif args.testnet:
+        trading_mode = TradingMode.TESTNET
+        print(f"🧪 币安测试网模式 (免费模拟)")
+    else:
+        trading_mode = TradingMode.PAPER
 
     if args.report:
         print(generate_status_report())
@@ -1071,7 +1186,8 @@ if __name__ == "__main__":
                 )
             print("🔄 Rolling-Aware 扫描模式\n")
             trader = RollingAwareAutoTrader(use_v5=True, use_rolling=True, auto_retrain=False,
-                                            use_alphas=args.alphas, execution_config=exec_cfg)
+                                            use_alphas=args.alphas, execution_config=exec_cfg,
+                                            trading_mode=TradingMode.PAPER)  # 扫描模式强制模拟盘
             print(trader.get_status_summary())
             print()
             signals = trader.scan()
@@ -1102,7 +1218,8 @@ if __name__ == "__main__":
         sys.exit(0)
 
     markets = ["crypto", "a_stock", "us_stock", "hk_stock"] if args.markets == ["all"] else args.markets
-    results, pf = auto_scan_and_trade(markets, use_ml=args.ml, use_rolling=args.rolling)
+    results, pf = auto_scan_and_trade(markets, use_ml=args.ml, use_rolling=args.rolling,
+                                      trading_mode=trading_mode)
 
     print(generate_status_report())
 

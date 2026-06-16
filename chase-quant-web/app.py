@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from portfolio import PortfolioManager, ALLOCATION, INITIAL_CAPITAL
 from signals import SignalEngine
 from risk import RiskController
+from ai_capabilities import render_ai_capabilities
 
 # MPT 组合优化引擎 (Phase 15)
 try:
@@ -154,6 +155,15 @@ COIN_META = {
     "ORDI": {"name": "ORDI", "logo": "https://cryptologos.cc/logos/ordi-ordi-logo.png", "color": "#FFFFFF"},
 }
 
+# bStocks 代币化美股 (Binance 2026-06-11 上线)
+BSTOCK_META = {
+    "NVDAB": {"name": "英伟达·b", "logo": "https://cryptologos.cc/logos/nvidia-nvda-logo.png", "color": "#76B900"},
+    "TSLAB": {"name": "特斯拉·b", "logo": "https://cryptologos.cc/logos/tesla-tsla-logo.png", "color": "#CC0000"},
+    "CRCLB": {"name": "Circle·b", "logo": "", "color": "#27A0E8"},
+    "MUB": {"name": "微策略·b", "logo": "", "color": "#E05A33"},
+    "SNDKB": {"name": "闪迪·b", "logo": "", "color": "#ED1C24"},
+}
+
 STOCK_META = {
     # ── A股 (20只) ──
     "000001": {"name": "平安银行", "logo": "", "color": "#E60012"},
@@ -226,6 +236,7 @@ MARKET_LABELS = {
     "a_stock": "🇨🇳 A股",
     "us_stock": "🇺🇸 美股",
     "hk_stock": "🇭🇰 港股",
+    "b_stock": "🏦 bStocks",
 }
 
 
@@ -234,6 +245,9 @@ def get_asset_meta(symbol: str, market: str = "crypto") -> dict:
     if market == "crypto":
         base = symbol.split("/")[0] if "/" in symbol else symbol
         return COIN_META.get(base, {"name": base, "logo": "", "color": "#8b949e"})
+    elif market == "b_stock":
+        base = symbol.split("/")[0] if "/" in symbol else symbol
+        return BSTOCK_META.get(base, {"name": base, "logo": "", "color": "#00D4AA"})
     else:
         return STOCK_META.get(symbol, {"name": symbol, "logo": "", "color": "#8b949e"})
 
@@ -246,6 +260,7 @@ def get_managers():
     return pf, risk
 
 pf, risk_ctrl = get_managers()
+pf._load()  # 每次渲染重新从磁盘加载持仓数据，避免缓存过期
 
 # ── 侧边栏 ──
 with st.sidebar:
@@ -291,15 +306,16 @@ with st.sidebar:
     st.caption(f"⚡ 初始本金: ¥{INITIAL_CAPITAL:,.0f}")
     st.caption(f"📅 运行中 · 实时监控")
 
-    # 刷新按钮
+    # 刷新按钮 — 同时清 cache_resource 确保读最新持仓数据
     if st.button("🔄 刷新数据", width='stretch'):
         st.cache_data.clear()
+        st.cache_resource.clear()
         st.rerun()
 
 
 # ── Tab 页 ──
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-    "📊 总览", "📈 信号", "💼 持仓", "📋 交易记录", "🛡️ 风控", "🧬 ML信号", "🧠 Qlib深度模型", "🕯️ 裸K扫描"
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    "📊 总览", "📈 信号", "💼 持仓", "📋 交易记录", "🛡️ 风控", "🧬 ML信号", "🧠 Qlib深度模型", "🕯️ 裸K扫描", "🤖 AI能力"
 ])
 
 # ═══════════════════════════════════════════
@@ -3272,6 +3288,12 @@ with tab8:
 
             > 🐼 基于熊猫教练「熊猫讲裸K」300+集交易体系 + Al Brooks价格行为四部曲
             """)
+
+# ═══════════════════════════════════════════
+# Tab 9: AI能力中心
+# ═══════════════════════════════════════════
+with tab9:
+    render_ai_capabilities()
 
 # ═══════════════════════════════════════════
 # 底部

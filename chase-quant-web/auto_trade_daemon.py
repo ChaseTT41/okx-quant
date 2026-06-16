@@ -265,10 +265,19 @@ def execute_strategy_signals(signals: list, pf) -> list:
     return results
 
 
-def run_trade_cycle(state: dict) -> dict:
-    """执行一次交易周期"""
+def run_trade_cycle(state: dict, trading_mode=None) -> dict:
+    """执行一次交易周期
+
+    Args:
+        state: 守护进程状态
+        trading_mode: TradingMode (Phase 15), None=paper
+    """
     from portfolio import PortfolioManager
     from execution import ExecutionConfig
+    from trading_config import TradingMode
+
+    if trading_mode is None:
+        trading_mode = TradingMode.PAPER
 
     # 构建执行配置: SMART 自适应策略
     exec_cfg = ExecutionConfig(
@@ -289,6 +298,7 @@ def run_trade_cycle(state: dict) -> dict:
                 use_graph=True,
                 use_alphas=True,
                 execution_config=exec_cfg,
+                trading_mode=trading_mode,
             )
             log(f"🚀 引擎: {trader.engine_label}")
             results, pf = trader.run()
@@ -323,11 +333,11 @@ def run_trade_cycle(state: dict) -> dict:
         try:
             from auto_trade import auto_scan_and_trade
             trad_results, pf = auto_scan_and_trade(
-                ["a_stock", "us_stock", "hk_stock"], use_ml=False, use_rolling=False
+                ["a_stock", "us_stock", "hk_stock", "b_stock"], use_ml=False, use_rolling=False
             )
             if trad_results:
                 results.extend(trad_results)
-                log(f"📊 A股/美股/港股: {len(trad_results)} 笔信号")
+                log(f"📊 A股/美股/港股/bStocks: {len(trad_results)} 笔信号")
         except Exception as e:
             log(f"⚠️ A股/美股/港股扫描异常: {e}")
 
@@ -344,12 +354,44 @@ def main():
     parser = argparse.ArgumentParser(description="Yina 自主交易守护进程 🐾")
     parser.add_argument("--daemon", action="store_true", help="后台持续运行")
     parser.add_argument("--once", action="store_true", help="单次运行+推送")
+    parser.add_argument("--testnet", action="store_true", help="币安测试网模式 (Phase 15)")
+    parser.add_argument("--live", action="store_true", help="币安实盘模式 (Phase 15, 真金白银!)")
     args = parser.parse_args()
 
-    log("🐾 Yina 自主模拟盘交易守护进程 启动!")
+    # 确定交易模式 (Phase 15)
+    from trading_config import TradingConfig, TradingMode
+    if args.live:
+        trading_mode = TradingMode.LIVE
+        mode_label = "🔴 币安实盘"
+    elif args.testnet:
+        trading_mode = TradingMode.TESTNET
+        mode_label = "🧪 币安测试网"
+    else:
+        trading_mode = TradingMode.PAPER
+        mode_label = "📝 模拟盘"
+
+    log(f"🐾 Yina 自主交易守护进程 启动! [{mode_label}]")
     log(f"📡 API: http://localhost:8766")
     log(f"⏱️  扫描间隔: {SCAN_INTERVAL_MINUTES}分钟")
     log(f"🌙 夜间休眠: {SLEEP_START_HOUR:02d}:00-{SLEEP_END_HOUR:02d}:00 (北京时间)")
+
+    # 实盘安全检查
+    if trading_mode.is_real:
+        config = TradingConfig.from_env()
+        issues = config.validate()
+        if issues:
+            log("🚨 实盘配置问题:")
+            for i in issues:
+                log(f"  - {i}")
+            log("🛑 退出 (安全问题)")
+            sys.exit(1)
+        if config.is_kill_switch_active():
+            log("🚨 紧急停止开关已激活! 退出")
+            sys.exit(1)
+        log(f"✅ 实盘配置检查通过")
+        log(f"💰 最低余额保护: ${config.min_balance_usdt:.0f}")
+        log(f"📊 每日交易上限: {config.max_daily_trades} 笔")
+        log(f"🛡️ 最大回撤限制: {config.max_drawdown_pct:.0%}")
 
     state = load_state()
     log(f"📊 历史统计: {state['cycles']} 次扫描, {state['total_trades']} 笔交易")
@@ -363,11 +405,12 @@ def main():
 
     # 启动通知
     push_wechat(
-        "🐾 Yina自主交易已启动",
+        f"🐾 Yina自主交易已启动 [{mode_label}]",
         f"> 🚀 交易引擎已就绪\n"
         f"> 📡 [查看仪表板](https://runs-student-skill-seeds.trycloudflare.com)\n"
         f"> ⏱️ 扫描间隔: {SCAN_INTERVAL_MINUTES}分钟\n"
         f"> 🧠 引擎: v5 Qlib融合 + 图增强 + Alpha + SMART拆单\n"
+        f"> 🎮 模式: {mode_label}\n"
         f"> ⏰ {beijing_now().strftime('%Y-%m-%d %H:%M')}"
     )
 
@@ -381,7 +424,7 @@ def main():
         log(f"🔄 第 {state['cycles']} 次扫描 [{beijing_now().strftime('%H:%M')}]")
         log(f"{'='*50}")
 
-        result = run_trade_cycle(state)
+        result = run_trade_cycle(state, trading_mode)
 
         if result["ok"]:
             pf = result["pf"]
