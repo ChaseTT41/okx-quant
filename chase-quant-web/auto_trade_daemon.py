@@ -275,12 +275,18 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
     for s in TIER1_ML_HEAVY + TIER2_TECHNICAL_LIGHT:
         swap_symbols.add(s)
 
+    # 🛡️ 获取 OKX 现有持仓，防止重复开仓
+    existing_positions = leverage_engine.fetch_open_positions()
+
     results = []
     for sig in signals:
         sym = sig.get("symbol", "")
         if sym not in swap_symbols:
             continue  # 非合约标的, 走现货流程
         if sig.get("action") != "BUY":
+            continue
+        if sym in existing_positions:
+            log_func(f"  ⚡ 跳过 {sym}: 已有持仓")
             continue
 
         # 拉取情绪叠加
@@ -311,8 +317,11 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
             log_func(f"  ⚡ 跳过 {sym}: {decision.skip_reason}")
             continue
 
-        # 仓位计算
-        total_equity = pf.total_value if hasattr(pf, 'total_value') else 1000
+        # 仓位计算 — 使用真实 OKX 余额 (非模拟盘)
+        total_equity = leverage_engine.fetch_equity()
+        if total_equity <= 0:
+            log_func(f"  ⚡ 跳过 {sym}: 无法获取余额")
+            continue
         price = sig.get("price", 100.0)
         pos = leverage_engine.calculate_position(total_equity, price, decision)
 
@@ -439,14 +448,50 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
 
                     # ── ⚡ 杠杆决策 (实盘 + 合约标的) ──
                     if leverage_engine and trading_mode.is_real:
-                        _run_leverage_decisions(
+                        swap_results = _run_leverage_decisions(
                             strategy_signals, sentiment_engine,
                             leverage_engine, pf, log
                         )
+                        if swap_results:
+                            results.extend(swap_results)
                 else:
                     log("💤 多策略引擎: 无信号")
         except Exception as e:
             log(f"⚠️ 多策略引擎异常: {e}")
+
+        # ── 🏭 股票合约扫描 (半导体/AI软件/太空等, ML策略不覆盖) ──
+        if leverage_engine and trading_mode.is_real:
+            try:
+                from stock_swap_scanner import scan_stock_swaps
+                existing_swap_positions = set()
+                try:
+                    okx_pos = leverage_engine.fetch_open_positions()
+                    existing_swap_positions = set(okx_pos.keys())
+                except Exception:
+                    pass
+
+                # 每3个周期全量扫描一次扩展列表
+                force_full = (state.get('cycles', 0) % 3 == 0)
+                stock_signals = scan_stock_swaps(
+                    sentiment_engine=sentiment_engine,
+                    existing_positions=existing_swap_positions,
+                    force_full=force_full,
+                )
+                if stock_signals:
+                    log(f"🏭 股票合约扫描: {len(stock_signals)} 条信号")
+                    for ss in stock_signals:
+                        log(f"  📈 [{ss['strategy_name']}] {ss['name']} | "
+                            f"评分{ss['score']:.0f} | 置信{ss['confidence']:.1%} | "
+                            f"{', '.join(ss['reasons'][:2])}")
+                    stock_results = _run_leverage_decisions(
+                        stock_signals, sentiment_engine,
+                        leverage_engine, pf, log
+                    )
+                    if stock_results:
+                        results.extend(stock_results)
+                        log(f"🏭 股票合约: {len(stock_results)} 笔执行")
+            except Exception as e:
+                log(f"⚠️ 股票合约扫描异常: {e}")
 
         # ── A股 + 美股传统信号扫描 (ML引擎不覆盖) ──
         try:
@@ -509,7 +554,7 @@ def main():
             sys.exit(1)
         log(f"✅ 实盘配置检查通过")
         log(f"💰 最低余额保护: ${config.min_balance_usdt:.0f}")
-        log(f"📊 每日交易上限: {config.max_daily_trades} 笔")
+        log(f"📊 每日交易上限: {config.max_daily_trades} 笔 (信号驱动)")
         log(f"🛡️ 最大回撤限制: {config.max_drawdown_pct:.0%}")
 
     state = load_state()

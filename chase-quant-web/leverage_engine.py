@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 import json
+import time
 import logging
 import numpy as np
 
@@ -442,32 +443,139 @@ class LeverageEngine:
             })
             self._okx_trading.hostname = "www.okx.cab"
 
+    def fetch_equity(self) -> float:
+        """
+        从 OKX 获取真实账户权益 (USDT)。
+
+        直接用 OKX REST API (绕过 ccxt):
+          GET /api/v5/account/balance
+
+        Returns:
+          totalEq in USDT, or 0.0 on failure
+        """
+        self._init_trading_exchange()
+        try:
+            import requests as _req, hmac as _hmac, base64 as _b64
+            from datetime import datetime as _dt, timezone as _tz
+
+            ts = _dt.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+            path = "/api/v5/account/balance"
+            sign_str = ts + "GET" + path + ""
+            sign = _b64.b64encode(_hmac.new(
+                self._okx_trading.secret.encode(), sign_str.encode(), "sha256"
+            ).digest()).decode()
+
+            r = _req.get(
+                f"https://{self._okx_trading.hostname}{path}",
+                headers={
+                    "OK-ACCESS-KEY": self._okx_trading.apiKey,
+                    "OK-ACCESS-SIGN": sign,
+                    "OK-ACCESS-TIMESTAMP": ts,
+                    "OK-ACCESS-PASSPHRASE": self._okx_trading.password,
+                },
+                timeout=10,
+            )
+            data = r.json()
+            if data.get("code") == "0" and data.get("data"):
+                d = data["data"][0]
+                return float(d.get("totalEq", 0))
+            return 0.0
+        except Exception as e:
+            log.warning(f"获取 OKX 余额失败: {e}")
+            return 0.0
+
+    def fetch_open_positions(self) -> set:
+        """
+        获取当前 OKX 所有持仓的 symbol 集合。
+
+        直接用 OKX REST API (绕过 ccxt 翻译层，避免 ccxt 版本兼容问题):
+          GET /api/v5/account/positions?instType=SWAP
+
+        Returns:
+          {"SOL/USDT", "AVAX/USDT", ...}
+        """
+        self._init_trading_exchange()
+        try:
+            import requests as _req, hmac as _hmac, base64 as _b64
+            from datetime import datetime as _dt, timezone as _tz
+
+            ts = _dt.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+            path = "/api/v5/account/positions?instType=SWAP"
+            sign_str = ts + "GET" + path + ""
+            sign = _b64.b64encode(_hmac.new(
+                self._okx_trading.secret.encode(), sign_str.encode(), "sha256"
+            ).digest()).decode()
+
+            r = _req.get(
+                f"https://{self._okx_trading.hostname}{path}",
+                headers={
+                    "OK-ACCESS-KEY": self._okx_trading.apiKey,
+                    "OK-ACCESS-SIGN": sign,
+                    "OK-ACCESS-TIMESTAMP": ts,
+                    "OK-ACCESS-PASSPHRASE": self._okx_trading.password,
+                },
+                timeout=10,
+            )
+            data = r.json()
+            symbols = set()
+            if data.get("code") == "0":
+                for p in data.get("data", []):
+                    inst_id = p.get("instId", "")
+                    pos_qty = float(p.get("pos", 0))
+                    if inst_id and pos_qty > 0:
+                        # "SOL-USDT-SWAP" → "SOL/USDT"
+                        sym = inst_id.replace("-USDT-SWAP", "/USDT")
+                        symbols.add(sym)
+            return symbols
+        except Exception as e:
+            log.warning(f"获取持仓列表失败: {e}")
+            return set()
+
     def set_leverage_on_exchange(self, symbol: str, leverage: int) -> bool:
         """
         在 OKX 上设置杠杆倍数和逐仓模式。
 
-        OKX API:
-          POST /api/v5/account/set-leverage
-          POST /api/v5/account/set-position-mode (isolated)
-
-        ccxt:
-          exchange.set_leverage(leverage, swap_symbol)
-          exchange.set_margin_mode('isolated', swap_symbol)
+        直接用 OKX REST API (绕过 ccxt 翻译层):
+          POST /api/v5/account/set-leverage  {instId, lever, mgnMode, posSide}
         """
         self._init_trading_exchange()
-        swap_sym = self._to_swap_symbol(symbol)
+        inst_id = self._to_okx_inst_id(symbol)
 
         try:
-            # 设杠杆
-            self._okx_trading.set_leverage(leverage, swap_sym)
-            # 设逐仓
-            try:
-                self._okx_trading.set_margin_mode("isolated", swap_sym)
-            except Exception:
-                # 可能已经设过了
-                log.debug(f"margin_mode 可能已设置: {swap_sym}")
-            log.info(f"⚡ 杠杆设置: {symbol} → {leverage}x isolated")
-            return True
+            import requests as _req, hmac as _hmac, base64 as _b64
+            from datetime import datetime as _dt, timezone as _tz
+
+            ts = _dt.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+            body = json.dumps({
+                "instId": inst_id,
+                "lever": str(leverage),
+                "mgnMode": "isolated",
+                "posSide": "long",  # OKX isolated 模式必须指定 posSide
+            })
+            path = "/api/v5/account/set-leverage"
+            sign_str = ts + "POST" + path + body
+            sign = _b64.b64encode(_hmac.new(
+                self._okx_trading.secret.encode(), sign_str.encode(), "sha256"
+            ).digest()).decode()
+
+            r = _req.post(
+                f"https://{self._okx_trading.hostname}{path}",
+                headers={
+                    "OK-ACCESS-KEY": self._okx_trading.apiKey,
+                    "OK-ACCESS-SIGN": sign,
+                    "OK-ACCESS-TIMESTAMP": ts,
+                    "OK-ACCESS-PASSPHRASE": self._okx_trading.password,
+                    "Content-Type": "application/json",
+                },
+                data=body, timeout=10,
+            )
+            data = r.json()
+            if data.get("code") == "0":
+                log.info(f"⚡ 杠杆设置: {symbol} → {leverage}x isolated long")
+                return True
+            else:
+                log.warning(f"杠杆设置返回异常 {symbol}: {data.get('msg', '')}")
+                return False
         except Exception as e:
             log.error(f"杠杆设置失败 {symbol}: {e}")
             return False
@@ -501,8 +609,13 @@ class LeverageEngine:
 
             # 2. 下市价单
             params = {}
-            if note:
-                params["clientOrderId"] = f"yina_{note[:20]}"
+            # OKX clOrdId: 字母+数字 only, max 32 chars, 无下划线
+            ts_suffix = str(int(time.time() * 1000))[-12:]
+            params["clientOrderId"] = f"yina{ts_suffix}"
+            # OKX USDT-margined 合约必须指定持仓方向和保证金模式
+            params["posSide"] = "long" if side == "buy" else "short"
+            params["tdMode"] = "isolated"
+            params["lever"] = str(leverage)  # 显式指定杠杆
 
             order = self._okx_trading.create_order(
                 swap_sym, "market", side, quantity_contracts, None, params

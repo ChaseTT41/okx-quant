@@ -267,7 +267,7 @@ class RiskController:
 # ═══════════════════════════════════════════
 
 # 实盘风控参数（100-300 USDT 小额适配）
-LIVE_MAX_DAILY_TRADES = 5           # 每日最大交易次数
+LIVE_MAX_DAILY_TRADES = 100         # 每日最大交易次数（信号驱动，不做硬限制）
 LIVE_MAX_DRAWDOWN_PCT = -0.10       # 最大回撤 10%（从峰值）
 LIVE_COOLDOWN_AFTER_STOP_MIN = 30   # 止损后冷静期（分钟）
 LIVE_MIN_NOTIONAL_USDT = 10.0       # 币安最低名义交易额

@@ -102,7 +102,7 @@ class TradingConfig:
 
     # ── 实盘风控参数（100-300 USDT 小额适配）──
     min_balance_usdt: float = 50.0          # 最低余额保护
-    max_daily_trades: int = 5               # 每日最大交易次数（保守）
+    max_daily_trades: int = 100             # 每日最大交易次数（信号驱动，不做硬限制）
     max_drawdown_pct: float = 0.10          # 最大回撤 10% 阻止新开仓
     max_position_size_pct: float = 0.50     # 单币最大仓位 50%
     api_error_fuse_count: int = 3           # 连续 API 错误熔断次数
@@ -177,7 +177,7 @@ class TradingConfig:
 
         # 实盘参数（支持环境变量覆盖）
         min_balance = float(os.environ.get("LIVE_MIN_BALANCE_USDT", "50"))
-        max_trades = int(os.environ.get("LIVE_MAX_DAILY_TRADES", "5"))
+        max_trades = int(os.environ.get("LIVE_MAX_DAILY_TRADES", "100"))
         max_dd = float(os.environ.get("LIVE_MAX_DRAWDOWN", "0.10"))
 
         # 代理 & 备用域名 (中国大陆/泰国访问 OKX 需要)
