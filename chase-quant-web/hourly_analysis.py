@@ -11,6 +11,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List
 from dataclasses import dataclass
+from ai_news_fetcher import get_ai_news_section
 
 warnings.filterwarnings("ignore")
 
@@ -454,6 +455,15 @@ def build_five_market_report(all_signals: Dict[str, list]) -> str:
         lines.append("")
     lines.append(generate_top5_cross_market(all_assets))
     lines.append(build_market_scoreboard(all_assets))
+
+    # 🤖 AI信源动态
+    try:
+        ai_section = get_ai_news_section()
+        lines.append(ai_section)
+        lines.append("")
+    except Exception as e:
+        print(f"   ⚠️ AI信源采集失败: {e}")
+
     btc_hint = ""
     if btc_asset and btc_asset.change_24h < -3:
         btc_hint = " ⚠️ BTC大盘承压，所有买入谨慎！"
