@@ -1,0 +1,225 @@
+# ═══════════════════════════════════════════
+# 🐾 Yina Agent Orchestrator — 多市场日报工作流
+#    5个市场并行采集 → 交叉验证 → 合成日报 → 推送企微
+# ═══════════════════════════════════════════
+
+name: multi-market-report
+description: >
+  5市场(Crypto/A股/美股/港股/bStocks) 并行信号采集 + AI信源抓取，
+  交叉市场top5筛选，风控检查，AI瓶颈叙事，推送企业微信。
+
+version: "1.0"
+checkpoint_enabled: true
+max_runtime_hours: 1
+
+variables:
+  push_webhook:
+    description: "企业微信webhook key (留空不推送)"
+    required: false
+    default: ""
+  force_refresh:
+    description: "强制刷新缓存"
+    default: "false"
+  max_signals:
+    description: "每市场最多信号数"
+    default: "20"
+
+# ═══════════════════════════════════════════
+
+phases:
+  # Phase 1: 5市场并行信号采集 + AI信源
+  - name: Fetch
+    description: "5个市场并行拉信号 + AI信源抓取"
+    parallel:
+      - id: crypto
+        agent_type: general-purpose
+        prompt: |
+          运行 python3 /Users/chasett/yina-app/chase-quant-web/api_server.py 的 /api/signals?market=crypto 端点，
+          获取加密货币市场最新交易信号。最多 {{max_signals}} 条。
+
+          返回信号的: symbol, action, confidence, price, reason, timestamp
+        schema:
+          type: object
+          properties:
+            market: {type: string, const: crypto}
+            signals:
+              type: array
+              items:
+                type: object
+                properties:
+                  symbol: {type: string}
+                  action: {type: string}
+                  confidence: {type: number}
+                  price: {type: number}
+                  reason: {type: string}
+                required: [symbol, action, confidence]
+
+      - id: a_stock
+        agent_type: general-purpose
+        prompt: |
+          获取A股市场最新交易信号。最多 {{max_signals}} 条。
+          使用 python3 /Users/chasett/yina-app/chase-quant-web/api_server.py 的 /api/signals?market=a_stock
+
+          返回信号的: symbol, action, confidence, price, reason
+        schema:
+          type: object
+          properties:
+            market: {type: string, const: a_stock}
+            signals:
+              type: array
+              items:
+                type: object
+                properties:
+                  symbol: {type: string}
+                  action: {type: string}
+                  confidence: {type: number}
+                  price: {type: number}
+                  reason: {type: string}
+                required: [symbol, action, confidence]
+
+      - id: us_stock
+        agent_type: general-purpose
+        prompt: |
+          获取美股市场最新交易信号。最多 {{max_signals}} 条。
+          使用 python3 /Users/chasett/yina-app/chase-quant-web/api_server.py 的 /api/signals?market=us_stock
+
+          返回信号的: symbol, action, confidence, price, reason
+        schema:
+          type: object
+          properties:
+            market: {type: string, const: us_stock}
+            signals:
+              type: array
+              items:
+                type: object
+                properties:
+                  symbol: {type: string}
+                  action: {type: string}
+                  confidence: {type: number}
+                  price: {type: number}
+                  reason: {type: string}
+                required: [symbol, action, confidence]
+
+      - id: hk_stock
+        agent_type: general-purpose
+        prompt: |
+          获取港股市场最新交易信号。最多 {{max_signals}} 条。
+          使用 python3 /Users/chasett/yina-app/chase-quant-web/api_server.py 的 /api/signals?market=hk_stock
+
+          返回信号的: symbol, action, confidence, price, reason
+        schema:
+          type: object
+          properties:
+            market: {type: string, const: hk_stock}
+            signals:
+              type: array
+              items:
+                type: object
+                properties:
+                  symbol: {type: string}
+                  action: {type: string}
+                  confidence: {type: number}
+                  price: {type: number}
+                  reason: {type: string}
+                required: [symbol, action, confidence]
+
+      - id: bstocks
+        agent_type: general-purpose
+        prompt: |
+          获取bStocks市场最新交易信号。最多 {{max_signals}} 条。
+          使用 python3 /Users/chasett/yina-app/chase-quant-web/api_server.py 的 /api/signals?market=bstocks
+
+          返回信号的: symbol, action, confidence, price, reason
+        schema:
+          type: object
+          properties:
+            market: {type: string, const: bstocks}
+            signals:
+              type: array
+              items:
+                type: object
+                properties:
+                  symbol: {type: string}
+                  action: {type: string}
+                  confidence: {type: number}
+                  price: {type: number}
+                  reason: {type: string}
+                required: [symbol, action, confidence]
+
+      - id: ai_news
+        agent_type: general-purpose
+        prompt: |
+          运行 python3 /Users/chasett/yina-app/chase-quant-web/ai_news_fetcher.py 获取5大AI信源最新动态。
+          返回 Stratechery, Dwarkesh, 张小珺, 晚点, 海外独角兽 的最新内容。
+          强制刷新: {{force_refresh}}
+        schema:
+          type: object
+          properties:
+            sources:
+              type: array
+              items:
+                type: object
+                properties:
+                  name: {type: string}
+                  items: {type: array}
+                required: [name]
+
+  # Phase 2: 交叉分析 — Top5 + 瓶颈叙事
+  - name: Analyze
+    description: "合成全景日报：Top5信号 + 瓶颈叙事 + 风控"
+    barrier: true
+    agent:
+      - id: synthesizer
+        agent_type: general-purpose
+        prompt: |
+          基于以下5市场信号和AI信源，按照 Chase哥 的日报格式生成报告:
+
+          **市场信号**:
+          - 加密货币: {{Fetch.crypto}}
+          - A股: {{Fetch.a_stock}}
+          - 美股: {{Fetch.us_stock}}
+          - 港股: {{Fetch.hk_stock}}
+          - bStocks: {{Fetch.bstocks}}
+
+          **AI信源**: {{Fetch.ai_news}}
+
+          报告格式要求:
+          1. 📡 市场脉动 — 各市场一句话总结
+          2. 🪙 加密货币叙事 — 瓶颈在哪
+          3. 🇺🇸 美股叙事
+          4. 🇨🇳 A股叙事
+          5. 🇭🇰 港股叙事
+          6. 🏦 bStocks
+          7. 🔥 跨市场Top5
+          8. 🤖 AI信源动态
+          9. 🛡️ 风控指标
+          10. 📊 综合评分卡
+
+          风格: 30秒速读 + 白毛股神大白话瓶颈叙事
+        schema:
+          type: object
+          properties:
+            report_markdown: {type: string, description: "完整Markdown日报"}
+            top5: {type: array}
+            risk_level: {type: string, enum: [low, medium, high, critical]}
+            bottlenecks: {type: array}
+            total_signals: {type: number}
+          required: [report_markdown, risk_level, total_signals]
+
+  # Phase 3: 推送企业微信
+  - name: Push
+    description: "推送到企业微信「金融监控」群"
+    loop_until: "push_completed"
+    max_iterations: 3
+    agent:
+      - id: pusher
+        agent_type: general-purpose
+        prompt: |
+          将以下日报推送到企业微信「金融监控」群:
+          Webhook: key={{push_webhook}}
+          默认为 2c602b48-5da2-4989-9193-30c0e226c769
+
+          使用分段推送，每段不超过4000字节。
+
+          日报内容:
+          {{Analyze.report_markdown}}

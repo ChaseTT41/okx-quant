@@ -1,0 +1,226 @@
+# ═══════════════════════════════════════════
+# 🐾 Yina Agent Orchestrator — 自修复工作流
+#    发现问题 → 分析根因 → 自动修复 → 测试验证 → 合入
+#    核心模式: Fix-Verify循环直到通过
+# ═══════════════════════════════════════════
+
+name: self-heal
+description: >
+  当代码出现bug、测试失败、或运行时错误时，自动分析根因、
+  生成修复方案、执行修复、运行测试、验证通过则合入。
+  不通过的修复自动回滚并重新尝试。类似Niuma的「自己重构自己」。
+
+version: "1.0"
+checkpoint_enabled: true
+max_runtime_hours: 4
+
+variables:
+  error_description:
+    description: "错误描述 (报错日志/issue链接/用户反馈)"
+    required: true
+  target_files:
+    description: "涉及的文件或目录 (逗号分隔)"
+    required: true
+  test_command:
+    description: "验证修复的测试命令"
+    required: false
+    default: ""
+  max_fix_attempts:
+    description: "最大修复尝试次数"
+    default: "5"
+  auto_commit:
+    description: "是否自动提交修复 (true/false)"
+    default: "false"
+
+# ═══════════════════════════════════════════
+
+phases:
+  # Phase 1: 诊断 — 多角度分析问题
+  - name: Diagnose
+    description: "从3个维度并行诊断问题根因"
+    parallel:
+      - id: error_analysis
+        agent_type: general-purpose
+        prompt: |
+          分析这个错误的根本原因:
+
+          **错误描述**: {{error_description}}
+          **涉及文件**: {{target_files}}
+
+          请从以下角度分析:
+          1. 直接原因 — 哪行代码触发了错误
+          2. 上游原因 — 什么输入/状态导致了这行代码犯错
+          3. 系统原因 — 为什么设计上没有防止这个问题
+
+          输出: root_cause (一句话), affected_files (文件+行号), severity (critical/high/medium/low), category (logic/type/null/race/config/security/other)
+        schema:
+          type: object
+          properties:
+            root_cause: {type: string}
+            affected_files:
+              type: array
+              items:
+                type: object
+                properties:
+                  file: {type: string}
+                  line: {type: number}
+                  issue: {type: string}
+            severity: {type: string, enum: [critical, high, medium, low]}
+            category: {type: string, enum: [logic, "null", type, race, config, security, other]}
+            explanation: {type: string}
+          required: [root_cause, affected_files, severity, category]
+
+      - id: test_check
+        agent_type: general-purpose
+        prompt: |
+          检查 {{target_files}} 相关的测试覆盖情况:
+
+          1. 是否有测试覆盖报错区域？
+          2. 如果有test_command: {{test_command}}, 运行它看是否复现
+          3. 缺少什么测试？
+
+          输出: tests_exist (boolean), test_coverage_gap (string), reproduce_command (string)
+        schema:
+          type: object
+          properties:
+            tests_exist: {type: boolean}
+            test_coverage_gap: {type: string}
+            reproduce_command: {type: string}
+            current_test_output: {type: string}
+          required: [tests_exist]
+
+      - id: impact_analysis
+        agent_type: code-reviewer
+        prompt: |
+          分析这个错误的影响范围:
+
+          **错误**: {{error_description}}
+          **涉及文件**: {{target_files}}
+
+          1. 影响哪些功能/API/用户？
+          2. 有没有相关的调用链会被波及？
+          3. 修复的风险等级？
+
+          输出: impacted_features (array), call_chain (array of affected functions), fix_risk (low/medium/high)
+        schema:
+          type: object
+          properties:
+            impacted_features:
+              type: array
+              items: {type: string}
+            call_chain:
+              type: array
+              items: {type: string}
+            fix_risk: {type: string, enum: [low, medium, high]}
+            rollback_safe: {type: boolean}
+          required: [impacted_features, fix_risk]
+
+  # Phase 2: 修复循环 — Fix → Test → Verify
+  - name: Fix
+    description: "循环修复直到测试通过或达到最大尝试次数"
+    loop_until: "fix_verified OR iter >= {{max_fix_attempts}}"
+    max_iterations: 5
+    barrier: true
+    pipeline:
+      input_from: [Diagnose.error_analysis]
+      stages:
+        - id: generate_fix
+          agent_type: general-purpose
+          prompt: |
+            基于诊断结果生成修复:
+
+            **根因**: {{Diagnose.error_analysis.root_cause}}
+            **受影响文件**: {{Diagnose.error_analysis.affected_files}}
+            **影响分析**: {{Diagnose.impact_analysis}}
+
+            修复要求:
+            1. 最小化改动 — 只改必要的代码
+            2. 不破坏现有功能
+            3. 如果涉及多个文件，统一风格
+            4. 添加必要的错误处理/边界检查
+
+            输出修改的文件路径和新内容。
+          schema:
+            type: object
+            properties:
+              changes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    file: {type: string}
+                    description: {type: string}
+                    diff: {type: string}
+                  required: [file, description]
+              rollback_plan: {type: string}
+            required: [changes]
+
+        - id: apply_fix
+          agent_type: general-purpose
+          prompt: |
+            执行以下代码修改:
+
+            {{item.changes}}
+
+            1. 对每个文件执行修改
+            2. 确认语法正确
+            3. 运行测试: {{test_command}}
+            4. 报告结果
+
+            如果测试失败，标记 fix_applied=false 以便下一轮重试。
+          schema:
+            type: object
+            properties:
+              fix_applied: {type: boolean}
+              test_result: {type: string, enum: [passed, failed, partial]}
+              test_output: {type: string}
+              error_if_failed: {type: string}
+            required: [fix_applied, test_result]
+
+        - id: verify_fix
+          agent_type: verify-agent
+          prompt: |
+            验证修复是否真的解决了问题:
+
+            **原始错误**: {{error_description}}
+            **修复内容**: {{item.changes}}
+            **测试结果**: {{item.test_result}}
+            **测试输出**: {{item.test_output}}
+
+            验证:
+            1. 原始错误是否已消失？
+            2. 有没有引入新问题？
+            3. 代码变更是否合理？
+
+            如果验证通过，设置 fix_verified=true。
+          schema:
+            type: object
+            properties:
+              fix_verified: {type: boolean}
+              verification_notes: {type: string}
+              new_issues_found: {type: array, items: {type: string}}
+              recommendation: {type: string, enum: [merge, retry, revert, manual]}
+            required: [fix_verified, recommendation]
+
+  # Phase 3: 合入 & 总结
+  - name: Finalize
+    description: "生成修复报告，可选自动提交"
+    agent:
+      id: summarize
+      agent_type: general-purpose
+      prompt: |
+        生成修复总结报告:
+
+        **诊断**: {{Diagnose}}
+        **修复**: {{Fix}}
+        **尝试次数**: {{Fix.iterations}}
+
+        报告内容:
+        1. 📋 问题概要 — 一句话
+        2. 🔍 根因分析 — 根本原因
+        3. 🔧 修复方案 — 改了哪些文件
+        4. ✅ 验证结果 — 测试是否通过
+        5. 💡 预防建议 — 如何避免再次发生
+        6. 📊 修复评分 — A/B/C/D/F
+
+        如果 {{auto_commit}} = true 且修复验证通过，commit并推送。

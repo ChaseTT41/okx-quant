@@ -1,0 +1,215 @@
+# ═══════════════════════════════════════════
+# 🐾 Yina Agent Orchestrator — 代码审查工作流
+#    多维度并行审查 → 交叉验证 → 合成报告
+# ═══════════════════════════════════════════
+
+name: code-review
+description: >
+  多维度并行代码审查：安全/质量/性能/架构 4个维度同时审查，
+  发现的问题交叉验证（对抗性反驳），最后合成统一报告。
+  适用于 PR review、重构前审查、安全审计。
+
+version: "1.0"
+checkpoint_enabled: true
+max_runtime_hours: 2
+
+variables:
+  target:
+    description: "要审查的文件或目录路径"
+    required: true
+  language:
+    description: "编程语言 (python/typescript/javascript/go/auto)"
+    default: "auto"
+  focus:
+    description: "重点关注领域 (security/performance/all)"
+    default: "all"
+  max_findings:
+    description: "每个维度最多发现数"
+    default: "15"
+
+# ═══════════════════════════════════════════
+
+phases:
+  # Phase 1: 多维度并行审查
+  - name: Review
+    description: "4个维度并行审查代码"
+    parallel:
+      - id: security
+        agent_type: security-reviewer
+        prompt: |
+          审查 {{target}} 的安全漏洞。
+          语言: {{language}}
+
+          重点关注:
+          - OWASP Top 10 漏洞
+          - 注入攻击 (SQL/命令/模板)
+          - 敏感信息泄露 (密钥/密码/Token)
+          - 认证和授权缺陷
+          - 不安全的加密实现
+          - SSRF / CSRF 风险
+
+          每个发现需要包含: title, severity (critical/high/medium/low), file, line, description, fix_suggestion
+        schema:
+          type: object
+          properties:
+            findings:
+              type: array
+              maxItems: 15
+              items:
+                type: object
+                properties:
+                  title: {type: string}
+                  severity: {type: string, enum: [critical, high, medium, low]}
+                  file: {type: string}
+                  line: {type: number}
+                  description: {type: string}
+                  fix_suggestion: {type: string}
+                required: [title, severity, description]
+          required: [findings]
+
+      - id: quality
+        agent_type: code-reviewer
+        prompt: |
+          审查 {{target}} 的代码质量问题。
+          语言: {{language}}
+
+          重点关注:
+          - 命名规范
+          - 函数/类职责单一性
+          - 代码重复
+          - 错误处理是否完善
+          - 类型安全
+          - 可读性和注释质量
+
+          每个发现需要包含: title, severity (high/medium/low/note), file, line, description, fix_suggestion
+        schema:
+          type: object
+          properties:
+            findings:
+              type: array
+              maxItems: 15
+              items:
+                type: object
+                properties:
+                  title: {type: string}
+                  severity: {type: string, enum: [high, medium, low, note]}
+                  file: {type: string}
+                  line: {type: number}
+                  description: {type: string}
+                  fix_suggestion: {type: string}
+                required: [title, severity, description]
+          required: [findings]
+
+      - id: performance
+        agent_type: code-reviewer
+        prompt: |
+          审查 {{target}} 的性能问题。
+          语言: {{language}}
+
+          重点关注:
+          - N+1 查询
+          - 不必要的内存分配
+          - 同步阻塞操作（应用异步）
+          - 缓存缺失
+          - 算法复杂度异常
+          - 数据库/API调用频次
+
+          每个发现需要包含: title, severity (high/medium/low), file, line, description, fix_suggestion
+        schema:
+          type: object
+          properties:
+            findings:
+              type: array
+              maxItems: 15
+              items:
+                type: object
+                properties:
+                  title: {type: string}
+                  severity: {type: string, enum: [high, medium, low]}
+                  file: {type: string}
+                  line: {type: number}
+                  description: {type: string}
+                  fix_suggestion: {type: string}
+                required: [title, severity, description]
+          required: [findings]
+
+      - id: architecture
+        agent_type: architect
+        prompt: |
+          审查 {{target}} 的架构问题。
+          语言: {{language}}
+
+          重点关注:
+          - 循环依赖
+          - 接口设计不合理
+          - 抽象层级混乱
+          - 模块边界模糊
+          - 可测试性
+          - 扩展性和维护性
+
+          每个发现需要包含: title, severity (high/medium/low/note), file, description, fix_suggestion
+        schema:
+          type: object
+          properties:
+            findings:
+              type: array
+              maxItems: 15
+              items:
+                type: object
+                properties:
+                  title: {type: string}
+                  severity: {type: string, enum: [high, medium, low, note]}
+                  file: {type: string}
+                  description: {type: string}
+                  fix_suggestion: {type: string}
+                required: [title, severity, description]
+          required: [findings]
+
+  # Phase 2: 交叉验证 (Adversarial Verify)
+  - name: Verify
+    description: "对抗性验证：3个独立视角质疑每个发现"
+    pipeline:
+      input_from: [Review.security, Review.quality, Review.performance, Review.architecture]
+      stages:
+        - id: verify_3x
+          agent_type: verify-agent
+          prompt: |
+            请从三个不同视角质疑这个代码审查发现:
+
+            **发现**: {{item.title}}
+            **严重度**: {{item.severity}}
+            **文件**: {{item.file}}
+            **描述**: {{item.description}}
+
+            视角1 (正确性): 这是真的问题还是误报？
+            视角2 (可复现): 能否在实际运行中触发？
+            视角3 (影响): 对生产环境的影响多大？
+
+            倾向: 如果不是100%确定，标 refuted=true 以过滤误报。
+          schema:
+            type: object
+            properties:
+              is_real: {type: boolean, description: "是否真实的bug/问题"}
+              confidence: {type: string, enum: [high, medium, low]}
+              refuted: {type: boolean, description: "是否被质疑推翻"}
+              reason: {type: string, description: "判断理由"}
+              impact_score: {type: number, minimum: 1, maximum: 10}
+            required: [is_real, refuted, reason]
+
+  # Phase 3: 合成最终报告
+  - name: Report
+    description: "合成多维度审查报告"
+    agent:
+      id: synthesizer
+      agent_type: general-purpose
+      prompt: |
+        请基于以下代码审查结果，合成一份专业的 Code Review 报告:
+
+        ✅ **已确认的真实问题**: 只包括 Verify 阶段 is_real=true 的发现
+        ❌ **误报过滤**: Verify 阶段被 refuted 的问题简单列出
+        📊 **按严重度分组**: critical → high → medium → low
+        💡 **修复优先级**: 给出 Top 5 最该立刻修复的问题
+
+        最后给出总体代码健康评分 (A-F)。
+
+        格式: Markdown
