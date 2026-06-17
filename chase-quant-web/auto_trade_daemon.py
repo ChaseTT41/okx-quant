@@ -1,8 +1,8 @@
 """
-Yina 自主模拟盘交易守护进程 🐾
+Yina 自主交易守护进程 🐾
 ==============================
 持续运行: 扫单 → 决策 → 执行 → 企微通知
-每30分钟扫描一次, 有交易时推送企微简报, 每日22:00发送日报
+每10分钟扫描一次 (加密永不收市), 有交易时推送企微简报, 每日22:00发送日报
 
 使用:
   python3 auto_trade_daemon.py              # 前台运行
@@ -24,7 +24,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent))
 
 # ── 配置 ──
-SCAN_INTERVAL_MINUTES = 30  # 扫描间隔
+SCAN_INTERVAL_MINUTES = 10  # 扫描间隔 (加密永不休市, 10分钟捕捉机会)
 DATA_DIR = Path(__file__).parent / "data"
 LOG_DIR = DATA_DIR / "daemon_logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -265,6 +265,91 @@ def execute_strategy_signals(signals: list, pf) -> list:
     return results
 
 
+def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf, log_func) -> list:
+    """对合约标的运行杠杆决策 (实盘模式)"""
+    from symbol_config import OKX_ALL_NON_CRYPTO_SWAPS, OKX_AI_CONCEPT_SWAPS
+
+    swap_symbols = set(OKX_ALL_NON_CRYPTO_SWAPS + OKX_AI_CONCEPT_SWAPS)
+    # 加密合约: Tier1+2 的 swap 版本
+    from symbol_config import TIER1_ML_HEAVY, TIER2_TECHNICAL_LIGHT
+    for s in TIER1_ML_HEAVY + TIER2_TECHNICAL_LIGHT:
+        swap_symbols.add(s)
+
+    results = []
+    for sig in signals:
+        sym = sig.get("symbol", "")
+        if sym not in swap_symbols:
+            continue  # 非合约标的, 走现货流程
+        if sig.get("action") != "BUY":
+            continue
+
+        # 拉取情绪叠加
+        overlay = None
+        if sentiment_engine:
+            try:
+                overlay = sentiment_engine.get_sentiment_overlay(sym)
+            except Exception:
+                pass
+
+        # 拉取资金费率
+        funding_rate = 0.0
+        if sentiment_engine:
+            fr_data = sentiment_engine.fetch_funding_rates([sym], use_cache=True)
+            if sym in fr_data:
+                funding_rate = fr_data[sym].funding_rate
+
+        decision = leverage_engine.determine_leverage(
+            confidence=sig.get("confidence", 0.5),
+            signal_weighted=sig.get("signal_val", sig.get("signal_weighted", 0)),
+            symbol=sym,
+            strategy_name=sig.get("strategy_name", sig.get("strategy", "unknown")),
+            funding_rate=funding_rate,
+            sentiment_overlay=overlay,
+        )
+
+        if decision.skip_reason:
+            log_func(f"  ⚡ 跳过 {sym}: {decision.skip_reason}")
+            continue
+
+        # 仓位计算
+        total_equity = pf.total_value if hasattr(pf, 'total_value') else 1000
+        price = sig.get("price", 100.0)
+        pos = leverage_engine.calculate_position(total_equity, price, decision)
+
+        log_func(
+            f"  ⚡ {sym}: {decision.recommended_leverage}x | "
+            f"WR={decision.blended_win_rate:.0%} | "
+            f"保证金=${pos['margin_usdt']} | "
+            f"止损={decision.stop_loss_pct:+.1%} | "
+            f"止盈={decision.take_profit_pct:+.0%}"
+        )
+
+        # 执行合约单
+        try:
+            order = leverage_engine.create_swap_market_order(
+                symbol=sym,
+                side="buy",
+                quantity_contracts=pos["quantity_contracts"],
+                leverage=decision.recommended_leverage,
+                stop_loss_price=pos["stop_loss_price"],
+                take_profit_price=pos["take_profit_price"],
+                note=f"{decision.recommended_leverage}x_{sym.split('/')[0][:8]}",
+            )
+            if order:
+                results.append({
+                    "symbol": sym, "action": "BUY_SWAP",
+                    "leverage": decision.recommended_leverage,
+                    "margin": pos["margin_usdt"],
+                    "notional": pos["notional_usdt"],
+                    "order_id": order.get("id", ""),
+                })
+                leverage_engine.increment_daily_trades()
+        except Exception as e:
+            log_func(f"  ❌ 合约下单失败 {sym}: {e}")
+
+    return results
+
+
 def run_trade_cycle(state: dict, trading_mode=None) -> dict:
     """执行一次交易周期
 
@@ -287,6 +372,30 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
         urgency=0.5,
     )
 
+    # ── 🎭 市场情绪引擎 ──
+    sentiment_engine = None
+    leverage_engine = None
+    try:
+        from market_sentiment import MarketSentimentEngine
+        sentiment_engine = MarketSentimentEngine()
+        snapshot = sentiment_engine.refresh_all(force=False)
+        fg = snapshot.fear_greed
+        log(f"🎭 情绪: F&G={fg.current_value} ({fg.classification})")
+        if snapshot.sector_flows:
+            top = max(snapshot.sector_flows.values(), key=lambda s: s.flow_score)
+            log(f"📊 资金流: {top.sector_name} 领先 (flow={top.flow_score:+.2f})")
+        if snapshot.rotation_prediction:
+            r = snapshot.rotation_prediction
+            log(f"🔮 轮动: {r.current_leader} → {r.next_leader} (conf={r.rotation_confidence:.0%})")
+
+        # ⚡ 杠杆引擎 (实盘时才启用)
+        if trading_mode.is_real:
+            from leverage_engine import LeverageEngine
+            leverage_engine = LeverageEngine(sentiment_engine=sentiment_engine)
+            log(f"⚡ 杠杆引擎就绪: 全局胜率={leverage_engine.get_global_win_rate():.0%}")
+    except Exception as e:
+        log(f"⚠️ 情绪引擎不可用: {e}")
+
     try:
         from auto_trade import RollingAwareAutoTrader, ROLLING_AVAILABLE
 
@@ -299,6 +408,7 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
                 use_alphas=True,
                 execution_config=exec_cfg,
                 trading_mode=trading_mode,
+                sentiment_engine=sentiment_engine,  # 🎭
             )
             log(f"🚀 引擎: {trader.engine_label}")
             results, pf = trader.run()
@@ -318,12 +428,21 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
             enabled = [k for k, v in ST_CFG.items() if v]
             if enabled:
                 log(f"🧠 多策略引擎: {len(enabled)}条策略线 ({', '.join(enabled)})")
-                strategy_signals = run_all_strategies()
+                strategy_signals = run_all_strategies(
+                    sentiment_engine=sentiment_engine  # 🎭 传入情绪
+                )
                 if strategy_signals:
                     strat_results = execute_strategy_signals(strategy_signals, pf)
                     if strat_results:
                         results.extend(strat_results)
                         log(f"🧠 多策略引擎: {len(strat_results)} 笔执行")
+
+                    # ── ⚡ 杠杆决策 (实盘 + 合约标的) ──
+                    if leverage_engine and trading_mode.is_real:
+                        _run_leverage_decisions(
+                            strategy_signals, sentiment_engine,
+                            leverage_engine, pf, log
+                        )
                 else:
                     log("💤 多策略引擎: 无信号")
         except Exception as e:
@@ -354,18 +473,19 @@ def main():
     parser = argparse.ArgumentParser(description="Yina 自主交易守护进程 🐾")
     parser.add_argument("--daemon", action="store_true", help="后台持续运行")
     parser.add_argument("--once", action="store_true", help="单次运行+推送")
-    parser.add_argument("--testnet", action="store_true", help="币安测试网模式 (Phase 15)")
-    parser.add_argument("--live", action="store_true", help="币安实盘模式 (Phase 15, 真金白银!)")
+    parser.add_argument("--testnet", action="store_true", help="交易所测试网/Demo模式 (Phase 15)")
+    parser.add_argument("--live", action="store_true", help="交易所实盘模式 (Phase 15, 真金白银!)")
     args = parser.parse_args()
 
     # 确定交易模式 (Phase 15)
     from trading_config import TradingConfig, TradingMode
+    config = TradingConfig.from_env()
     if args.live:
         trading_mode = TradingMode.LIVE
-        mode_label = "🔴 币安实盘"
+        mode_label = f"🔴 {config.exchange.label} 实盘"
     elif args.testnet:
         trading_mode = TradingMode.TESTNET
-        mode_label = "🧪 币安测试网"
+        mode_label = f"🧪 {config.exchange.label} 测试网/Demo"
     else:
         trading_mode = TradingMode.PAPER
         mode_label = "📝 模拟盘"
@@ -377,7 +497,6 @@ def main():
 
     # 实盘安全检查
     if trading_mode.is_real:
-        config = TradingConfig.from_env()
         issues = config.validate()
         if issues:
             log("🚨 实盘配置问题:")

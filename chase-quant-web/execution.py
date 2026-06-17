@@ -968,9 +968,9 @@ class ExecutionEngine:
 
     def execute_live(self, symbol: str, side: str, quantity: float,
                      price: float, market_data: dict,
-                     binance_trader) -> ExecutionReport:
+                     exchange_trader) -> ExecutionReport:
         """
-        实盘执行 — 通过 BinanceLiveTrader 在币安真实下单
+        实盘执行 — 通过交易所 API 真实下单 (Binance / OKX)
 
         与 execute_paper() 同签名，复用:
           - 预交易分析（策略选择、拆片）
@@ -983,7 +983,7 @@ class ExecutionEngine:
             quantity: 总数量
             price: 当前价格 (arrival price)
             market_data: {avg_daily_volume, volatility, spread, ...}
-            binance_trader: BinanceLiveTrader 实例
+            exchange_trader: BinanceLiveTrader 实例 (支持 Binance/OKX)
 
         Returns:
             ExecutionReport
@@ -1031,7 +1031,7 @@ class ExecutionEngine:
             amount_usdt = quantity * price if price > 0 else 0
 
             if amount_usdt < 10:
-                # 低于币安最小交易额
+                # 低于最小交易额
                 report = ExecutionReport(
                     parent_id=parent_id, symbol=symbol, side=side,
                     total_quantity=quantity, arrival_price=price,
@@ -1047,12 +1047,12 @@ class ExecutionEngine:
 
             # 执行市价单
             if side == "buy":
-                result = binance_trader.market_buy(
+                result = exchange_trader.market_buy(
                     symbol, amount_usdt,
                     note=f"[{parent_id}] {self.config.strategy.upper()} 实盘执行"
                 )
             else:
-                result = binance_trader.market_sell(
+                result = exchange_trader.market_sell(
                     symbol, quantity,
                     note=f"[{parent_id}] {self.config.strategy.upper()} 实盘执行"
                 )
@@ -1146,6 +1146,76 @@ class ExecutionEngine:
                 notes=f"未知错误: {e}"
             )
             return report
+
+    def execute_swap_live(self, symbol: str, side: str, quantity_contracts: float,
+                           price: float, leverage: int, market_data: dict,
+                           leverage_engine, stop_loss_price: float = None,
+                           take_profit_price: float = None) -> dict:
+        """
+        ⚡ 实盘合约执行 — 通过 OKX API 下永续合约单。
+
+        与 execute_live() 共享相同的预交易分析和风控，但:
+          - 使用 swaps 端点 (set_leverage + 合约下单)
+          - 杠杆风险检查
+          - 止盈止损作为 algo order
+
+        Returns: dict with order_id, status, margin, notional
+        """
+        parent_id = f"swap_{uuid.uuid4().hex[:12]}"
+        adv = market_data.get("avg_daily_volume", 1e6)
+
+        try:
+            # 1. 杠杆风控
+            from risk import RiskController
+            rc = RiskController(None)
+            lev_check = rc.leverage_pre_trade_check(
+                symbol=symbol,
+                margin_usdt=quantity_contracts * price / leverage,
+                leverage=leverage,
+                total_equity=market_data.get("total_equity", 1000),
+                funding_rate=market_data.get("funding_rate", 0.0),
+            )
+            if not lev_check.passed:
+                return {
+                    "ok": False, "error": f"杠杆风控: {lev_check.reason}",
+                    "parent_id": parent_id,
+                }
+
+            # 2. 下合约单
+            order = leverage_engine.create_swap_market_order(
+                symbol=symbol,
+                side=side,
+                quantity_contracts=quantity_contracts,
+                leverage=leverage,
+                stop_loss_price=stop_loss_price,
+                take_profit_price=take_profit_price,
+                note=parent_id[:20],
+            )
+
+            if not order:
+                return {
+                    "ok": False, "error": "合约下单返回空",
+                    "parent_id": parent_id,
+                }
+
+            return {
+                "ok": True,
+                "parent_id": parent_id,
+                "order_id": order.get("id", ""),
+                "symbol": symbol,
+                "side": side,
+                "quantity_contracts": quantity_contracts,
+                "leverage": leverage,
+                "notional_usdt": round(quantity_contracts * price, 2),
+                "margin_usdt": round(quantity_contracts * price / leverage, 2),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        except Exception as e:
+            return {
+                "ok": False, "error": str(e),
+                "parent_id": parent_id,
+            }
 
     def _simulate_slice_fill(self, slice_obj: OrderSlice, current_price: float,
                              side: str, volatility: float, spread: float) -> Tuple[float, float, float]:

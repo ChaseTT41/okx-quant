@@ -31,8 +31,11 @@ data/daemon_logs/
 data/hourly/
 data/ai_results/
 data/sentiment/
+data/sentiment_cache/
 data/live_fuse_state.json
 data/live_risk_state.json
+data/leverage_state.json
+data/rolling/
 
 # IDE
 .vscode/

@@ -70,6 +70,98 @@ class RiskController:
 
         return RiskCheck(True, "通过", "info")
 
+    # ── ⚡ 杠杆交易专属风控 ──
+    MAX_LEVERAGE = 10
+    MAX_LEVERAGED_POSITION_SIZE_PCT = 10.0  # 杠杆仓位上限 (保证金)
+    MAX_DAILY_LEVERAGED_TRADES = 3
+    MAX_LEVERAGED_TOTAL_EXPOSURE = 3.0  # 总名义敞口 ≤ 3x 权益
+
+    def leverage_pre_trade_check(self, symbol: str, margin_usdt: float,
+                                  leverage: int, total_equity: float,
+                                  funding_rate: float = 0.0,
+                                  total_leveraged_notional: float = 0.0) -> RiskCheck:
+        """
+        杠杆交易事前风控 — 在合约下单前检查。
+
+        检查项:
+          1. 杠杆上限 (≤10x)
+          2. 保证金仓位上限 (≤10% 权益)
+          3. 总名义敞口上限 (≤3x 权益)
+          4. 资金费率过高警告
+          5. 预估强平价格
+        """
+        # 1. 杠杆上限
+        if leverage > self.MAX_LEVERAGE:
+            return RiskCheck(False, f"杠杆{leverage}x > {self.MAX_LEVERAGE}x上限", "danger")
+
+        # 2. 保证金仓位 (单仓 ≤ 10% 权益)
+        margin_pct = margin_usdt / total_equity * 100 if total_equity > 0 else 100
+        if margin_pct > self.MAX_LEVERAGED_POSITION_SIZE_PCT:
+            return RiskCheck(
+                False,
+                f"杠杆保证金{margin_pct:.1f}% > {self.MAX_LEVERAGED_POSITION_SIZE_PCT}%上限",
+                "warning"
+            )
+
+        # 3. 总名义敞口 (杠杆后)
+        new_notional = margin_usdt * leverage
+        total_notional_after = total_leveraged_notional + new_notional
+        exposure_ratio = total_notional_after / total_equity if total_equity > 0 else 0
+        if exposure_ratio > self.MAX_LEVERAGED_TOTAL_EXPOSURE:
+            return RiskCheck(
+                False,
+                f"总敞口{exposure_ratio:.1f}x > {self.MAX_LEVERAGED_TOTAL_EXPOSURE}x上限",
+                "danger"
+            )
+
+        # 4. 资金费率: 年化>30% 警告
+        fr_annualized = abs(funding_rate) * 3 * 365
+        if fr_annualized > 0.30:
+            return RiskCheck(
+                True,
+                f"⚠️ 资金费率年化{fr_annualized:.0%}, 持仓成本高",
+                "warning"
+            )
+
+        # 5. 强平价格估算 (保守: -15% of entry for 10x)
+        liq_buffer = 0.85 / leverage  # 10x → 8.5%, 5x → 17%, 2x → 42%
+        if liq_buffer < 0.05:
+            return RiskCheck(
+                True,
+                f"强平空间仅{liq_buffer:.1%} (杠杆={leverage}x), 建议设紧止损",
+                "warning"
+            )
+
+        return RiskCheck(True, f"杠杆风控通过 ({leverage}x, 保证金{margin_usdt:.0f}USDT)", "info")
+
+    def leverage_position_check(self, symbol: str, entry_price: float,
+                                 current_price: float, leverage: int,
+                                 margin: float, pnl_pct: float) -> RiskCheck:
+        """
+        杠杆持仓定期检查 — 强平风险评估。
+        """
+        # 杠杆放大亏损
+        unleveraged_pnl = pnl_pct / leverage if leverage > 0 else pnl_pct
+
+        # 10x杠杆 → 8% 价格跌 = 80% 保证金亏 → 接近强平
+        liq_threshold = -0.85 / leverage  # 10x → -8.5%
+
+        if pnl_pct <= liq_threshold * 0.7:  # 70% 到强平线
+            return RiskCheck(
+                False,
+                f"{symbol} 杠杆亏损{pnl_pct:.1f}% (强平线≈{liq_threshold:.1%}), 建议减仓!",
+                "danger"
+            )
+
+        if pnl_pct <= liq_threshold * 0.85:
+            return RiskCheck(
+                True,
+                f"{symbol} 杠杆亏损{pnl_pct:.1f}%, 接近强平线",
+                "warning"
+            )
+
+        return RiskCheck(True, f"{symbol} 杠杆正常 ({pnl_pct:+.1f}%)", "info")
+
     def position_check(self, position_id: str) -> List[RiskCheck]:
         """持仓风控: 每笔持仓定期检查"""
         checks = []

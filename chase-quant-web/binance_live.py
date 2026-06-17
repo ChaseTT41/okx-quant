@@ -1,16 +1,16 @@
 """
-Chase量化策略 — 币安实盘交易封装
+Chase量化策略 — 交易所实盘交易封装
 ==================================
-封装 ccxt 币安现货交易，适配小额资金（100-300 USDT）。
+封装 ccxt 现货交易，支持 Binance / OKX，适配小额资金（100-300 USDT）。
 
 核心保护:
   - 每笔交易前检查紧急停止开关
-  - 金额低于币安最小交易额自动拒绝
+  - 金额低于最小交易额自动拒绝
   - API 错误自动重试（最多 3 次），连续失败触发熔断
   - 所有成交记录到 data/live_orders/{date}.jsonl
 
 使用:
-    from trading_config import TradingConfig, TradingMode
+    from trading_config import TradingConfig, TradingMode, Exchange
     from binance_live import BinanceLiveTrader
 
     config = TradingConfig.from_env()
@@ -111,28 +111,37 @@ class LiveAPIError(Exception):
 
 class BinanceLiveTrader:
     """
-    币安现货交易封装
+    交易所现货交易封装 (Binance / OKX)
 
     适配小额资金 (100-300 USDT):
-      - 自动检查币安最小交易额 ($10)
+      - 自动检查最小交易额 ($10)
       - 市价单为主（避免挂单不成交）
       - 每笔交易记录到 JSONL
     """
 
-    # 币安现货最小名义交易额（美元）
+    # 现货最小名义交易额（美元）
     MIN_NOTIONAL_USD = 10.0
 
-    # 支持的交易对
-    SUPPORTED_SYMBOLS = [
-        "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
-        "ADA/USDT", "DOGE/USDT", "DOT/USDT", "LINK/USDT", "AVAX/USDT",
-    ]
+    # 支持的交易对 — 从统一配置中心加载 (Tier1 ML深度扫描)
+    try:
+        from symbol_config import get_all_crypto_symbols
+        SUPPORTED_SYMBOLS = get_all_crypto_symbols(tiers=[1])
+    except ImportError:
+        SUPPORTED_SYMBOLS = [
+            "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
+            "ADA/USDT", "DOGE/USDT", "DOT/USDT", "LINK/USDT", "AVAX/USDT",
+        ]
 
-    # bStocks 代币化股票（观察模式）
-    BSTOCK_SYMBOLS = [
-        "NVDAB/USDT", "TSLAB/USDT", "AAPLB/USDT", "CRCLB/USDT",
-        "MUB/USDT", "SNDKB/USDT",
-    ]
+    # bStocks 代币化股票（观察模式，仅 Binance 支持）
+    # ⚠️ OKX 现货不支持股票代币化产品！
+    try:
+        from symbol_config import BSTOCKS_BINANCE
+        BSTOCK_SYMBOLS = BSTOCKS_BINANCE
+    except ImportError:
+        BSTOCK_SYMBOLS = [
+            "NVDAB/USDT", "TSLAB/USDT", "AAPLB/USDT", "CRCLB/USDT",
+            "MUB/USDT", "SNDKB/USDT",
+        ]
 
     def __init__(self, config=None):
         """
@@ -146,10 +155,11 @@ class BinanceLiveTrader:
             config = TradingConfig.from_env()
         self.config = config
 
-        # 创建 ccxt exchange（带凭证）
+        # 创建 ccxt exchange（带凭证，自动识别 Binance/OKX）
         self._exchange = create_exchange(
             for_trading=True,
-            testnet=config.is_testnet
+            testnet=config.is_testnet,
+            exchange_type=config.exchange,
         )
         self._min_notional_cache: Dict[str, float] = {}
 
@@ -524,6 +534,147 @@ class BinanceLiveTrader:
             status=status,
         )
 
+    # ── ⚡ Swap/合约交易 ──
+
+    def market_buy_swap(self, symbol: str, amount_usdt: float,
+                         leverage: int, stop_loss_price: float = None,
+                         note: str = "") -> OrderResult:
+        """
+        合约市价做多 (OKX 永续合约)。
+
+        Args:
+          symbol: 'BTC/USDT' (自动转为 'BTC/USDT:USDT')
+          amount_usdt: 保证金 (USDT)
+          leverage: 杠杆倍数
+          stop_loss_price: 止损触发价
+          note: 备注
+        """
+        swap_sym = symbol.replace("/USDT", "/USDT:USDT")
+
+        # 校验
+        self._validate_trading_ready()
+        self._check_kill_switch()
+
+        if amount_usdt < self._get_min_notional(symbol):
+            raise LiveTradingBlockedError(
+                f"保证金 ${amount_usdt:.2f} 低于最小交易额")
+
+        usdt_balance = self.get_usdt_balance()
+        if amount_usdt > usdt_balance:
+            raise LiveTradingBlockedError(
+                f"USDT 余额不足 (需要 ${amount_usdt:.2f}, 可用 ${usdt_balance:.2f})")
+
+        # 设杠杆 + 逐仓
+        try:
+            self._exchange.set_leverage(leverage, swap_sym)
+        except Exception:
+            pass
+        try:
+            self._exchange.set_margin_mode("isolated", swap_sym)
+        except Exception:
+            pass
+
+        # 计算合约数量
+        price = self._get_price(symbol)
+        if price <= 0:
+            raise LiveAPIError(f"无法获取 {symbol} 价格")
+        notional = amount_usdt * leverage
+        quantity = notional / price
+
+        # 精度处理
+        try:
+            market = self._exchange.market(swap_sym)
+            precision = market["precision"]["amount"]
+            quantity = self._exchange.amount_to_precision(swap_sym, quantity)
+        except Exception:
+            quantity = round(quantity, 4)
+
+        last_error = ""
+        for attempt in range(self._max_retries):
+            try:
+                order = self._exchange.create_order(
+                    swap_sym, "market", "buy", float(quantity),
+                    None,
+                    {"note": note, "leverage": str(leverage)}
+                )
+
+                self._record_api_success()
+                result = self._parse_order_result(order, swap_sym, "buy", amount_usdt, note)
+                result.leverage = leverage
+                result.notional_usdt = round(notional, 2)
+                self._log_order(result)
+
+                # 设止损 (algo order)
+                if stop_loss_price:
+                    try:
+                        self._exchange.create_order(
+                            swap_sym, "stop_market", "sell", float(quantity),
+                            None,
+                            {"stopLossPrice": stop_loss_price}
+                        )
+                    except Exception as sl_err:
+                        print(f"  ⚠️ 止损单设置失败: {sl_err}")
+
+                return result
+
+            except Exception as e:
+                last_error = str(e)
+                if attempt < self._max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                self._record_api_error(f"合约下单失败: {last_error}")
+
+        raise LiveAPIError(f"合约下单失败: {last_error}")
+
+    def market_sell_swap(self, symbol: str, quantity: float,
+                          note: str = "") -> OrderResult:
+        """
+        合约市价平仓/做空。
+
+        Args:
+          symbol: 'BTC/USDT'
+          quantity: 合约数量
+          note: 备注
+        """
+        swap_sym = symbol.replace("/USDT", "/USDT:USDT")
+        self._validate_trading_ready()
+        self._check_kill_switch()
+
+        last_error = ""
+        for attempt in range(self._max_retries):
+            try:
+                order = self._exchange.create_order(
+                    swap_sym, "market", "sell", quantity,
+                    None, {"note": note}
+                )
+                self._record_api_success()
+                result = self._parse_order_result(order, swap_sym, "sell", quantity, note)
+                self._log_order(result)
+                return result
+            except Exception as e:
+                last_error = str(e)
+                if attempt < self._max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                self._record_api_error(f"合约平仓失败: {last_error}")
+
+        raise LiveAPIError(f"合约平仓失败: {last_error}")
+
+    def _get_price(self, symbol: str) -> float:
+        """获取当前价格 (ccxt ticker)"""
+        try:
+            ticker = self._exchange.fetch_ticker(
+                symbol.replace("/USDT", "/USDT:USDT")
+                if not symbol.endswith(":USDT") else symbol
+            )
+            return ticker.get("last", 0) or 0
+        except Exception:
+            try:
+                ticker = self._exchange.fetch_ticker(symbol)
+                return ticker.get("last", 0) or 0
+            except Exception:
+                return 0.0
+
     # ── 辅助 ──
 
     def _round_quantity(self, symbol: str, quantity: float) -> float:
@@ -568,6 +719,7 @@ class BinanceLiveTrader:
         )
 
         status = {
+            "exchange": self.config.exchange.label,
             "mode": self.config.mode.label,
             "testnet": self.config.is_testnet,
             "live": self.config.is_live,
@@ -591,6 +743,7 @@ class BinanceLiveTrader:
     def print_status(self):
         """打印交易器状态"""
         s = self.get_status()
+        print(f"交易所:   {s.get('exchange', '?')}")
         print(f"交易模式: {s['mode']}")
         print(f"API 状态: {'✅ 正常' if s['api_ok'] else '🔴 熔断'}")
         print(f"紧急停止: {'🔴 已激活' if s['kill_switch_active'] else '🟢 正常'}")
@@ -607,7 +760,7 @@ class BinanceLiveTrader:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="币安实盘交易器")
+    parser = argparse.ArgumentParser(description="交易所实盘交易器 (Binance / OKX)")
     parser.add_argument("--balance", action="store_true", help="查询余额")
     parser.add_argument("--status", action="store_true", help="查看状态")
     parser.add_argument("--buy", type=str, help="买入交易对 (如 BTC/USDT)")

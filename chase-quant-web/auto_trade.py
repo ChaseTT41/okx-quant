@@ -114,9 +114,13 @@ class MLAutoTrader:
     """
 
     # 加密货币扫描列表 (流动性好 + 数据充足)
-    CRYPTO_WATCHLIST = [
-        "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
-    ]
+    try:
+        from symbol_config import get_all_crypto_symbols
+        CRYPTO_WATCHLIST = get_all_crypto_symbols(tiers=[1])  # Tier1: 30+主流币ML深度扫
+    except ImportError:
+        CRYPTO_WATCHLIST = [
+            "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
+        ]
 
     def __init__(self, use_lgbm: bool = True):
         if not ML_SIGNAL_AVAILABLE:
@@ -226,14 +230,19 @@ class RollingAwareAutoTrader:
       results, pf = trader.run()
     """
 
-    CRYPTO_WATCHLIST = [
-        "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
-    ]
+    try:
+        from symbol_config import get_all_crypto_symbols
+        CRYPTO_WATCHLIST = get_all_crypto_symbols(tiers=[1])  # Tier1: 30+主流币ML深度扫
+    except ImportError:
+        CRYPTO_WATCHLIST = [
+            "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
+        ]
 
     def __init__(self, use_v5: bool = True, use_rolling: bool = True,
                  auto_retrain: bool = False, use_graph: bool = True,
                  use_alphas: bool = False, execution_config: "ExecutionConfig" = None,
-                 trading_mode: "TradingMode" = None):
+                 trading_mode: "TradingMode" = None,
+                 sentiment_engine=None):
         """
         Args:
             use_v5: 是否使用 MLSignalEngineV5 (Qlib融合)
@@ -243,6 +252,7 @@ class RollingAwareAutoTrader:
             use_alphas: 是否使用Alpha挖掘增强 (Phase 12)
             execution_config: 执行优化配置 (Phase 13), None=单笔市价
             trading_mode: 交易模式 (Phase 15), None=自动从环境变量读取
+            sentiment_engine: 市场情绪引擎 (MarketSentimentEngine)
         """
         self.use_v5 = use_v5 and ML_V5_AVAILABLE
         self.use_rolling = use_rolling and ROLLING_AVAILABLE
@@ -251,6 +261,7 @@ class RollingAwareAutoTrader:
         self.use_alphas = use_alphas and ALPHA_AVAILABLE
         self.use_execution = execution_config is not None and EXECUTION_AVAILABLE
         self.execution_config = execution_config
+        self.sentiment_engine = sentiment_engine
 
         # ── Phase 15: 实盘交易 ──
         if trading_mode is None:
@@ -262,7 +273,7 @@ class RollingAwareAutoTrader:
             try:
                 trading_cfg = TradingConfig.from_env()
                 self.live_trader = BinanceLiveTrader(trading_cfg)
-                print(f"🔗 实盘连接: {trading_mode.label}")
+                print(f"🔗 实盘连接: {trading_mode.label} @ {trading_cfg.exchange.label}")
                 usdt = self.live_trader.get_usdt_balance()
                 print(f"💰 USDT 余额: ${usdt:.2f}")
             except Exception as e:
@@ -592,6 +603,18 @@ class RollingAwareAutoTrader:
 
         # 3. 扫描信号
         ml_signals = self.scan(symbols)
+
+        # ── 🎭 情绪叠加: 调整信号置信度 ──
+        if self.sentiment_engine:
+            for sig in ml_signals:
+                try:
+                    overlay = self.sentiment_engine.get_sentiment_overlay(sig["symbol"])
+                    adj = overlay.get("composite_sentiment", 0.0) * 0.12  # ±12% max
+                    sig["confidence"] = min(1.0, max(0.1, sig["confidence"] + adj))
+                    sig["sentiment_overlay"] = overlay
+                except Exception:
+                    pass
+
         buy_sigs = [s for s in ml_signals if s["action"] == "BUY"]
         sell_sigs = [s for s in ml_signals if s["action"] == "SELL"]
 
@@ -642,7 +665,8 @@ class RollingAwareAutoTrader:
                 size_pct = size_pct / 100
             max_size = min(cash * size_pct, cash * 0.5)
 
-            if max_size < 200:
+            if max_size < 10:
+                # OKX/Binance 现货最小交易额 ≈ $10
                 continue
 
             ml_score = abs(sig["signal_val"]) * 80 + sig["confidence"] * 50 + sig["consensus"] * 50
@@ -1044,7 +1068,8 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
             cash_pct = 0.6 if market in ("a_stock", "hk_stock") else 0.5
             max_size = min(sig.suggested_size, cash * cash_pct)
 
-            if max_size < 200:
+            if max_size < 10:
+                # OKX/Binance 现货最小交易额 ≈ $10
                 continue
 
             check = rc.pre_trade_check(market, max_size, sig.score, total_value)
@@ -1151,20 +1176,21 @@ if __name__ == "__main__":
     parser.add_argument("--wechat-report", action="store_true",
                        help="交易后推送日报到企业微信 (Phase 14)")
     parser.add_argument("--testnet", action="store_true",
-                       help="使用币安测试网实盘交易 (Phase 15)")
+                       help="使用交易所测试网/Demo实盘交易 (Phase 15)")
     parser.add_argument("--live", action="store_true",
-                       help="使用币安实盘交易 (Phase 15, 真金白银!)")
+                       help="使用交易所实盘交易 (Phase 15, 真金白银!)")
     parser.add_argument("--once", action="store_true",
                        help="单次扫描+执行后退出")
     args = parser.parse_args()
 
     # 确定交易模式 (Phase 15)
+    trading_cfg = TradingConfig.from_env()
     if args.live:
         trading_mode = TradingMode.LIVE
-        print(f"🔴 币安实盘交易模式! USDT 真金白银!")
+        print(f"🔴 {trading_cfg.exchange.label} 实盘交易模式! USDT 真金白银!")
     elif args.testnet:
         trading_mode = TradingMode.TESTNET
-        print(f"🧪 币安测试网模式 (免费模拟)")
+        print(f"🧪 {trading_cfg.exchange.label} 测试网/Demo模式 (免费模拟)")
     else:
         trading_mode = TradingMode.PAPER
 

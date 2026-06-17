@@ -15,7 +15,12 @@ DATA_DIR = Path(__file__).parent / "data"
 PORTFOLIO_FILE = DATA_DIR / "portfolio.json"
 TRADES_FILE = DATA_DIR / "trades.json"
 
-SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
+# 从统一配置中心加载 Tier1 ML深度扫描标的 (30+主流币)
+try:
+    from symbol_config import get_all_crypto_symbols
+    SYMBOLS = get_all_crypto_symbols(tiers=[1])  # Tier1 ML深度扫描
+except ImportError:
+    SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
 SCAN_INTERVAL = 300  # 5分钟
 
 # 激进参数

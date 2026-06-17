@@ -91,12 +91,17 @@ def _calc_macd(close: np.ndarray) -> Tuple[float, float, float]:
 class CryptoSignals:
     """加密货币信号 (Binance/OKX via ccxt) — 偏差修正版"""
 
-    # 存活币: 当前Top15, 用于实盘交易
-    WATCHLIST = [
-        "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
-        "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT",
-        "MATIC/USDT", "UNI/USDT", "ATOM/USDT", "APT/USDT", "OP/USDT",
-    ]
+    # 存活币: 从统一配置中心加载 Tier1 ML深度扫描标的
+    # 实时拉取 OKX 支持的币种，过滤归零币
+    try:
+        from symbol_config import get_all_crypto_symbols
+        WATCHLIST = get_all_crypto_symbols(tiers=[1])  # Tier1: 30+主流币
+    except ImportError:
+        WATCHLIST = [
+            "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
+            "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT",
+            "MATIC/USDT", "UNI/USDT", "ATOM/USDT", "APT/USDT", "OP/USDT",
+        ]
 
     # 归零币幽灵列表: 不交易, 但用于风险校准
     # 每季度对照 CoinGecko Top 200 更新

@@ -62,10 +62,15 @@ GRAPH_DIR = DATA_DIR / "asset_graphs"
 GRAPH_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── 默认监控资产 ──
-DEFAULT_CRYPTO_SYMBOLS = [
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
-    "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT",
-]
+# ── 默认监控资产 ──
+try:
+    from symbol_config import get_all_crypto_symbols
+    DEFAULT_CRYPTO_SYMBOLS = get_all_crypto_symbols(tiers=[1])  # Tier1: 30+主流币
+except ImportError:
+    DEFAULT_CRYPTO_SYMBOLS = [
+        "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
+        "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT",
+    ]
 
 DEFAULT_STOCK_SYMBOLS = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM",

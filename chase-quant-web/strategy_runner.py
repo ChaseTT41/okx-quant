@@ -36,10 +36,16 @@ STRATEGY_CONFIG = {
 }
 
 # ── 需要拉取数据的币种 (所有策略覆盖的币种并集) ──
-ALL_CRYPTO_SYMBOLS = [
-    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT",
-    "XRP/USDT", "AVAX/USDT",
-]
+# 从统一配置中心加载 Tier1+2 (~80个币种)
+try:
+    from symbol_config import get_all_crypto_symbols
+    ALL_CRYPTO_SYMBOLS = get_all_crypto_symbols(tiers=[1, 2])
+except ImportError:
+    ALL_CRYPTO_SYMBOLS = [
+        "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT",
+        "XRP/USDT", "AVAX/USDT", "ADA/USDT", "DOGE/USDT",
+        "DOT/USDT", "LINK/USDT",
+    ]
 
 # ── ccxt 交易所实例 (懒加载) ──
 _exchange = None
@@ -271,12 +277,14 @@ STRATEGY_NAMES = {
 }
 
 
-def run_all_strategies(market_data: Dict[str, pd.DataFrame] = None) -> List[dict]:
+def run_all_strategies(market_data: Dict[str, pd.DataFrame] = None,
+                        sentiment_engine=None) -> List[dict]:
     """
     运行所有启用的策略，返回去重后的信号列表
 
     Args:
         market_data: 预先拉取的市场数据（可选）。如果为None，自动拉取。
+        sentiment_engine: 市场情绪引擎 (MarketSentimentEngine, 可选)
 
     Returns:
         [{symbol, name, action, price, score, confidence,
@@ -323,6 +331,17 @@ def run_all_strategies(market_data: Dict[str, pd.DataFrame] = None) -> List[dict
 
     if len(deduped) < len(all_signals):
         print(f"  🔄 去重: {len(all_signals)} → {len(deduped)} 信号")
+
+    # 4. 🎭 情绪叠加 (如果传入 sentiment_engine)
+    if sentiment_engine:
+        for sig in deduped:
+            try:
+                overlay = sentiment_engine.get_sentiment_overlay(sig["symbol"])
+                adj = overlay.get("composite_sentiment", 0.0) * 0.10
+                sig["confidence"] = min(0.95, max(0.15, sig["confidence"] + adj))
+                sig["sentiment_overlay"] = overlay
+            except Exception:
+                pass
 
     return deduped
 

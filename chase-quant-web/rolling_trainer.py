@@ -166,6 +166,12 @@ class RollingModelSnapshot:
         return StalenessLevel.EXPIRED
 
     def to_dict(self) -> dict:
+        import math
+        def _safe_round(v, ndigits=4):
+            try:
+                return round(v, ndigits)
+            except Exception:
+                return v
         return {
             "model_name": self.model_name,
             "theme_id": self.theme_id,
@@ -178,15 +184,18 @@ class RollingModelSnapshot:
             "n_samples": self.n_samples,
             "n_epochs": self.n_epochs,
             "seq_len": self.seq_len,
-            "oos_ic": round(self.oos_ic, 4),
-            "oos_icir": round(self.oos_icir, 4),
-            "oos_r2": round(self.oos_r2, 4),
-            "oos_hit_rate": round(self.oos_hit_rate, 4),
-            "icir_delta": round(self.icir_delta, 4),
+            "fwd_window": self.fwd_window,
+            "oos_ic": _safe_round(self.oos_ic),
+            "oos_icir": _safe_round(self.oos_icir),
+            "oos_r2": _safe_round(self.oos_r2),
+            "oos_hit_rate": _safe_round(self.oos_hit_rate),
+            "icir_delta": _safe_round(self.icir_delta),
             "icir_trend": self.icir_trend,
             "age_days": self.age_days,
             "staleness": self.staleness.value,
-            "feature_drift": round(self.feature_drift, 4),
+            "feature_drift": _safe_round(self.feature_drift),
+            "model_path": self.model_path,
+            "meta_path": self.meta_path,
         }
 
 
@@ -213,7 +222,7 @@ class RollingWindowManager:
         "mode": "hybrid",
         "sliding_size_days": 730,       # 滑动窗口: 2年
         "min_samples": 200,              # 最少样本数
-        "update_interval_days": 7,       # 更新间隔 (每周)
+        "update_interval_days": 3,       # 更新间隔 (震荡市3天, 快速适应)
         "max_staleness_days": 21,        # 模型过期天数
         "retrain_threshold_icir_drop": 0.15,  # ICIR下降超过此值触发重训
         "key_inflection_points": True,   # 保留关键拐点
@@ -525,23 +534,23 @@ class RollingModelRegistry:
                 for s in data.get("snapshots", []):
                     try:
                         self.snapshots.append(RollingModelSnapshot(
-                            model_name=s["model_name"],
-                            theme_id=s["theme_id"],
-                            theme_name=s["theme_name"],
+                            model_name=s.get("model_name", ""),
+                            theme_id=s.get("theme_id", ""),
+                            theme_name=s.get("theme_name", ""),
                             window_id=s.get("window_id", ""),
-                            version=s["version"],
-                            trained_at=s["trained_at"],
-                            data_start=s["data_start"],
-                            data_end=s["data_end"],
-                            n_samples=s["n_samples"],
+                            version=s.get("version", 1),
+                            trained_at=s.get("trained_at", ""),
+                            data_start=s.get("data_start", ""),
+                            data_end=s.get("data_end", ""),
+                            n_samples=s.get("n_samples", 0),
                             n_epochs=s.get("n_epochs", 100),
                             seq_len=s.get("seq_len", 60),
                             fwd_window=s.get("fwd_window", 5),
-                            oos_ic=s["oos_ic"],
-                            oos_icir=s["oos_icir"],
-                            oos_r2=s["oos_r2"],
-                            oos_hit_rate=s["oos_hit_rate"],
-                            model_path=s["model_path"],
+                            oos_ic=s.get("oos_ic", 0.0),
+                            oos_icir=s.get("oos_icir", 0.0),
+                            oos_r2=s.get("oos_r2", 0.0),
+                            oos_hit_rate=s.get("oos_hit_rate", 0.0),
+                            model_path=s.get("model_path", ""),
                             meta_path=s.get("meta_path", ""),
                             icir_delta=s.get("icir_delta", 0.0),
                             icir_trend=s.get("icir_trend", "→"),
@@ -1101,7 +1110,11 @@ class RollingTrainer:
             return {"drifted": False, "drift_score": 0.0, "action": "graph_unavailable"}
 
         if symbols is None:
-            symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
+            try:
+                from symbol_config import get_all_crypto_symbols
+                symbols = get_all_crypto_symbols(tiers=[1])
+            except ImportError:
+                symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
 
         try:
             # 加载旧图
@@ -1353,7 +1366,7 @@ if __name__ == "__main__":
         if gs.get("available"):
             print(f"\n🔗 资产关系图 (Phase 11):")
             print(f"   资产数: {gs['n_assets']}")
-            print(f"   图密度: {gs['graph_density']:.4f}")
+            print(f"   图密度: {gs.get('density', 0):.4f}")
             print(f"   平均度: {gs['avg_degree']:.2f}")
             print(f"   社区数: {gs['n_communities']}")
             print(f"   图年龄: {gs['age_days']} 天 {'⚠️ 需更新' if gs.get('stale') else '✅ 新鲜'}")
@@ -1401,7 +1414,11 @@ if __name__ == "__main__":
         print("🔨 构建资产关系图...")
         try:
             builder = AssetGraphBuilder()
-            symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
+            try:
+                from symbol_config import get_all_crypto_symbols
+                symbols = get_all_crypto_symbols(tiers=[1])
+            except ImportError:
+                symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
             snapshot = builder.build(symbols)
             builder.save_snapshot(snapshot)
             print(f"\n✅ 图构建完成!")
