@@ -1,0 +1,40 @@
+# Python source — not needed for static deployment
+*.py
+*.pyc
+__pycache__/
+
+# Node (only need static output)
+node_modules/
+package.json
+package-lock.json
+tailwind.config.js
+
+# Data — large, not needed
+data/
+*.db
+*.sqlite
+
+# Test artifacts
+test-results/
+.playwright/
+pytest_cache/
+
+# Config (keep out of deployment)
+.env
+.env.*
+*.log
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+
+# Docs (optional — comment out to deploy)
+# README.md
+
+# OS junk
+.DS_Store
+Thumbs.db
