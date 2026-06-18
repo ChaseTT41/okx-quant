@@ -699,8 +699,13 @@ class LeverageEngine:
         notional = margin * leverage
         quantity = self.compute_contract_quantity(margin, price, leverage)
 
-        sl_price = price * (1 + decision.stop_loss_pct)
-        tp_price = price * (1 + decision.take_profit_pct)
+        # 止损方向: 多头止损在入场价下方, 空头止损在入场价上方
+        if side == "sell":  # 空头 (做空)
+            sl_price = price * (1 - decision.stop_loss_pct)  # stop_loss_pct为负, 减负得正 → 上方
+            tp_price = price * (1 - decision.take_profit_pct)  # take_profit_pct为正, 减正得负 → 下方
+        else:  # 多头 (做多, 默认)
+            sl_price = price * (1 + decision.stop_loss_pct)
+            tp_price = price * (1 + decision.take_profit_pct)
         max_loss = margin * abs(decision.stop_loss_pct) * leverage
 
         return {

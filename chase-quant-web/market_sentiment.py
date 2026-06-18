@@ -1045,6 +1045,64 @@ class MarketSentimentEngine:
             "ai_divergence_signal": ai_signal,
         }
 
+    # ── 11a. OKX OHLCV (Fix #6: OKX-only 币种需要) ──
+
+    def fetch_okx_ohlcv(self, symbol: str, limit: int = 400, bar: str = "1D") -> Optional[list]:
+        """
+        从 OKX 拉取 K线数据, 返回 ccxt 兼容格式: [[ts, open, high, low, close, vol], ...]
+        用于 OKX-only 币种 (如 HYPE) 无 Binance 数据时的 fallback。
+        """
+        inst_id = self._to_okx_inst_id(symbol)
+        data = self._okx_get("/api/v5/market/candles", {
+            "instId": inst_id,
+            "bar": bar,
+            "limit": str(limit),
+        })
+        if not data or data.get("code") != "0":
+            log.warning(f"OKX OHLCV {symbol} 拉取失败")
+            return None
+        candles = data.get("data", [])
+        if not candles:
+            return None
+        # OKX 返回格式: [ts, open, high, low, close, vol, volCcy] (反转时间序)
+        ohlcv = []
+        for c in reversed(candles):  # OKX 最新在前, 反转为升序
+            try:
+                ts = int(c[0])
+                o = float(c[1])
+                h = float(c[2])
+                l = float(c[3])
+                cl = float(c[4])
+                vol = float(c[5])
+                ohlcv.append([ts, o, h, l, cl, vol])
+            except (ValueError, IndexError, TypeError):
+                continue
+        return ohlcv if ohlcv else None
+
+    # ── 11b. 实时点差 (Fix #5) ──
+
+    def fetch_okx_spread(self, symbol: str) -> float:
+        """
+        从 OKX ticker 获取实时 bid/ask spread。
+        Returns: spread as fraction (e.g. 0.0005 = 5bps)
+        """
+        inst_id = self._to_okx_inst_id(symbol)
+        data = self._okx_get("/api/v5/market/ticker", {"instId": inst_id})
+        if not data or data.get("code") != "0":
+            return None
+        tickers = data.get("data", [])
+        if not tickers:
+            return None
+        t = tickers[0]
+        try:
+            bid = float(t.get("bidPx", 0))
+            ask = float(t.get("askPx", 0))
+            if bid > 0 and ask > 0:
+                return (ask - bid) / bid  # relative spread
+        except (ValueError, TypeError):
+            pass
+        return None
+
     # ── 11. 主入口: refresh_all() ──
 
     def refresh_all(self,

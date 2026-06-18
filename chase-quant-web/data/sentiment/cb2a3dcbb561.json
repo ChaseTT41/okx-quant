@@ -1,169 +1,156 @@
 {
   "symbol": "ETH/USDT",
   "market": "crypto",
-  "analyzed_at": "2026-06-08T22:01:05.537093+08:00",
-  "current_price_range": "ETH/USDT 价格近期经历大幅下跌，逼近关键支撑位。",
-  "recent_performance": "比特币和以太坊延续跌势，加密货币市场情绪转弱，经历自2024年7月以来最糟糕的一周。",
-  "sentiment_score": 35,
+  "analyzed_at": "2026-06-18T20:45:31.649392+08:00",
+  "current_price_range": "ETH/USDT 价格在近期波动剧烈，比特币维持区间震荡，以太坊表现略显疲软。",
+  "recent_performance": "以太坊近期表现略显疲软，比特币维持区间震荡，部分山寨币轮动。",
+  "sentiment_score": 45,
   "sentiment_label": "中性偏跌",
-  "sentiment_summary": "市场情绪低迷，短期反弹乏力，中期承压。",
+  "sentiment_summary": "市场情绪谨慎，短期受宏观政策影响，中期存在不确定性。",
   "key_drivers": [
     {
-      "factor": "宏观地缘政治风险",
+      "factor": "美联储利率会议及前瞻指引",
       "impact": "negative",
       "strength": 8,
       "cycle": "short",
-      "detail": "以色列与伊朗的军事冲突升级导致风险资产避险情绪升温，短期内对加密货币构成压力。",
-      "source": "CryptoSlate, AP News"
+      "detail": "美联储会议后，市场对利率前景感到担忧，导致加密货币集体跳水，影响短期市场情绪。",
+      "source": "CoinDesk, TradingKey, CNBC"
     },
     {
-      "factor": "ETF资金流出",
-      "impact": "negative",
-      "strength": 7,
+      "factor": "地缘政治局势缓和（美伊和平协议）",
+      "impact": "positive",
+      "strength": 6,
       "cycle": "short",
-      "detail": "美国比特币、以太坊ETF结束创纪录的资金连续流出，短期内对市场情绪造成负面影响。",
-      "source": "CoinDesk"
+      "detail": "美伊和平协议的达成暂时缓解了地缘政治紧张局势，对风险资产短期情绪有提振作用。",
+      "source": "TMGM, Reuters, CNBC"
     },
     {
-      "factor": "技术面抛售压力",
-      "impact": "negative",
-      "strength": 7,
-      "cycle": "short",
-      "detail": "比特币、以太坊价格逼近关键支撑位，市场出现惨烈抛售后反弹乏力，短期内抛售压力依然存在。",
-      "source": "Moomoo, CoinDesk"
-    },
-    {
-      "factor": "机构乐观情绪（潜在）",
+      "factor": "机构持仓动态 (Bitmine Immersion Technologies)",
       "impact": "positive",
       "strength": 5,
       "cycle": "short",
-      "detail": "有消息称机构乐观情绪提振以太坊，但目前尚未转化为持续的上涨动力，短期影响有限。",
+      "detail": "Bitmine Immersion Technologies 宣布持有大量 ETH 代币，显示机构对 ETH 的持续关注，对短期市场有积极信号。",
       "source": "Moomoo"
     },
     {
-      "factor": "USDT市值超越ETH",
+      "factor": "DeFi 行业发展方向",
       "impact": "neutral",
       "strength": 4,
-      "cycle": "short",
-      "detail": "USDT市值超越ETH成为第二大加密货币市值排名，反映了稳定币的吸引力，但对ETH本身情绪影响中性。",
-      "source": "深潮TechFlow"
-    },
-    {
-      "factor": "AI行业发展",
-      "impact": "positive",
-      "strength": 6,
       "cycle": "mid",
-      "detail": "AI股票在经历抛售后有所恢复，AI算力需求对能源和基础设施的拉动可能间接影响相关技术发展，中期有潜在利好。",
-      "source": "AP News, Business Insider, Decrypt"
+      "detail": "解决中心化问题是 DeFi 进化的方向，预示着行业将朝着更成熟、更具可持续性的方向发展，影响中期市场。",
+      "source": "CryptoRank"
     },
     {
-      "factor": "监管政策讨论",
-      "impact": "neutral",
+      "factor": "监管环境变化 (爱尔兰收紧加密货币监管)",
+      "impact": "negative",
       "strength": 5,
       "cycle": "mid",
-      "detail": "国会即将讨论加密税收规则，包括质押、挖矿等，中期可能带来政策不确定性或利好，目前影响中性。",
+      "detail": "爱尔兰收紧加密货币监管，将增加合规成本和不确定性，对中期市场情绪产生一定压力。",
       "source": "Decrypt"
     },
     {
-      "factor": "以太坊基金会裁员",
-      "impact": "neutral",
-      "strength": 3,
-      "cycle": "short",
-      "detail": "Joe Lubin表示基金会裁员和离职并非危机，短期内对市场情绪影响有限，但需关注后续发展。",
-      "source": "CoinDesk"
+      "factor": "AI 技术在加密领域的应用",
+      "impact": "positive",
+      "strength": 7,
+      "cycle": "long",
+      "detail": " Dorsey's Block 新 AI 工具处理代码工作，Nvidia 构建 AI 训练机器人，显示 AI 技术对加密货币行业效率提升和创新具有长期积极影响。",
+      "source": "CoinTelegraph, Decrypt"
     },
     {
-      "factor": "宏观经济周期（潜在）",
+      "factor": "能源转型与加密货币挖矿",
       "impact": "neutral",
       "strength": 4,
       "cycle": "long",
-      "detail": "有分析师担忧2026年可能出现1999年式的泡沫破裂，长期来看宏观经济环境对加密市场有潜在影响，但目前数据不足以明确判断。",
-      "source": "Fortune"
+      "detail": "Wall Street 关注矿工的 AI 基础设施，显示能源在数字经济中的重要性，可能影响长期挖矿成本和效率。",
+      "source": "CryptoSlate"
     }
   ],
   "platform_sentiment": {
     "国际/英文媒体": {
-      "score": 40,
-      "summary": "关注下跌和风险，情绪偏谨慎。"
+      "score": 55,
+      "summary": "关注宏观政策与地缘政治影响。"
     },
     "国际/社交媒体": {
-      "score": 45,
-      "summary": "讨论反弹与支撑，情绪略有波动。"
+      "score": 40,
+      "summary": "情绪波动较大，受短期消息面影响。"
     },
     "国内/中文媒体": {
-      "score": 30,
-      "summary": "报道下跌和情绪转弱，偏悲观。"
+      "score": 50,
+      "summary": "报道以市场动态为主，情绪相对平稳。"
     },
     "国内/投资社区": {
-      "score": 35,
-      "summary": "关注反弹动能和交易所余额，情绪谨慎。"
+      "score": 45,
+      "summary": "对短期波动保持谨慎，关注机构动向。"
     }
   },
   "risks": [
-    "地缘政治冲突加剧导致避险情绪进一步蔓延。",
-    "ETF持续资金流出对市场信心造成打击。",
-    "关键支撑位被跌破可能引发更大规模的抛售。",
-    "监管政策的不确定性可能对市场造成负面影响。",
-    "潜在的宏观经济衰退风险。"
+    "美联储鹰派言论可能导致更长时间的高利率环境。",
+    "全球经济衰退风险依然存在，可能抑制风险资产需求。",
+    "加密货币行业的安全漏洞和欺诈事件频发，影响投资者信心。",
+    "监管政策的不确定性可能随时对市场造成冲击。"
   ],
   "opportunities": [
-    "短期内若地缘政治风险缓解，可能出现技术性反弹。",
-    "长期来看，AI技术发展和应用落地可能为加密市场带来新的增长点。",
-    "USDT市值超越ETH可能促使部分资金重新评估ETH的价值和潜力。",
-    "DeFi领域的技术进步和安全性的提升可能吸引更多用户和资金。",
-    "机构对加密资产的持续关注和潜在的ETF资金回流。"
+    "AI 技术在加密领域的应用可能带来新的增长点和效率提升。",
+    "DeFi 协议的不断创新和成熟可能吸引更多用户和资金。",
+    "机构投资者对加密货币的兴趣持续存在，可能带来增量资金。",
+    "地缘政治局势的缓和有助于风险资产的估值修复。"
   ],
   "macro_cycle": {
     "short_term": {
-      "score": 30,
-      "summary": "短期内受地缘政治和ETF资金流出影响，情绪偏弱。",
+      "score": 40,
+      "summary": "短期受美联储政策影响，市场情绪偏谨慎，需关注后续数据。",
       "drivers": [
         {
-          "factor": "地缘政治风险",
+          "factor": "美联储利率政策",
           "impact": "negative",
-          "detail": "短期内对风险资产构成直接压力。"
+          "detail": "鹰派信号导致短期市场承压。"
         },
         {
-          "factor": "ETF资金流出",
-          "impact": "negative",
-          "detail": "短期内削弱市场信心。"
+          "factor": "地缘政治局势",
+          "impact": "positive",
+          "detail": "和平协议带来短期情绪缓和。"
         }
       ]
     },
     "mid_term": {
-      "score": 45,
-      "summary": "中期面临宏观经济不确定性和监管政策讨论，情绪中性偏跌。",
+      "score": 50,
+      "summary": "中期面临宏观经济不确定性与行业发展机遇并存的局面。",
       "drivers": [
         {
-          "factor": "AI行业发展",
-          "impact": "positive",
-          "detail": "中期可能带来技术驱动的增长机会。"
+          "factor": "全球经济前景",
+          "impact": "negative",
+          "detail": "经济下行风险影响中期市场。"
         },
         {
-          "factor": "监管政策讨论",
-          "impact": "neutral",
-          "detail": "中期可能带来不确定性或潜在利好。"
+          "factor": "DeFi 行业进化",
+          "impact": "positive",
+          "detail": "行业发展方向明确，孕育中期机会。"
         }
       ]
     },
     "long_term": {
-      "score": 50,
-      "summary": "长期来看，技术革命和结构性问题是关键，目前数据不足以明确判断。",
+      "score": 65,
+      "summary": "长期看好 AI 等技术驱动的加密货币发展潜力。",
       "drivers": [
         {
-          "factor": "宏观经济周期",
+          "factor": "AI 技术革命",
+          "impact": "positive",
+          "detail": "AI 赋能加密行业，带来长期增长动力。"
+        },
+        {
+          "factor": "能源转型",
           "impact": "neutral",
-          "detail": "长期影响存在，但目前判断依据不足。"
+          "detail": "能源结构变化对挖矿行业有长期影响。"
         }
       ]
     }
   },
-  "cycle_position": "下跌初期",
-  "cycle_confidence": 55,
-  "sentiment_trend": "恶化",
+  "cycle_position": "横盘整理",
+  "cycle_confidence": 35,
+  "sentiment_trend": "稳定",
   "divergence_note": "无明显背离",
-  "conclusion": "当前ETH/USDT市场情绪偏向中性偏跌，短期内受地缘政治风险和ETF资金流出影响，市场表现疲软，延续跌势。中期来看，AI行业发展和监管政策讨论是关键驱动因素，但宏观经济的不确定性仍构成压力。长期来看，市场结构性问题和技术发展将是主导因素，但目前缺乏足够数据支持明确判断。整体市场处于下跌初期，需警惕进一步下行风险。",
-  "trading_suggestion": "短期内保持谨慎，关注地缘政治局势和ETF资金流向。若出现企稳迹象，可考虑逢低布局，但需严格控制风险。仅供参考，非投资建议。",
+  "conclusion": "当前 ETH/USDT 市场情绪整体偏向谨慎，短期内受美联储政策和地缘政治消息影响较大，市场波动性增加。中期来看，全球经济前景和 DeFi 行业的发展方向是关键。长期而言，AI 等技术创新为加密货币领域带来积极的增长潜力。整体市场处于横盘整理阶段，投资者需保持警惕，关注宏观经济指标和行业发展动态。",
+  "trading_suggestion": "建议在短期波动中保持观望，关注关键技术位支撑，中长期可关注 AI 和 DeFi 领域优质项目。",
   "data_sources": [
     "google_news",
     "Google News Business",

@@ -1,50 +1,963 @@
 {
   "cash": {
-    "crypto": 2451.697058262296,
-    "a_stock": 2500.0,
-    "us_stock": 2500.0
+    "crypto": 2076.457510306735,
+    "a_stock": 187.71933848740105,
+    "us_stock": 307.83589843749996,
+    "hk_stock": 166.87937382973132,
+    "b_stock": 371.5413863702837
   },
   "positions": {
-    "crypto_BNB/USDT_20260608231347": {
-      "id": "crypto_BNB/USDT_20260608231347",
+    "a_stock_600900_20260609105003": {
+      "id": "a_stock_600900_20260609105003",
+      "market": "a_stock",
+      "symbol": "600900",
+      "name": "长江电力",
+      "entry_price": 27.51,
+      "current_price": 26.66,
+      "quantity": 46.34678298800436,
+      "entry_time": "2026-06-09T03:50:03.588872+00:00",
+      "entry_reason": "RSI=55 中性 | MACD正柱 | 多头排列",
+      "stop_loss": 25.309200000000004,
+      "take_profit": 31.636499999999998,
+      "status": "open",
+      "avg_entry_price": 27.51,
+      "entry_prices": [
+        27.51
+      ],
+      "execution_strategy": ""
+    },
+    "a_stock_000001_20260609105003": {
+      "id": "a_stock_000001_20260609105003",
+      "market": "a_stock",
+      "symbol": "000001",
+      "name": "平安银行",
+      "entry_price": 11.03,
+      "current_price": 10.52,
+      "quantity": 95.19492293744334,
+      "entry_time": "2026-06-09T03:50:03.592841+00:00",
+      "entry_reason": "RSI=56 中性 | MACD正柱",
+      "stop_loss": 10.1476,
+      "take_profit": 12.684499999999998,
+      "status": "open",
+      "avg_entry_price": 11.03,
+      "entry_prices": [
+        11.03
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_BNB/USDT_20260609122144": {
+      "id": "crypto_BNB/USDT_20260609122144",
       "market": "crypto",
       "symbol": "BNB/USDT",
       "name": "BNB",
-      "entry_price": 605.72,
-      "current_price": 603.89,
-      "quantity": 2.4781070713574427,
-      "entry_time": "2026-06-08T23:13:47.261947+08:00",
-      "entry_reason": "[🐺] 1hMACD金叉 | 评分60",
-      "stop_loss": 575.434,
-      "take_profit": 654.1776000000001,
+      "entry_price": 602.9,
+      "current_price": 589.45,
+      "quantity": 0.3317299718029524,
+      "entry_time": "2026-06-09T05:21:44.374434+00:00",
+      "entry_reason": "[最小仓位] 信号=-0.148 | 全市场偏空中选最强, 自动建仓",
+      "stop_loss": 554.668,
+      "take_profit": 693.3349999999999,
       "status": "open",
-      "avg_entry_price": 605.72,
+      "avg_entry_price": 602.9,
       "entry_prices": [
-        605.72
+        602.9
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_BTC/USDT_20260610033744": {
+      "id": "crypto_BTC/USDT_20260610033744",
+      "market": "crypto",
+      "symbol": "BTC/USDT",
+      "name": "BTC",
+      "entry_price": 61914.0,
+      "current_price": 61538.01,
+      "quantity": 0.022757622025186653,
+      "entry_time": "2026-06-10T03:37:44.098328+08:00",
+      "entry_reason": "[🐺] 1hRSI偏低(42) | 低于布林中轨 | 评分63",
+      "stop_loss": 58818.299999999996,
+      "take_profit": 66867.12000000001,
+      "status": "closed",
+      "avg_entry_price": 61914.0,
+      "entry_prices": [
+        61914.0
       ],
       "execution_strategy": "aggressive"
     },
-    "crypto_ETH/USDT_20260608231848": {
-      "id": "crypto_ETH/USDT_20260608231848",
+    "crypto_XRP/USDT_20260610033744": {
+      "id": "crypto_XRP/USDT_20260610033744",
       "market": "crypto",
-      "symbol": "ETH/USDT",
-      "name": "ETH",
-      "entry_price": 1700.0,
-      "current_price": 1692.81,
-      "quantity": 0.6180748886375536,
-      "entry_time": "2026-06-08T23:18:48.591155+08:00",
-      "entry_reason": "[🐺] 1hMACD金叉 | 评分60",
-      "stop_loss": 1615.0,
-      "take_profit": 1836.0000000000002,
-      "status": "open",
-      "avg_entry_price": 1700.0,
+      "symbol": "XRP/USDT",
+      "name": "XRP",
+      "entry_price": 1.1422,
+      "current_price": 1.1139,
+      "quantity": 863.5184617818109,
+      "entry_time": "2026-06-10T03:37:44.098397+08:00",
+      "entry_reason": "[🐺] 1hRSI偏低(43) | 低于布林中轨 | 评分63",
+      "stop_loss": 1.08509,
+      "take_profit": 1.2335760000000002,
+      "status": "closed",
+      "avg_entry_price": 1.1422,
       "entry_prices": [
-        1700.0
+        1.1422
       ],
       "execution_strategy": "aggressive"
+    },
+    "hk_stock_03690_20260610144559": {
+      "id": "hk_stock_03690_20260610144559",
+      "market": "hk_stock",
+      "symbol": "03690",
+      "name": "美团",
+      "entry_price": 85.7,
+      "current_price": 77.9000015258789,
+      "quantity": 8.751458576429405,
+      "entry_time": "2026-06-10T07:45:59.402786+00:00",
+      "entry_reason": "MACD正柱 | MACD柱放大 | RSI=58(健康) | 波动适中(31%)",
+      "stop_loss": 78.84400000000001,
+      "take_profit": 98.55499999999999,
+      "status": "closed",
+      "avg_entry_price": 85.7,
+      "entry_prices": [
+        85.7
+      ],
+      "execution_strategy": ""
+    },
+    "hk_stock_01109_20260610144559": {
+      "id": "hk_stock_01109_20260610144559",
+      "market": "hk_stock",
+      "symbol": "01109",
+      "name": "华润置地",
+      "entry_price": 37.62,
+      "current_price": 37.279998779296875,
+      "quantity": 9.938197767145136,
+      "entry_time": "2026-06-10T07:45:59.410708+00:00",
+      "entry_reason": "MACD正柱 | 多头排列 | RSI=75(超买)⚠️ | 放量(1.7x)",
+      "stop_loss": 34.6104,
+      "take_profit": 43.26299999999999,
+      "status": "open",
+      "avg_entry_price": 37.62,
+      "entry_prices": [
+        37.62
+      ],
+      "execution_strategy": ""
+    },
+    "hk_stock_02020_20260615093550": {
+      "id": "hk_stock_02020_20260615093550",
+      "market": "hk_stock",
+      "symbol": "02020",
+      "name": "安踏体育",
+      "entry_price": 76.25,
+      "current_price": 76.25,
+      "quantity": 8.281548555132938,
+      "entry_time": "2026-06-15T02:35:50.188258+00:00",
+      "entry_reason": "MACD正柱 | MACD柱放大 | RSI=55(健康) | 波动适中(19%)",
+      "stop_loss": 70.15,
+      "take_profit": 87.6875,
+      "status": "open",
+      "avg_entry_price": 76.25,
+      "entry_prices": [
+        76.25
+      ],
+      "execution_strategy": ""
+    },
+    "us_stock_IWM_20260616005117": {
+      "id": "us_stock_IWM_20260616005117",
+      "market": "us_stock",
+      "symbol": "IWM",
+      "name": "罗素2000ETF ($295.07)",
+      "entry_price": 295.07000732421875,
+      "current_price": 293.7200012207031,
+      "quantity": 4.236282810765371,
+      "entry_time": "2026-06-15T17:51:17.129516+00:00",
+      "entry_reason": "RSI=55 健康 | MACD金叉 | 站上20日线 | 20日+6.3%",
+      "stop_loss": 271.46440673828124,
+      "take_profit": 339.33050842285155,
+      "status": "open",
+      "avg_entry_price": 295.07000732421875,
+      "entry_prices": [
+        295.07000732421875
+      ],
+      "execution_strategy": ""
+    },
+    "us_stock_SMH_20260616005117": {
+      "id": "us_stock_SMH_20260616005117",
+      "market": "us_stock",
+      "symbol": "SMH",
+      "name": "半导体ETF ($647.18)",
+      "entry_price": 647.1798706054688,
+      "current_price": 652.4749755859375,
+      "quantity": 0.9608997872851099,
+      "entry_time": "2026-06-15T17:51:17.146171+00:00",
+      "entry_reason": "RSI=59 健康 | 站上20日线 | 20日+16.3%",
+      "stop_loss": 595.4054809570313,
+      "take_profit": 744.256851196289,
+      "status": "open",
+      "avg_entry_price": 647.1798706054688,
+      "entry_prices": [
+        647.1798706054688
+      ],
+      "execution_strategy": ""
+    },
+    "us_stock_TLT_20260616005117": {
+      "id": "us_stock_TLT_20260616005117",
+      "market": "us_stock",
+      "symbol": "TLT",
+      "name": "长期国债ETF ($85.75)",
+      "entry_price": 85.7488021850586,
+      "current_price": 87.12000274658203,
+      "quantity": 3.608013227197111,
+      "entry_time": "2026-06-15T17:51:17.156423+00:00",
+      "entry_reason": "MACD金叉 | 站上20日线",
+      "stop_loss": 78.88889801025391,
+      "take_profit": 98.61112251281737,
+      "status": "open",
+      "avg_entry_price": 85.7488021850586,
+      "entry_prices": [
+        85.7488021850586
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_ETH/USDT_20260616005210": {
+      "id": "crypto_ETH/USDT_20260616005210",
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "name": "Ethereum",
+      "entry_price": 1830.44,
+      "current_price": 1831.02,
+      "quantity": 0.6366449447671059,
+      "entry_time": "2026-06-15T17:52:10.664501+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0440 | 动量因子: -9.60% (权重0.5)",
+      "stop_loss": 1684.0048000000002,
+      "take_profit": 2105.006,
+      "status": "closed",
+      "avg_entry_price": 1830.44,
+      "entry_prices": [
+        1830.44
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_ETH/USDT_20260616012316": {
+      "id": "crypto_ETH/USDT_20260616012316",
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "name": "Ethereum",
+      "entry_price": 1831.68,
+      "current_price": 1831.33,
+      "quantity": 0.6359461935035737,
+      "entry_time": "2026-06-15T18:23:16.725627+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0449 | 动量因子: -9.54% (权重0.5)",
+      "stop_loss": 1685.1456,
+      "take_profit": 2106.432,
+      "status": "closed",
+      "avg_entry_price": 1831.68,
+      "entry_prices": [
+        1831.68
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_ETH/USDT_20260616015418": {
+      "id": "crypto_ETH/USDT_20260616015418",
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "name": "Ethereum",
+      "entry_price": 1831.17,
+      "current_price": 1819.5,
+      "quantity": 0.6357748920679827,
+      "entry_time": "2026-06-15T18:54:18.008355+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0450 | 动量因子: -9.56% (权重0.5)",
+      "stop_loss": 1684.6764,
+      "take_profit": 2105.8455,
+      "status": "closed",
+      "avg_entry_price": 1831.17,
+      "entry_prices": [
+        1831.17
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_ETH/USDT_20260616022515": {
+      "id": "crypto_ETH/USDT_20260616022515",
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "name": "Ethereum",
+      "entry_price": 1819.02,
+      "current_price": 1824.43,
+      "quantity": 0.6386827988582936,
+      "entry_time": "2026-06-15T19:25:15.318269+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0397 | 动量因子: -10.16% (权重0.5)",
+      "stop_loss": 1673.4984,
+      "take_profit": 2091.8729999999996,
+      "status": "closed",
+      "avg_entry_price": 1819.02,
+      "entry_prices": [
+        1819.02
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_ETH/USDT_20260616025612": {
+      "id": "crypto_ETH/USDT_20260616025612",
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "name": "Ethereum",
+      "entry_price": 1822.86,
+      "current_price": 1790.06,
+      "quantity": 0.6374921009039608,
+      "entry_time": "2026-06-15T19:56:12.269945+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0419 | 动量因子: -9.98% (权重0.5)",
+      "stop_loss": 1677.0312,
+      "take_profit": 2096.2889999999998,
+      "status": "closed",
+      "avg_entry_price": 1822.86,
+      "entry_prices": [
+        1822.86
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_ETH/USDT_20260616060034": {
+      "id": "crypto_ETH/USDT_20260616060034",
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "name": "Ethereum",
+      "entry_price": 1790.52,
+      "current_price": 1789.01,
+      "quantity": 0.645765260279741,
+      "entry_time": "2026-06-15T23:00:34.195537+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0279 | 动量因子: -11.57% (权重0.5)",
+      "stop_loss": 1647.2784000000001,
+      "take_profit": 2059.098,
+      "status": "closed",
+      "avg_entry_price": 1790.52,
+      "entry_prices": [
+        1790.52
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_ETH/USDT_20260616063132": {
+      "id": "crypto_ETH/USDT_20260616063132",
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "name": "Ethereum",
+      "entry_price": 1788.28,
+      "current_price": 1797.41,
+      "quantity": 0.6461146763481077,
+      "entry_time": "2026-06-15T23:31:32.148982+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0271 | 动量因子: -11.68% (权重0.5)",
+      "stop_loss": 1645.2176,
+      "take_profit": 2056.522,
+      "status": "closed",
+      "avg_entry_price": 1788.28,
+      "entry_prices": [
+        1788.28
+      ],
+      "execution_strategy": ""
+    },
+    "a_stock_601888_20260616093749": {
+      "id": "a_stock_601888_20260616093749",
+      "market": "a_stock",
+      "symbol": "601888",
+      "name": "中国中免",
+      "entry_price": 59.08,
+      "current_price": 55.33,
+      "quantity": 11.92588862559242,
+      "entry_time": "2026-06-16T02:37:49.367214+00:00",
+      "entry_reason": "RSI=58 中性 | MACD正柱",
+      "stop_loss": 54.3536,
+      "take_profit": 67.942,
+      "status": "open",
+      "avg_entry_price": 59.08,
+      "entry_prices": [
+        59.08
+      ],
+      "execution_strategy": ""
+    },
+    "hk_stock_00939_20260616093754": {
+      "id": "hk_stock_00939_20260616093754",
+      "market": "hk_stock",
+      "symbol": "00939",
+      "name": "建设银行",
+      "entry_price": 8.979999542236328,
+      "current_price": 8.979999542236328,
+      "quantity": 28.00118053566657,
+      "entry_time": "2026-06-16T02:37:54.392174+00:00",
+      "entry_reason": "MACD正柱 | MACD柱放大 | RSI=58(健康) | 波动适中(19%)",
+      "stop_loss": 8.261599578857423,
+      "take_profit": 10.326999473571776,
+      "status": "open",
+      "avg_entry_price": 8.979999542236328,
+      "entry_prices": [
+        8.979999542236328
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616144658": {
+      "id": "crypto_SOL/USDT_20260616144658",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 74.37,
+      "current_price": 75.0,
+      "quantity": 11.648334094076786,
+      "entry_time": "2026-06-16T07:46:58.540756+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0011 | 动量因子: -9.43% (权重0.5)",
+      "stop_loss": 68.4204,
+      "take_profit": 85.5255,
+      "status": "closed",
+      "avg_entry_price": 74.37,
+      "entry_prices": [
+        74.37
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616151756": {
+      "id": "crypto_SOL/USDT_20260616151756",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 75.04,
+      "current_price": 75.12,
+      "quantity": 11.562982959493597,
+      "entry_time": "2026-06-16T08:17:56.084894+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0091 | 动量因子: -8.61% (权重0.5)",
+      "stop_loss": 69.03680000000001,
+      "take_profit": 86.296,
+      "status": "closed",
+      "avg_entry_price": 75.04,
+      "entry_prices": [
+        75.04
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616154852": {
+      "id": "crypto_SOL/USDT_20260616154852",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 75.15,
+      "current_price": 75.1,
+      "quantity": 11.543358969518165,
+      "entry_time": "2026-06-16T08:48:52.941947+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0109 | 动量因子: -8.48% (权重0.5)",
+      "stop_loss": 69.138,
+      "take_profit": 86.4225,
+      "status": "closed",
+      "avg_entry_price": 75.15,
+      "entry_prices": [
+        75.15
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616161949": {
+      "id": "crypto_SOL/USDT_20260616161949",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 75.09,
+      "current_price": 74.91,
+      "quantity": 11.544886631387383,
+      "entry_time": "2026-06-16T09:19:49.183347+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0111 | 动量因子: -8.55% (权重0.5)",
+      "stop_loss": 69.0828,
+      "take_profit": 86.3535,
+      "status": "closed",
+      "avg_entry_price": 75.09,
+      "entry_prices": [
+        75.09
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616165045": {
+      "id": "crypto_SOL/USDT_20260616165045",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 74.85,
+      "current_price": 75.1,
+      "quantity": 11.56917947900854,
+      "entry_time": "2026-06-16T09:50:45.767354+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0088 | 动量因子: -8.84% (权重0.5)",
+      "stop_loss": 68.862,
+      "take_profit": 86.07749999999999,
+      "status": "closed",
+      "avg_entry_price": 74.85,
+      "entry_prices": [
+        74.85
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616172148": {
+      "id": "crypto_SOL/USDT_20260616172148",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 75.07,
+      "current_price": 75.02,
+      "quantity": 11.539129587125457,
+      "entry_time": "2026-06-16T10:21:48.942043+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0117 | 动量因子: -8.57% (权重0.5)",
+      "stop_loss": 69.06439999999999,
+      "take_profit": 86.33049999999999,
+      "status": "closed",
+      "avg_entry_price": 75.07,
+      "entry_prices": [
+        75.07
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616174301": {
+      "id": "crypto_SOL/USDT_20260616174301",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 75.01,
+      "current_price": 74.63,
+      "quantity": 11.540664471346965,
+      "entry_time": "2026-06-16T10:43:01.822961+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #2/4 | 综合Alpha: 0.0112 | 动量因子: -8.65% (权重0.5)",
+      "stop_loss": 69.0092,
+      "take_profit": 86.2615,
+      "status": "closed",
+      "avg_entry_price": 75.01,
+      "entry_prices": [
+        75.01
+      ],
+      "execution_strategy": ""
+    },
+    "b_stock_MUB/USDT_20260616174337": {
+      "id": "b_stock_MUB/USDT_20260616174337",
+      "market": "b_stock",
+      "symbol": "MUB/USDT",
+      "name": "微策略·b ($1128.27)",
+      "entry_price": 8123.544,
+      "current_price": 7463.016,
+      "quantity": 0.08616928769020024,
+      "entry_time": "2026-06-16T10:43:37.638459+00:00",
+      "entry_reason": "站上5日线 | 1日+4.2% | 🆕 bStocks新品 (上线<1周)",
+      "stop_loss": 7473.6604800000005,
+      "take_profit": 9342.075599999998,
+      "status": "closed",
+      "avg_entry_price": 8123.544,
+      "entry_prices": [
+        8123.544
+      ],
+      "execution_strategy": ""
+    },
+    "b_stock_NVDAB/USDT_20260616174337": {
+      "id": "b_stock_NVDAB/USDT_20260616174337",
+      "market": "b_stock",
+      "symbol": "NVDAB/USDT",
+      "name": "英伟达·b ($212.06)",
+      "entry_price": 1526.832,
+      "current_price": 1496.448,
+      "quantity": 0.26198036195206803,
+      "entry_time": "2026-06-16T10:43:37.660509+00:00",
+      "entry_reason": "站上5日线 | 🆕 bStocks新品 (上线<1周)",
+      "stop_loss": 1404.6854400000002,
+      "take_profit": 1755.8568,
+      "status": "open",
+      "avg_entry_price": 1526.832,
+      "entry_prices": [
+        1526.832
+      ],
+      "execution_strategy": ""
+    },
+    "b_stock_CRCLB/USDT_20260616174337": {
+      "id": "b_stock_CRCLB/USDT_20260616174337",
+      "market": "b_stock",
+      "symbol": "CRCLB/USDT",
+      "name": "Circle·b ($84.63)",
+      "entry_price": 609.336,
+      "current_price": 568.8000000000001,
+      "quantity": 0.32822613467774764,
+      "entry_time": "2026-06-16T10:43:37.673421+00:00",
+      "entry_reason": "站上5日线 | 🆕 bStocks新品 (上线<1周)",
+      "stop_loss": 560.58912,
+      "take_profit": 700.7364,
+      "status": "open",
+      "avg_entry_price": 609.336,
+      "entry_prices": [
+        609.336
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616181402": {
+      "id": "crypto_SOL/USDT_20260616181402",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 74.64,
+      "current_price": 74.73,
+      "quantity": 11.577400088599742,
+      "entry_time": "2026-06-16T11:14:02.169931+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0075 | 动量因子: -9.10% (权重0.5)",
+      "stop_loss": 68.6688,
+      "take_profit": 85.836,
+      "status": "closed",
+      "avg_entry_price": 74.64,
+      "entry_prices": [
+        74.64
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616181854": {
+      "id": "crypto_SOL/USDT_20260616181854",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 74.72,
+      "current_price": 74.45,
+      "quantity": 11.562704832069992,
+      "entry_time": "2026-06-16T11:18:54.130788+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0084 | 动量因子: -9.00% (权重0.5)",
+      "stop_loss": 68.7424,
+      "take_profit": 85.928,
+      "status": "closed",
+      "avg_entry_price": 74.72,
+      "entry_prices": [
+        74.72
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616184953": {
+      "id": "crypto_SOL/USDT_20260616184953",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 74.46,
+      "current_price": 75.01,
+      "quantity": 11.58680661168621,
+      "entry_time": "2026-06-16T11:49:53.715623+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #2/4 | 综合Alpha: 0.0059 | 动量因子: -9.32% (权重0.5)",
+      "stop_loss": 68.50319999999999,
+      "take_profit": 85.62899999999999,
+      "status": "closed",
+      "avg_entry_price": 74.46,
+      "entry_prices": [
+        74.46
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616192056": {
+      "id": "crypto_SOL/USDT_20260616192056",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 75.06,
+      "current_price": 74.8,
+      "quantity": 11.509643434841458,
+      "entry_time": "2026-06-16T12:20:56.893649+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #2/4 | 综合Alpha: 0.0133 | 动量因子: -8.59% (权重0.5)",
+      "stop_loss": 69.0552,
+      "take_profit": 86.319,
+      "status": "closed",
+      "avg_entry_price": 75.06,
+      "entry_prices": [
+        75.06
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616195155": {
+      "id": "crypto_SOL/USDT_20260616195155",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 74.8,
+      "current_price": 74.17,
+      "quantity": 11.53388369792311,
+      "entry_time": "2026-06-16T12:51:55.766577+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #2/4 | 综合Alpha: 0.0112 | 动量因子: -8.90% (权重0.5)",
+      "stop_loss": 68.816,
+      "take_profit": 86.02,
+      "status": "closed",
+      "avg_entry_price": 74.8,
+      "entry_prices": [
+        74.8
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616202255": {
+      "id": "crypto_SOL/USDT_20260616202255",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 74.18,
+      "current_price": 73.99,
+      "quantity": 11.600004896988485,
+      "entry_time": "2026-06-16T13:22:55.486504+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #2/4 | 综合Alpha: 0.0052 | 动量因子: -9.66% (权重0.5)",
+      "stop_loss": 68.24560000000001,
+      "take_profit": 85.307,
+      "status": "closed",
+      "avg_entry_price": 74.18,
+      "entry_prices": [
+        74.18
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260616205356": {
+      "id": "crypto_SOL/USDT_20260616205356",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 74.04,
+      "current_price": 73.14,
+      "quantity": 11.608693541931418,
+      "entry_time": "2026-06-16T13:53:56.509157+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #2/4 | 综合Alpha: 0.0046 | 动量因子: -9.83% (权重0.5)",
+      "stop_loss": 68.11680000000001,
+      "take_profit": 85.146,
+      "status": "closed",
+      "avg_entry_price": 74.04,
+      "entry_prices": [
+        74.04
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260617010236": {
+      "id": "crypto_SOL/USDT_20260617010236",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 74.1,
+      "current_price": 73.81,
+      "quantity": 11.55828032279072,
+      "entry_time": "2026-06-16T18:02:36.369631+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #2/4 | 综合Alpha: 0.0106 | 动量因子: -9.76% (权重0.5)",
+      "stop_loss": 68.172,
+      "take_profit": 85.21499999999999,
+      "status": "closed",
+      "avg_entry_price": 74.1,
+      "entry_prices": [
+        74.1
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_ETH/USDT_20260617013334": {
+      "id": "crypto_ETH/USDT_20260617013334",
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "name": "Ethereum",
+      "entry_price": 1796.78,
+      "current_price": 1792.56,
+      "quantity": 0.6373880564918151,
+      "entry_time": "2026-06-16T18:33:34.548704+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0397 | 动量因子: -10.60% (权重0.5)",
+      "stop_loss": 1653.0376,
+      "take_profit": 2066.297,
+      "status": "closed",
+      "avg_entry_price": 1796.78,
+      "entry_prices": [
+        1796.78
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_ETH/USDT_20260617023537": {
+      "id": "crypto_ETH/USDT_20260617023537",
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "name": "Ethereum",
+      "entry_price": 1799.57,
+      "current_price": 1796.47,
+      "quantity": 0.6357083731847566,
+      "entry_time": "2026-06-16T19:35:37.048392+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0415 | 动量因子: -10.46% (权重0.5)",
+      "stop_loss": 1655.6044,
+      "take_profit": 2069.5054999999998,
+      "status": "closed",
+      "avg_entry_price": 1799.57,
+      "entry_prices": [
+        1799.57
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_ETH/USDT_20260617060026": {
+      "id": "crypto_ETH/USDT_20260617060026",
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "name": "Ethereum",
+      "entry_price": 1796.79,
+      "current_price": 1795.0,
+      "quantity": 0.6360996749527198,
+      "entry_time": "2026-06-16T23:00:26.226016+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0414 | 动量因子: -10.60% (权重0.5)",
+      "stop_loss": 1653.0468,
+      "take_profit": 2066.3084999999996,
+      "status": "closed",
+      "avg_entry_price": 1796.79,
+      "entry_prices": [
+        1796.79
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260617070226": {
+      "id": "crypto_SOL/USDT_20260617070226",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 73.58,
+      "current_price": 73.59,
+      "quantity": 15.521632185932067,
+      "entry_time": "2026-06-17T00:02:26.462524+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0067 | 动量因子: -10.31% (权重0.5)",
+      "stop_loss": 67.6936,
+      "take_profit": 84.61699999999999,
+      "status": "closed",
+      "avg_entry_price": 73.58,
+      "entry_prices": [
+        73.58
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260617073325": {
+      "id": "crypto_SOL/USDT_20260617073325",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 73.62,
+      "current_price": 73.46,
+      "quantity": 15.505968767578718,
+      "entry_time": "2026-06-17T00:33:25.012802+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0074 | 动量因子: -10.26% (权重0.5)",
+      "stop_loss": 67.7304,
+      "take_profit": 84.663,
+      "status": "closed",
+      "avg_entry_price": 73.62,
+      "entry_prices": [
+        73.62
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_AVAX/USDT_20260617080422": {
+      "id": "crypto_AVAX/USDT_20260617080422",
+      "market": "crypto",
+      "symbol": "AVAX/USDT",
+      "name": "Avalanche",
+      "entry_price": 6.917,
+      "current_price": 6.611,
+      "quantity": 164.86323947475182,
+      "entry_time": "2026-06-17T01:04:22.847073+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0032 | 动量因子: -21.64% (权重0.5)",
+      "stop_loss": 6.36364,
+      "take_profit": 7.954549999999999,
+      "status": "open",
+      "avg_entry_price": 6.917,
+      "entry_prices": [
+        6.917
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_SOL/USDT_20260617083530": {
+      "id": "crypto_SOL/USDT_20260617083530",
+      "market": "crypto",
+      "symbol": "SOL/USDT",
+      "name": "Solana",
+      "entry_price": 73.36,
+      "current_price": 71.04,
+      "quantity": 11.654637143242667,
+      "entry_time": "2026-06-17T01:35:30.625298+00:00",
+      "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0015 | 动量因子: -10.58% (权重0.5)",
+      "stop_loss": 67.4912,
+      "take_profit": 84.36399999999999,
+      "status": "open",
+      "avg_entry_price": 73.36,
+      "entry_prices": [
+        73.36
+      ],
+      "execution_strategy": ""
+    },
+    "b_stock_SNDKB/USDT_20260617123348": {
+      "id": "b_stock_SNDKB/USDT_20260617123348",
+      "market": "b_stock",
+      "symbol": "SNDKB/USDT",
+      "name": "闪迪·b ($2049.92)",
+      "entry_price": 14759.424,
+      "current_price": 15117.983999999999,
+      "quantity": 0.006775332153883513,
+      "entry_time": "2026-06-17T05:33:48.582578+00:00",
+      "entry_reason": "站上5日线 | 🆕 bStocks新品 (上线<1周)",
+      "stop_loss": 13578.670080000002,
+      "take_profit": 16973.3376,
+      "status": "open",
+      "avg_entry_price": 14759.424,
+      "entry_prices": [
+        14759.424
+      ],
+      "execution_strategy": ""
+    },
+    "b_stock_MUB/USDT_20260617212408": {
+      "id": "b_stock_MUB/USDT_20260617212408",
+      "market": "b_stock",
+      "symbol": "MUB/USDT",
+      "name": "微策略·b ($1043.04)",
+      "entry_price": 7509.888,
+      "current_price": 7969.8240000000005,
+      "quantity": 0.049473625488194194,
+      "entry_time": "2026-06-17T14:24:08.665384+00:00",
+      "entry_reason": "站上5日线 | 🆕 bStocks新品 (上线<1周)",
+      "stop_loss": 6909.09696,
+      "take_profit": 8636.3712,
+      "status": "open",
+      "avg_entry_price": 7509.888,
+      "entry_prices": [
+        7509.888
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_NEAR/USDT_20260618070636": {
+      "id": "crypto_NEAR/USDT_20260618070636",
+      "market": "crypto",
+      "symbol": "NEAR/USDT",
+      "name": "NEAR",
+      "entry_price": 2.19,
+      "current_price": 2.246,
+      "quantity": 117.0820802878547,
+      "entry_time": "2026-06-18T00:06:36.636108+00:00",
+      "entry_reason": "[激进交易] 1hRSI超卖(30) | 4hRSI超卖(35) | 触布林下轨 | 超跌反弹(-3.2%)",
+      "stop_loss": 2.0148,
+      "take_profit": 2.5185,
+      "status": "open",
+      "avg_entry_price": 2.19,
+      "entry_prices": [
+        2.19
+      ],
+      "execution_strategy": ""
+    },
+    "crypto_ATOM/USDT_20260618072013": {
+      "id": "crypto_ATOM/USDT_20260618072013",
+      "market": "crypto",
+      "symbol": "ATOM/USDT",
+      "name": "ATOM",
+      "entry_price": 1.903,
+      "current_price": 1.828,
+      "quantity": 121.25230650119734,
+      "entry_time": "2026-06-18T00:20:13.052086+00:00",
+      "entry_reason": "[激进交易] 1hRSI超卖(25) | 4hRSI超卖(29) | 触布林下轨",
+      "stop_loss": 1.75076,
+      "take_profit": 2.18845,
+      "status": "open",
+      "avg_entry_price": 1.903,
+      "entry_prices": [
+        1.903
+      ],
+      "execution_strategy": ""
+    },
+    "a_stock_002415_20260618093822": {
+      "id": "a_stock_002415_20260618093822",
+      "market": "a_stock",
+      "symbol": "002415",
+      "name": "海康威视",
+      "entry_price": 32.36,
+      "current_price": 32.3,
+      "quantity": 8.705370065822004,
+      "entry_time": "2026-06-18T02:38:22.781679+00:00",
+      "entry_reason": "MACD正柱 | 10日+5.2%",
+      "stop_loss": 29.7712,
+      "take_profit": 37.214,
+      "status": "open",
+      "avg_entry_price": 32.36,
+      "entry_prices": [
+        32.36
+      ],
+      "execution_strategy": ""
     }
   },
   "initial_capital": 10000.0,
-  "created_at": "2026-06-08T11:25:00.000000+00:00",
-  "updated_at": "2026-06-08T23:33:53.260990+08:00"
+  "created_at": "2026-06-08T11:25:00.000000+00:00"
 }

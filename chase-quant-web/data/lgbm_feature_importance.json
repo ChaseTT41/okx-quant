@@ -1,247 +1,247 @@
 {
   "trend": [
     {
+      "feature": "mom_14d",
+      "importance": 133.0
+    },
+    {
       "feature": "mom_20d",
-      "importance": 118.0
+      "importance": 102.0
     },
     {
       "feature": "mom_10d",
-      "importance": 115.0
+      "importance": 99.0
     },
     {
       "feature": "mom_5d",
-      "importance": 110.0
-    },
-    {
-      "feature": "mom_7d",
-      "importance": 76.0
-    },
-    {
-      "feature": "mom_2d",
-      "importance": 74.0
-    },
-    {
-      "feature": "mom_14d",
-      "importance": 67.0
+      "importance": 97.0
     },
     {
       "feature": "mom_1d",
-      "importance": 49.0
+      "importance": 97.0
     },
     {
       "feature": "mom_3d",
-      "importance": 48.0
+      "importance": 94.0
+    },
+    {
+      "feature": "mom_7d",
+      "importance": 83.0
+    },
+    {
+      "feature": "mom_2d",
+      "importance": 71.0
     }
   ],
   "reversal": [
     {
       "feature": "ma_dist_100_200",
-      "importance": 145.0
+      "importance": 211.0
     },
     {
       "feature": "ma_dist_50_100",
-      "importance": 110.0
-    },
-    {
-      "feature": "ma_dist_5_20",
-      "importance": 94.0
-    },
-    {
-      "feature": "ma_dist_10_20",
-      "importance": 79.0
-    },
-    {
-      "feature": "ma_dist_20_100",
-      "importance": 67.0
+      "importance": 134.0
     },
     {
       "feature": "ma_dist_20_60",
-      "importance": 61.0
-    },
-    {
-      "feature": "ma_dist_5_60",
-      "importance": 48.0
+      "importance": 103.0
     },
     {
       "feature": "ma_dist_10_50",
-      "importance": 36.0
+      "importance": 99.0
+    },
+    {
+      "feature": "ma_dist_5_20",
+      "importance": 96.0
+    },
+    {
+      "feature": "ma_dist_10_20",
+      "importance": 80.0
+    },
+    {
+      "feature": "ma_dist_20_100",
+      "importance": 56.0
+    },
+    {
+      "feature": "ma_dist_5_60",
+      "importance": 40.0
     }
   ],
   "volume": [
     {
+      "feature": "obv_mom_20d",
+      "importance": 151.0
+    },
+    {
       "feature": "vol_ratio_20_100",
-      "importance": 112.0
+      "importance": 127.0
     },
     {
       "feature": "vol_ratio_10_50",
-      "importance": 100.0
+      "importance": 119.0
     },
     {
       "feature": "vol_trend_10d",
-      "importance": 94.0
-    },
-    {
-      "feature": "obv_mom_20d",
-      "importance": 94.0
+      "importance": 104.0
     },
     {
       "feature": "obv_mom_10d",
-      "importance": 91.0
+      "importance": 92.0
     },
     {
       "feature": "obv_mom_5d",
-      "importance": 84.0
-    },
-    {
-      "feature": "vol_ratio_5_20",
-      "importance": 82.0
+      "importance": 86.0
     },
     {
       "feature": "vol_ratio_5_50",
-      "importance": 55.0
+      "importance": 79.0
+    },
+    {
+      "feature": "vol_ratio_5_20",
+      "importance": 60.0
     }
   ],
   "vol_breakout": [
     {
       "feature": "vol_60d",
-      "importance": 135.0
-    },
-    {
-      "feature": "vol_120d",
-      "importance": 130.0
-    },
-    {
-      "feature": "vol_30d",
-      "importance": 93.0
-    },
-    {
-      "feature": "vol_14d",
-      "importance": 78.0
-    },
-    {
-      "feature": "vol_10d",
-      "importance": 77.0
+      "importance": 147.0
     },
     {
       "feature": "vol_90d",
-      "importance": 76.0
+      "importance": 115.0
+    },
+    {
+      "feature": "vol_30d",
+      "importance": 103.0
+    },
+    {
+      "feature": "vol_10d",
+      "importance": 103.0
+    },
+    {
+      "feature": "vol_120d",
+      "importance": 99.0
+    },
+    {
+      "feature": "vol_14d",
+      "importance": 94.0
     },
     {
       "feature": "vol_20d",
-      "importance": 65.0
+      "importance": 79.0
     },
     {
       "feature": "vol_5d",
-      "importance": 54.0
+      "importance": 79.0
     }
   ],
   "tail_risk": [
     {
+      "feature": "kurt_120d",
+      "importance": 164.0
+    },
+    {
       "feature": "skew_120d",
-      "importance": 140.0
+      "importance": 145.0
     },
     {
       "feature": "kurt_60d",
-      "importance": 129.0
-    },
-    {
-      "feature": "kurt_120d",
-      "importance": 92.0
+      "importance": 139.0
     },
     {
       "feature": "skew_60d",
-      "importance": 90.0
+      "importance": 124.0
     },
     {
       "feature": "kurt_20d",
-      "importance": 79.0
+      "importance": 121.0
     },
     {
       "feature": "skew_20d",
-      "importance": 72.0
+      "importance": 103.0
     },
     {
       "feature": "tail_events_60d_2s",
-      "importance": 28.0
+      "importance": 51.0
     },
     {
       "feature": "tail_events_20d_2s",
-      "importance": 13.0
+      "importance": 15.0
     }
   ],
   "momentum_enhanced": [
     {
-      "feature": "autocorr_3d",
-      "importance": 100.0
+      "feature": "autocorr_20d",
+      "importance": 166.0
+    },
+    {
+      "feature": "autocorr_5d",
+      "importance": 140.0
     },
     {
       "feature": "autocorr_10d",
-      "importance": 91.0
+      "importance": 127.0
     },
     {
-      "feature": "autocorr_1d",
-      "importance": 74.0
-    },
-    {
-      "feature": "autocorr_20d",
-      "importance": 68.0
+      "feature": "autocorr_3d",
+      "importance": 106.0
     },
     {
       "feature": "hurst_120d",
+      "importance": 90.0
+    },
+    {
+      "feature": "autocorr_1d",
+      "importance": 77.0
+    },
+    {
+      "feature": "hurst_20d",
       "importance": 66.0
     },
     {
       "feature": "hurst_60d",
-      "importance": 64.0
-    },
-    {
-      "feature": "hurst_20d",
       "importance": 58.0
-    },
-    {
-      "feature": "autocorr_5d",
-      "importance": 56.0
     }
   ],
   "cross_market": [
     {
-      "feature": "btc_eth_beta_10d",
-      "importance": 91.0
+      "feature": "btc_eth_beta_20d",
+      "importance": 98.0
     },
     {
       "feature": "corr_SPY_20d",
       "importance": 89.0
     },
     {
-      "feature": "btc_eth_beta_20d",
-      "importance": 80.0
+      "feature": "btc_eth_beta_60d",
+      "importance": 84.0
     },
     {
-      "feature": "btc_eth_beta_60d",
-      "importance": 74.0
+      "feature": "btc_eth_beta_10d",
+      "importance": 77.0
     },
     {
       "feature": "btc_eth_corr_20d",
-      "importance": 72.0
+      "importance": 68.0
     },
     {
       "feature": "btc_eth_corr_60d",
-      "importance": 59.0
-    },
-    {
-      "feature": "corr_SPY_10d",
-      "importance": 57.0
+      "importance": 64.0
     },
     {
       "feature": "btc_eth_corr_10d",
-      "importance": 54.0
+      "importance": 60.0
     },
     {
-      "feature": "btc_eth_residual_20d",
-      "importance": 48.0
+      "feature": "corr_SPY_10d",
+      "importance": 58.0
     },
     {
       "feature": "beta_SPY_10d",
+      "importance": 53.0
+    },
+    {
+      "feature": "btc_eth_residual_60d",
       "importance": 47.0
     }
   ]

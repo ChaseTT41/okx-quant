@@ -32,7 +32,7 @@ STRATEGY_CONFIG = {
     "ml_momentum": True,           # ML融合动量策略
     "mean_reversion_grid": True,   # 均值回归网格策略
     "cross_market_alpha": True,    # 跨市场Alpha套利
-    "aggressive": False,           # 激进交易 (默认关闭，5分钟扫描+大仓位)
+    "aggressive": True,            # 激进交易 (Fix #1: 开启，多时间框架RSI+MACD+布林带)
 }
 
 # ── 需要拉取数据的币种 (所有策略覆盖的币种并集) ──

@@ -657,32 +657,38 @@ def build_derivatives_features() -> List[Feature]:
     """衍生品: 资金费率 + 未平仓合约 + 期权偏斜proxy"""
     features = []
 
-    # 资金费率 (Binance perpetuals)
+    # 资金费率 — Fix #3: 从 _SENTIMENT_CTX 读取 OKX 实时数据
     for lookback in [1, 3, 8, 24]:  # hours
         features.append(Feature(
             id=f"funding_rate_{lookback}h", name=f"资金费率 {lookback}h均值",
             category="H",
-            description=f"过去{lookback}小时平均资金费率",
+            description=f"过去{lookback}小时平均资金费率 (OKX实时)",
             compute_fn=lambda df, lookback=lookback:
-                0.0,  # 需要ccxt futures API, 占位
+                _SENTIMENT_CTX.get("funding_rates", {}).get(
+                    _SENTIMENT_CTX.get("current_symbol", ""), 0.0
+                ),
         ))
 
-    # OI变化率
+    # OI变化率 — Fix #3: 从 _SENTIMENT_CTX 读取
     for w in [1, 3, 7, 14]:
         features.append(Feature(
             id=f"oi_change_{w}d", name=f"OI {w}日变化",
             category="H",
-            description=f"未平仓合约{w}日变化率",
+            description=f"未平仓合约{w}日变化率 (OKX实时)",
             compute_fn=lambda df, w=w:
-                0.0,  # 需要ccxt futures API, 占位
+                _SENTIMENT_CTX.get("oi_changes", {}).get(
+                    _SENTIMENT_CTX.get("current_symbol", ""), {}
+                ).get(w, 0.0),
         ))
 
-    # OI/成交量比
+    # OI/成交量比 — Fix #3: 从 _SENTIMENT_CTX 读取
     features.append(Feature(
         id="oi_vol_ratio", name="OI/成交量比",
         category="H",
-        description="未平仓合约与成交量的比值 (杠杆热度proxy)",
-        compute_fn=lambda df: 0.0,
+        description="未平仓合约与成交量的比值 (杠杆热度proxy, OKX实时)",
+        compute_fn=lambda df: _SENTIMENT_CTX.get("funding_rates", {}).get(
+            _SENTIMENT_CTX.get("current_symbol", ""), 0.0
+        ) * 100,  # 年化费率*100 作为杠杆热度 proxy
     ))
 
     # 期权隐含波动率偏斜proxy (用BTC价格偏度+极端值)
@@ -706,36 +712,42 @@ def build_sentiment_features() -> List[Feature]:
     """情绪: Fear & Greed + 变化率 + 极端值"""
     features = []
 
-    # F&G 变化率 (不是绝对值!)
+    # F&G 变化率 — Fix #3: 从 _SENTIMENT_CTX 读取实时数据
+    fg_now = _SENTIMENT_CTX.get("fg_value", 50)
     for w in [1, 3, 5, 7, 14]:
+        fg_prev = _SENTIMENT_CTX.get(f"fg_prev_{w}d", fg_now)
         features.append(Feature(
-            id="fg_change_{w}d", name=f"F&G {w}日变化",
+            id=f"fg_change_{w}d", name=f"F&G {w}日变化",
             category="I",
             description=f"Fear & Greed Index 的{w}日变化量 (>0=情绪改善)",
-            compute_fn=lambda df, w=w:
-                0.0,  # 需要Alternative.me API, 占位
+            compute_fn=lambda df, w=w, fg_now=fg_now, fg_prev=fg_prev:
+                fg_now - fg_prev,  # Fix #3: 接入实时 F&G 数据
         ))
 
-    # F&G 极端值标志
+    # F&G 极端值标志 — Fix #3: 接入实时 F&G 数据
     features.append(Feature(
         id="fg_extreme_fear", name="F&G 极度恐惧",
         category="I",
         description="当前F&G ≤ 25 (极度恐惧 → 逆势买入信号)",
-        compute_fn=lambda df: 0.0,
+        compute_fn=lambda df: 1.0 if _SENTIMENT_CTX.get("fg_value", 50) <= 25 else 0.0,
     ))
     features.append(Feature(
         id="fg_extreme_greed", name="F&G 极度贪婪",
         category="I",
         description="当前F&G ≥ 75 (极度贪婪 → 减仓信号)",
-        compute_fn=lambda df: 0.0,
+        compute_fn=lambda df: 1.0 if _SENTIMENT_CTX.get("fg_value", 50) >= 75 else 0.0,
     ))
 
-    # F&G 反转信号
+    # F&G 反转信号 — Fix #3: 接入实时 F&G 数据
     features.append(Feature(
         id="fg_reversal", name="F&G 反转信号",
         category="I",
         description="F&G从极恐反弹(≤25→>30)或从极贪回落(≥75→<70)",
-        compute_fn=lambda df: 0.0,
+        compute_fn=lambda df: (
+            1.0 if (_SENTIMENT_CTX.get("fg_value", 50) > 30 and _SENTIMENT_CTX.get("fg_prev_1d", 50) <= 25)
+            else -1.0 if (_SENTIMENT_CTX.get("fg_value", 50) < 70 and _SENTIMENT_CTX.get("fg_prev_1d", 50) >= 75)
+            else 0.0
+        ),
     ))
 
     return features
@@ -1317,6 +1329,29 @@ def _up_down_ratio(close: np.ndarray, window: int) -> np.ndarray:
     return result
 
 
+# ═══════════════════════════════════════════════════════════
+# Fix #3: 情绪数据上下文 (由 daemon 每轮扫描前注入)
+# ═══════════════════════════════════════════════════════════
+_SENTIMENT_CTX: Dict[str, any] = {
+    "fg_value": 50,          # Fear & Greed 当前值 0-100
+    "fg_prev_1d": 50,        # 1天前F&G
+    "fg_prev_3d": 50,
+    "fg_prev_5d": 50,
+    "fg_prev_7d": 50,
+    "fg_prev_14d": 50,
+    "funding_rates": {},     # {symbol: annualized_rate}
+    "oi_changes": {},        # {symbol: {1: pct, 3: pct, 7: pct, 14: pct}}
+    "current_symbol": None,  # 当前正在计算特征的标的
+}
+
+def set_sentiment_context(**kwargs):
+    """由 daemon 调用，注入实时情绪数据"""
+    _SENTIMENT_CTX.update(kwargs)
+
+def _get_current_symbol():
+    return _SENTIMENT_CTX.get("current_symbol", "")
+
+
 class FeatureFactory:
     """500+特征生成器"""
 
@@ -1353,12 +1388,14 @@ class FeatureFactory:
         self._available_count = sum(1 for f in self.features if f.compute_fn is not None)
         self._placeholder_count = len(self.features) - self._available_count
 
-    def compute_all(self, df: pd.DataFrame) -> Dict[str, float]:
-        """计算所有特征值 (只算有实现的)"""
+    def compute_all(self, df: pd.DataFrame, symbol: str = None) -> Dict[str, float]:
+        """计算所有特征值 (只算有实现的). symbol 用于情绪/衍生品数据查询"""
+        if symbol:
+            _SENTIMENT_CTX["current_symbol"] = symbol
         result = {}
         for f in self.features:
             try:
-                val = f.compute_fn(df)
+                val = f.compute_fn(df) if f.compute_fn else 0.0
                 if not np.isnan(val) and not np.isinf(val):
                     result[f.id] = float(val)
                 else:
@@ -1367,8 +1404,10 @@ class FeatureFactory:
                 result[f.id] = 0.0
         return result
 
-    def compute_active(self, df: pd.DataFrame) -> Dict[str, float]:
+    def compute_active(self, df: pd.DataFrame, symbol: str = None) -> Dict[str, float]:
         """只计算已实现的特征 (跳过占位)"""
+        if symbol:
+            _SENTIMENT_CTX["current_symbol"] = symbol
         result = {}
         for f in self.features:
             if f.compute_fn is None:

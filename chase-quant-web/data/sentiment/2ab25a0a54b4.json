@@ -1,175 +1,166 @@
 {
   "symbol": "BTC/USDT",
   "market": "crypto",
-  "analyzed_at": "2026-06-08T22:00:56.420583+08:00",
-  "current_price_range": "比特币价格在$63,400上方波动，近期曾跌破$60k后反弹。",
-  "recent_performance": "经历近期大幅抛售后出现反弹，但全面反转仍需时间。",
-  "sentiment_score": 55,
-  "sentiment_label": "中性偏涨",
-  "sentiment_summary": "市场情绪谨慎乐观，短期波动加剧，关注机构动向与宏观风险。",
+  "analyzed_at": "2026-06-18T20:45:12.120967+08:00",
+  "current_price_range": "比特币近期跌破65,000美元，显示承压。",
+  "recent_performance": "主要加密货币下跌，比特币价格波动较大。",
+  "sentiment_score": 45,
+  "sentiment_label": "中性偏跌",
+  "sentiment_summary": "市场情绪谨慎，受宏观政策和市场波动影响。",
   "key_drivers": [
     {
-      "factor": "机构买入与逢低吸纳",
-      "impact": "positive",
-      "strength": 7,
+      "factor": "美联储货币政策预期",
+      "impact": "negative",
+      "strength": 8,
       "cycle": "short",
-      "detail": "部分机构在近期低点增持比特币，显示出对短期价格支撑的信心。",
-      "source": "Moomoo, PANews"
+      "detail": "美联储会议后，降息预期落空，导致市场情绪转为防御性，短期内对加密市场构成压力。",
+      "source": "Moomoo, CoinDesk, Decrypt"
     },
     {
-      "factor": "地缘政治紧张局势",
+      "factor": "债券市场信号",
+      "impact": "negative",
+      "strength": 7,
+      "cycle": "short",
+      "detail": "债券市场对利率发出明确信号，可能预示着更长时间的高利率环境，对风险资产构成短期负面影响。",
+      "source": "Moomoo"
+    },
+    {
+      "factor": "美元指数走势",
       "impact": "negative",
       "strength": 6,
       "cycle": "short",
-      "detail": "以色列与伊朗的冲突升级曾导致市场避险情绪升温，比特币价格承压。",
-      "source": "Yahoo Finance, AP News, CryptoSlate"
-    },
-    {
-      "factor": "宏观经济数据与货币政策预期",
-      "impact": "neutral",
-      "strength": 5,
-      "cycle": "mid",
-      "detail": "强劲的就业数据可能影响美联储的降息预期，对风险资产有潜在影响。",
-      "source": "Decrypt"
-    },
-    {
-      "factor": "AI 产业发展与资金流向",
-      "impact": "neutral",
-      "strength": 6,
-      "cycle": "mid",
-      "detail": "AI 股票的波动和 IPO 资金的虹吸效应对加密货币市场资金面产生短期影响。",
-      "source": "AP News, Yahoo Finance, Decrypt"
-    },
-    {
-      "factor": "监管政策进展（CLARITY Act等）",
-      "impact": "neutral",
-      "strength": 4,
-      "cycle": "mid",
-      "detail": "关于稳定币的监管法案（如 CLARITY Act）的进展对市场有中期影响，但目前进展不明朗。",
-      "source": "CoinTelegraph, CryptoSlate"
-    },
-    {
-      "factor": "技术升级与安全漏洞",
-      "impact": "neutral",
-      "strength": 3,
-      "cycle": "short",
-      "detail": "Zcash 等项目的技术更新和安全漏洞修复对特定币种有短期影响。",
-      "source": "CoinTelegraph, Decrypt"
-    },
-    {
-      "factor": "市场情绪波动性",
-      "impact": "neutral",
-      "strength": 7,
-      "cycle": "short",
-      "detail": "市场情绪在近期低点时达到极度悲观，接近高点时达到极度乐观，显示短期波动性高。",
+      "detail": "美元指数可能处于重大突破边缘，通常美元走强对以美元计价的加密货币构成短期压力。",
       "source": "Moomoo"
     },
     {
-      "factor": "长期需求驱动力",
+      "factor": "宏观经济不确定性（如地缘政治）",
+      "impact": "neutral",
+      "strength": 5,
+      "cycle": "mid",
+      "detail": "地缘政治事件（如伊朗战争相关新闻）对全球市场情绪产生影响，可能间接影响风险资产的短期和中期波动。",
+      "source": "CNBC, Reuters, Politico"
+    },
+    {
+      "factor": "机构投资者兴趣演变",
       "impact": "positive",
       "strength": 5,
       "cycle": "long",
-      "detail": "投资者关注比特币的长期需求驱动因素，为市场提供潜在支撑。",
+      "detail": "Bitwise首席投资官认为下一轮牛市将更为缓慢、波动性更低，显示机构对加密货币的长期兴趣正在演变，但短期内可能缺乏爆发力。",
       "source": "Moomoo"
+    },
+    {
+      "factor": "比特币基本面（如算力、持仓）",
+      "impact": "positive",
+      "strength": 4,
+      "cycle": "long",
+      "detail": "Bitdeer Technologies在五月增加了比特币产量和持仓量，显示部分矿业公司对长期价值的信心。",
+      "source": "Moomoo"
+    },
+    {
+      "factor": "技术发展与创新（如AI、Layer-2）",
+      "impact": "neutral",
+      "strength": 4,
+      "cycle": "long",
+      "detail": "AI在加密领域的应用（如Block的AI工具）和比特币Layer-2项目的进展是长期看点，但短期内面临熊市考验。",
+      "source": "Moomoo, CoinTelegraph, Decrypt"
+    },
+    {
+      "factor": "监管动态",
+      "impact": "neutral",
+      "strength": 5,
+      "cycle": "short",
+      "detail": "G7呼吁联合打击朝鲜加密盗窃，爱尔兰收紧加密监管，以及CME可能起诉CFTC，这些监管消息对短期市场情绪有不确定性影响。",
+      "source": "CoinTelegraph, Decrypt"
     }
   ],
   "platform_sentiment": {
     "国际/英文媒体": {
-      "score": 60,
-      "summary": "关注机构动向与宏观风险，情绪偏谨慎乐观。"
+      "score": 45,
+      "summary": "关注宏观政策，情绪谨慎偏跌。"
     },
     "国际/社交媒体": {
       "score": 50,
-      "summary": "情绪分化，短期波动剧烈，关注热点事件。"
+      "summary": "情绪分化，有看涨信号但受制约。"
     },
     "国内/中文媒体": {
-      "score": 55,
-      "summary": "报道价格波动与反弹，关注机构行为。"
+      "score": 40,
+      "summary": "报道价格下跌，关注宏观影响。"
     },
     "国内/投资社区": {
-      "score": 50,
-      "summary": "讨论守住关键价位，情绪谨慎。"
+      "score": 45,
+      "summary": "讨论宏观政策，观望情绪浓厚。"
     }
   },
   "risks": [
-    "地缘政治冲突的进一步升级可能引发更广泛的市场避险情绪。",
-    "美联储货币政策的不确定性可能对风险资产造成压力。",
-    "加密货币市场的监管政策变化存在不确定性。",
-    "AI 领域资金流动的剧烈波动可能影响加密货币市场的流动性。",
-    "市场情绪的快速转变可能导致短期价格大幅波动。"
+    "美联储维持高利率时间超预期",
+    "全球宏观经济衰退风险",
+    "加密货币行业内部的监管不确定性增加",
+    "潜在的黑客攻击和DeFi协议风险",
+    "市场流动性收紧"
   ],
   "opportunities": [
-    "机构持续的逢低买入可能为市场提供支撑。",
-    "技术升级和创新可能催生新的增长点。",
-    "部分分析认为市场此前可能超卖，存在反弹空间。",
-    "长期需求驱动因素的显现可能为比特币提供结构性支撑。"
+    "比特币价格跌破关键均线可能触发历史性买入信号",
+    "长期投资者对加密货币的兴趣演变",
+    "AI技术在加密领域的应用潜力",
+    "部分机构对加密货币的长期价值看好",
+    "潜在的宏观经济转向带来的反弹机会"
   ],
   "macro_cycle": {
     "short_term": {
-      "score": 55,
-      "summary": "短期内受地缘政治和资金流影响，波动性高，但机构买盘提供支撑。",
+      "score": 40,
+      "summary": "短期内受降息预期落空和债券市场信号影响，情绪偏向谨慎。",
       "drivers": [
         {
-          "factor": "地缘政治事件",
+          "factor": "美联储政策",
           "impact": "negative",
-          "detail": "短期内对市场情绪造成负面冲击。"
+          "detail": "降息预期落空，短期内对市场构成压力。"
         },
         {
-          "factor": "机构逢低买入",
-          "impact": "positive",
-          "detail": "短期内为价格提供支撑。"
-        },
-        {
-          "factor": "市场情绪波动",
-          "impact": "neutral",
-          "detail": "短期内导致价格大幅震荡。"
+          "factor": "债券市场",
+          "impact": "negative",
+          "detail": "利率信号不明朗，增加不确定性。"
         }
       ]
     },
     "mid_term": {
       "score": 50,
-      "summary": "中期关注宏观经济数据、货币政策预期及监管进展。",
+      "summary": "中期来看，宏观经济和地缘政治的不确定性将继续影响市场波动。",
       "drivers": [
         {
-          "factor": "货币政策预期",
+          "factor": "地缘政治",
           "impact": "neutral",
-          "detail": "影响中期风险偏好。"
+          "detail": "持续的地缘政治事件可能带来短期波动。"
         },
         {
-          "factor": "监管政策",
+          "factor": "通胀数据",
           "impact": "neutral",
-          "detail": "对行业发展有中期影响。"
-        },
-        {
-          "factor": "AI 产业周期",
-          "impact": "neutral",
-          "detail": "影响中期资金流向。"
+          "detail": "通胀能否持续回落是关键。"
         }
       ]
     },
     "long_term": {
       "score": 60,
-      "summary": "长期看好比特币的长期需求驱动力，技术发展提供潜在增长。",
+      "summary": "长期来看，技术发展和机构兴趣演变是积极因素，但需克服结构性挑战。",
       "drivers": [
         {
-          "factor": "长期需求驱动",
+          "factor": "技术创新",
           "impact": "positive",
-          "detail": "为比特币提供结构性支撑。"
+          "detail": "AI和Layer-2等技术为长期增长提供动力。"
         },
         {
-          "factor": "技术革命（AI等）",
-          "impact": "neutral",
-          "detail": "可能间接影响数字资产的长期发展。"
+          "factor": "机构采用",
+          "impact": "positive",
+          "detail": "机构对加密货币的兴趣是长期支撑。"
         }
       ]
     }
   },
   "cycle_position": "下跌初期",
-  "cycle_confidence": 45,
-  "sentiment_trend": "稳定",
+  "cycle_confidence": 55,
+  "sentiment_trend": "恶化",
   "divergence_note": "无明显背离",
-  "conclusion": "当前比特币市场情绪处于谨慎乐观状态，短期内受到地缘政治紧张和资金流动的双重影响，波动性较大。中期来看，宏观经济数据和监管政策的走向将是关键。长期而言，比特币作为数字黄金的叙事以及技术发展的潜力仍是支撑因素。市场整体处于下跌初期的修复阶段，但仍需警惕潜在风险。",
-  "trading_suggestion": "关注关键技术位支撑，逢低吸纳部分仓位，但需严格控制风险，并密切关注宏观动态。",
+  "conclusion": "当前BTC/USDT市场情绪偏向谨慎，短期内受制于美联储货币政策预期落空和债券市场信号，呈现下跌初期特征。中期来看，宏观经济和地缘政治的不确定性将持续影响市场波动。长期而言，技术创新和机构兴趣演变提供了积极支撑，但需要克服结构性挑战。整体市场情绪正从观望转向担忧，但仍有潜在机会。",
+  "trading_suggestion": "建议短期内保持谨慎，关注宏观数据和美联储动态，寻找超跌反弹机会，长期投资者可关注技术发展和基本面改善的标的。",
   "data_sources": [
     "google_news",
     "Google News Business",
