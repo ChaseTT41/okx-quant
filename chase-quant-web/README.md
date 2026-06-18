@@ -1,5 +1,9 @@
 # 🐾 Yina OKX 量化交易系统 v2.0
 
+[![Vercel](https://img.shields.io/badge/Vercel-Deployed-black?logo=vercel&style=flat-square)](https://chase-quant-web.vercel.app)
+[![GitHub](https://img.shields.io/badge/GitHub-okx--quant-blue?logo=github&style=flat-square)](https://github.com/ChaseTT41/okx-quant)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
+
 > **多策略 ML 融合 + 市场情绪引擎 + 自适应杠杆 + 板块轮动预测**
 >
 > 支持加密货币 + 美股永续合约（OKX Perpetual Swaps）
@@ -150,9 +154,23 @@ chase-quant-web/
 
 ## 🌐 相关链接
 
-- **Streamlit 仪表板**: http://localhost:8501
-- **量化API**: http://localhost:8766
-- **公网访问**: Cloudflare Tunnel (配置中)
+| 链接 | 地址 |
+|------|------|
+| 🌍 **Vercel 前端** | [chase-quant-web.vercel.app](https://chase-quant-web.vercel.app) |
+| 🏠 Streamlit 仪表板 | http://localhost:8501 |
+| 📖 量化API | http://localhost:8766 |
+| 📖 API文档 | http://localhost:8766/docs |
+| 🔗 Cloudflare Tunnel | `trycloudflare.com` (动态) |
+
+### ⚡ GitHub → Vercel 自动部署
+
+```
+git push origin main → Vercel 自动构建 → 全球 CDN 生效 (~2秒)
+```
+
+- **前端**: 纯静态 SPA，`vercel.json` 配置 zero-build 部署
+- **API**: Vercel Rewrites 反向代理 `/api/*` → Cloudflare Tunnel 后端
+- **前后端分离**: 改 UI 不碰交易后端，策略运行不中断
 
 ---
 
