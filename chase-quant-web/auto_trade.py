@@ -718,6 +718,70 @@ class RollingAwareAutoTrader:
                             results.append(f"🔴 ML卖出 {pos.symbol}: {pos.pnl_pct:+.1f}%")
                             break
 
+        # 4.5. 🐻 做空持仓管理 (止盈/止损方向相反)
+        short_cfg = self._get_short_config()
+        short_positions = pf.get_short_positions()
+        if short_positions:
+            # 更新做空持仓价格
+            for spos in short_positions:
+                for sig in ml_signals:
+                    if sig["symbol"] == spos.symbol:
+                        pf.update_price(spos.id, sig["price"])
+                        break
+
+            for spos in short_positions:
+                pnl_pct = spos.pnl_pct  # 已含杠杆
+                sl_pct = -short_cfg["stop_loss_pct"] * 100  # e.g. -8%
+                tp_pct = short_cfg["take_profit_pct"] * 100  # e.g. +12%
+
+                # 做空止损: 亏损超过阈值
+                if pnl_pct <= sl_pct:
+                    if self.trading_mode.is_real and self.live_trader is not None:
+                        try:
+                            self.live_trader.close_short_swap(
+                                spos.symbol, spos.quantity,
+                                f"🐻做空止损: {pnl_pct:.1f}%"
+                            )
+                        except Exception as e:
+                            print(f"  ⚠️ 平空止损失败 ({spos.symbol}): {e}")
+                    pf.cover_short(spos.id, spos.current_price,
+                                   f"🐻做空止损: {pnl_pct:.1f}%")
+                    results.append(f"🔴 做空止损 {spos.symbol}: {pnl_pct:.1f}%")
+                    print(f"  🛑 做空止损 {spos.symbol}: {pnl_pct:.1f}%")
+
+                # 做空止盈: 盈利超过阈值
+                elif pnl_pct >= tp_pct:
+                    if self.trading_mode.is_real and self.live_trader is not None:
+                        try:
+                            self.live_trader.close_short_swap(
+                                spos.symbol, spos.quantity,
+                                f"🐻做空止盈: +{pnl_pct:.1f}%"
+                            )
+                        except Exception as e:
+                            print(f"  ⚠️ 平空止盈失败 ({spos.symbol}): {e}")
+                    pf.cover_short(spos.id, spos.current_price,
+                                   f"🐻做空止盈: +{pnl_pct:.1f}%")
+                    results.append(f"🟢 做空止盈 {spos.symbol}: +{pnl_pct:.1f}%")
+                    print(f"  🎯 做空止盈 {spos.symbol}: +{pnl_pct:.1f}%")
+
+                # ML买入信号 → 平空
+                else:
+                    for sig in buy_sigs:
+                        if sig["symbol"] == spos.symbol and sig["confidence"] >= 0.55:
+                            if self.trading_mode.is_real and self.live_trader is not None:
+                                try:
+                                    self.live_trader.close_short_swap(
+                                        spos.symbol, spos.quantity,
+                                        f"🐻ML平空: BUY信号{sig['signal_val']:+.3f}"
+                                    )
+                                except Exception as e:
+                                    print(f"  ⚠️ ML平空失败 ({spos.symbol}): {e}")
+                            pf.cover_short(spos.id, spos.current_price,
+                                           f"🐻ML平空: BUY信号{sig['signal_val']:+.3f}")
+                            results.append(f"🔄 ML平空 {spos.symbol}: {pnl_pct:+.1f}%")
+                            print(f"  🔄 ML平空 {spos.symbol}: {pnl_pct:+.1f}%")
+                            break
+
         # 5. 入场信号 — 🧠 AI复盘叠加: 仓位动态调整
         held_symbols = [p.symbol for p in pf.open_positions if p.market == "crypto"]
 
@@ -934,8 +998,153 @@ class RollingAwareAutoTrader:
                         results.append(f"🐾 最小仓位买入 {strongest['symbol']} ¥{min_size:.0f} | {reasoning}")
                         print(f"  🐾 最小仓位规则触发! 买入 {strongest['symbol']} ¥{min_size:.0f}")
 
+        # 6. 🐻 做空入场信号
+        if short_cfg["enabled"] and sell_sigs:
+            existing_shorts = pf.get_short_positions()
+            n_shorts = len(existing_shorts)
+            short_held_symbols = [s.symbol for s in existing_shorts]
+            # 多头持仓的币种不做空（避免同时多空）
+            long_held_symbols = [p.symbol for p in pf.open_positions
+                                 if p.market == "crypto" and getattr(p, 'side', 'LONG') == 'LONG']
+
+            # 筛选做空候选人
+            short_candidates = []
+            for sig in sell_sigs:
+                if sig["symbol"] in long_held_symbols:
+                    continue  # 不同时多空
+                if sig["symbol"] in short_held_symbols:
+                    continue  # 已有空仓不重复
+                if abs(sig["signal_val"]) < short_cfg["min_signal_strength"]:
+                    continue
+                if sig["confidence"] < short_cfg["min_confidence"]:
+                    continue
+                short_candidates.append(sig)
+
+            # 按信号强度排序(最负的优先)
+            short_candidates.sort(key=lambda s: s["signal_val"])
+
+            if short_candidates:
+                print(f"\n🐻 做空候选: {len(short_candidates)} 个 "
+                      f"(现有{n_shorts}/{short_cfg['max_concurrent']}空仓)")
+
+            for sig in short_candidates[:short_cfg["max_concurrent"]]:
+                if n_shorts >= short_cfg["max_concurrent"]:
+                    break
+
+                cash_usdt = pf.cash.get("crypto", 0)
+                margin = min(
+                    cash_usdt * short_cfg["single_max_pct"],
+                    cash_usdt * short_cfg["max_capital_pct"] / max(n_shorts + 1, 1)
+                )
+
+                if margin < 10:
+                    continue
+
+                # 做空风控
+                check = rc.short_pre_trade_check(
+                    symbol=sig["symbol"],
+                    signal_val=sig["signal_val"],
+                    confidence=sig["confidence"],
+                    consensus=sig["consensus"],
+                    margin_usdt=margin,
+                    leverage=short_cfg["max_leverage"],
+                    total_equity=total_value if total_value > 0 else cash_usdt,
+                    n_existing_shorts=n_shorts,
+                    max_concurrent=short_cfg["max_concurrent"],
+                    short_capital_pct=short_cfg["max_capital_pct"],
+                    min_signal=short_cfg["min_signal_strength"],
+                    min_confidence=short_cfg["min_confidence"],
+                )
+                if not check.passed:
+                    print(f"  ⚠️ {sig['symbol']} 做空风控拦截: {check.reason}")
+                    continue
+
+                # 止损价 (入场价上方)
+                stop_loss_price = sig["price"] * (1 + short_cfg["stop_loss_pct"])
+                leverage = short_cfg["max_leverage"]
+                notional = margin * leverage
+                quantity = notional / sig["price"]
+
+                reasoning = (
+                    f"[🐻做空 {leverage}x] 信号={sig['signal_val']:+.3f} | "
+                    f"置信={sig['confidence']:.0%} | "
+                    f"活跃={sig['n_active']}"
+                )
+
+                # ── 实盘 vs 模拟盘 ──
+                if self.trading_mode.is_real and self.live_trader is not None:
+                    try:
+                        exec_report = self.live_trader.open_short_swap(
+                            sig["symbol"], margin, leverage,
+                            stop_loss_price, reasoning
+                        )
+                        if exec_report.is_filled:
+                            results.append(
+                                f"🐻做空 {sig['symbol']} ${margin:.0f} @ {leverage}x | "
+                                f"SL={stop_loss_price:.4f}"
+                            )
+                            pf.open_short(
+                                market="crypto", symbol=sig["symbol"],
+                                name=sig["name"], price=sig["price"],
+                                quantity=quantity, margin_usdt=margin,
+                                leverage=leverage, reason=reasoning,
+                            )
+                            n_shorts += 1
+                            print(f"  🐻 开空成功 {sig['symbol']} ${margin:.0f} @ {leverage}x")
+                        else:
+                            print(f"  ❌ 开空未成交 ({sig['symbol']})")
+                    except Exception as e:
+                        print(f"  ❌ 开空失败 ({sig['symbol']}): {e}")
+                else:
+                    # 模拟盘做空
+                    trade = pf.open_short(
+                        market="crypto", symbol=sig["symbol"],
+                        name=sig["name"], price=sig["price"],
+                        quantity=quantity, margin_usdt=margin,
+                        leverage=leverage, reason=reasoning,
+                    )
+                    if trade:
+                        results.append(
+                            f"🐻模拟做空 {sig['symbol']} ${margin:.0f} @ {leverage}x | "
+                            f"信号={sig['signal_val']:+.3f}"
+                        )
+                        n_shorts += 1
+                        print(f"  🐻 模拟做空 {sig['symbol']} ${margin:.0f} @ {leverage}x")
+
         pf.take_snapshot()
         return results, pf
+
+    def _get_short_config(self) -> dict:
+        """获取做空配置参数（优先读 TradingConfig, fallback 默认值）"""
+        try:
+            if self.live_trader is not None:
+                cfg = self.live_trader.config
+                return {
+                    "enabled": cfg.short_enabled,
+                    "max_leverage": cfg.short_max_leverage,
+                    "max_concurrent": cfg.short_max_concurrent,
+                    "max_capital_pct": cfg.short_max_capital_pct,
+                    "single_max_pct": cfg.short_single_max_pct,
+                    "stop_loss_pct": cfg.short_stop_loss_pct,
+                    "take_profit_pct": cfg.short_take_profit_pct,
+                    "min_signal_strength": cfg.short_min_signal_strength,
+                    "min_confidence": cfg.short_min_confidence,
+                }
+        except Exception:
+            pass
+        # fallback: 从环境变量直接读
+        import os
+        return {
+            "enabled": os.environ.get("SHORT_ENABLED", "true").strip().lower() in ("true", "1", "yes"),
+            "max_leverage": int(os.environ.get("SHORT_MAX_LEVERAGE", "3")),
+            "max_concurrent": int(os.environ.get("SHORT_MAX_CONCURRENT", "2")),
+            "max_capital_pct": float(os.environ.get("SHORT_MAX_CAPITAL_PCT", "0.30")),
+            "single_max_pct": float(os.environ.get("SHORT_SINGLE_MAX_PCT", "0.15")),
+            "stop_loss_pct": float(os.environ.get("SHORT_STOP_LOSS_PCT", "0.08")),
+            "take_profit_pct": float(os.environ.get("SHORT_TAKE_PROFIT_PCT", "0.12")),
+            "min_signal_strength": float(os.environ.get("SHORT_MIN_SIGNAL", "0.12")),
+            "min_confidence": float(os.environ.get("SHORT_MIN_CONFIDENCE", "0.55")),
+        }
 
     def get_status_summary(self) -> str:
         """引擎状态摘要"""

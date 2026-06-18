@@ -167,6 +167,7 @@ class BinanceLiveTrader:
         self._consecutive_errors = 0
         self._fuse_blown_until: Optional[datetime] = None
         self._load_fuse_state()
+        self._max_retries = 3              # API 调用最大重试次数
 
     # ── 交易所属性 ──
 
@@ -534,6 +535,18 @@ class BinanceLiveTrader:
             status=status,
         )
 
+    # ── 通用校验 (Swap 方法复用) ──
+
+    def _validate_trading_ready(self):
+        """综合交易前校验（紧急停止 + 熔断）"""
+        self._check_kill_switch()
+        self._check_fuse()
+
+    def _get_min_notional(self, symbol: str) -> float:
+        """获取最小名义交易额（兼容 spot 和 swap）"""
+        spot_sym = symbol.replace(":USDT", "") if ":USDT" in symbol else symbol
+        return self.get_min_notional(spot_sym)
+
     # ── ⚡ Swap/合约交易 ──
 
     def market_buy_swap(self, symbol: str, amount_usdt: float,
@@ -659,6 +672,181 @@ class BinanceLiveTrader:
                 self._record_api_error(f"合约平仓失败: {last_error}")
 
         raise LiveAPIError(f"合约平仓失败: {last_error}")
+
+    # ── 🐻 做空交易 (OKX 永续合约) ──
+
+    def open_short_swap(self, symbol: str, amount_usdt: float,
+                        leverage: int = 3, stop_loss_price: float = None,
+                        note: str = "") -> OrderResult:
+        """
+        合约市价开空 (OKX 永续合约)。
+
+        Args:
+          symbol: 'BTC/USDT' (自动转为 'BTC/USDT:USDT')
+          amount_usdt: 保证金 (USDT)
+          leverage: 杠杆倍数 (默认3x)
+          stop_loss_price: 止损触发价 (做空止损在入场价上方)
+          note: 备注
+        """
+        swap_sym = symbol.replace("/USDT", "/USDT:USDT")
+
+        self._validate_trading_ready()
+
+        if amount_usdt < self._get_min_notional(symbol):
+            raise LiveTradingBlockedError(
+                f"做空保证金 ${amount_usdt:.2f} 低于最小交易额")
+
+        usdt_balance = self.get_usdt_balance()
+        if amount_usdt > usdt_balance:
+            raise LiveTradingBlockedError(
+                f"USDT 余额不足 (需要 ${amount_usdt:.2f}, 可用 ${usdt_balance:.2f})")
+
+        # 设杠杆 + 逐仓
+        try:
+            self._exchange.set_leverage(leverage, swap_sym)
+        except Exception:
+            pass
+        try:
+            self._exchange.set_margin_mode("isolated", swap_sym)
+        except Exception:
+            pass
+
+        # 计算合约数量
+        price = self._get_price(symbol)
+        if price <= 0:
+            raise LiveAPIError(f"无法获取 {symbol} 价格")
+        notional = amount_usdt * leverage
+        quantity = notional / price
+
+        # 精度处理
+        try:
+            market = self._exchange.market(swap_sym)
+            precision = market["precision"]["amount"]
+            quantity = self._exchange.amount_to_precision(swap_sym, quantity)
+        except Exception:
+            quantity = round(quantity, 4)
+
+        last_error = ""
+        for attempt in range(self._max_retries):
+            try:
+                # 🐻 关键: posSide="short" 告诉 OKX 这是开空仓
+                order = self._exchange.create_order(
+                    swap_sym, "market", "sell", float(quantity),
+                    None,
+                    {"note": note, "posSide": "short", "leverage": str(leverage)}
+                )
+
+                self._record_api_success()
+                result = self._parse_order_result(order, swap_sym, "sell_short", amount_usdt, note)
+                result.leverage = leverage
+                result.notional_usdt = round(notional, 2)
+                self._log_order(result)
+
+                # 设止损 (做空方向: 止损在入场价上方, 用 buy stop-market)
+                if stop_loss_price and stop_loss_price > 0:
+                    try:
+                        self._exchange.create_order(
+                            swap_sym, "stop_market", "buy", float(quantity),
+                            None,
+                            {"stopLossPrice": stop_loss_price, "posSide": "short"}
+                        )
+                    except Exception as sl_err:
+                        print(f"  ⚠️ 做空止损单设置失败: {sl_err}")
+
+                return result
+
+            except Exception as e:
+                last_error = str(e)
+                if attempt < self._max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                self._record_api_error(f"开空失败: {last_error}")
+
+        raise LiveAPIError(f"开空失败: {last_error}")
+
+    def close_short_swap(self, symbol: str, quantity: float,
+                          note: str = "") -> OrderResult:
+        """
+        合约市价平空 (买入平仓)。
+
+        Args:
+          symbol: 'BTC/USDT'
+          quantity: 合约数量
+          note: 备注
+        """
+        swap_sym = symbol.replace("/USDT", "/USDT:USDT")
+        self._validate_trading_ready()
+
+        last_error = ""
+        for attempt in range(self._max_retries):
+            try:
+                # 🐻 平空: buy + posSide="short"
+                order = self._exchange.create_order(
+                    swap_sym, "market", "buy", float(quantity),
+                    None, {"note": note, "posSide": "short"}
+                )
+                self._record_api_success()
+                result = self._parse_order_result(order, swap_sym, "buy_cover", quantity, note)
+                self._log_order(result)
+                return result
+            except Exception as e:
+                last_error = str(e)
+                if attempt < self._max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                self._record_api_error(f"平空失败: {last_error}")
+
+        raise LiveAPIError(f"平空失败: {last_error}")
+
+    def get_swap_position(self, symbol: str) -> dict:
+        """
+        查询合约持仓（区分多/空方向）。
+
+        Returns:
+          {
+            "has_long": bool, "has_short": bool,
+            "long_qty": float, "short_qty": float,
+            "long_pnl": float, "short_pnl": float,
+            "total_pnl": float,
+          }
+        """
+        swap_sym = symbol.replace("/USDT", "/USDT:USDT")
+        result = {
+            "has_long": False, "has_short": False,
+            "long_qty": 0.0, "short_qty": 0.0,
+            "long_pnl": 0.0, "short_pnl": 0.0,
+            "total_pnl": 0.0,
+        }
+
+        try:
+            positions = self._exchange.fetch_positions([swap_sym])
+            for pos in positions:
+                if not pos:
+                    continue
+                side = pos.get("side", "")  # "long" or "short"
+                contracts = abs(pos.get("contracts", 0) or 0)
+                pnl = pos.get("unrealizedPnl", 0) or 0
+
+                if contracts <= 0:
+                    continue
+
+                if side == "short":
+                    result["has_short"] = True
+                    result["short_qty"] = contracts
+                    result["short_pnl"] = pnl
+                else:
+                    result["has_long"] = True
+                    result["long_qty"] = contracts
+                    result["long_pnl"] = pnl
+
+                result["total_pnl"] += pnl
+
+        except Exception as e:
+            print(f"  ⚠️ 查询 {symbol} 合约持仓失败: {e}")
+
+        return result
+
+    # ── 价格查询 ──
 
     def _get_price(self, symbol: str) -> float:
         """获取当前价格 (ccxt ticker)"""

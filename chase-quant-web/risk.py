@@ -162,6 +162,75 @@ class RiskController:
 
         return RiskCheck(True, f"{symbol} 杠杆正常 ({pnl_pct:+.1f}%)", "info")
 
+    # ── 🐻 做空专属风控 ──
+
+    def short_pre_trade_check(self, symbol: str, signal_val: float,
+                               confidence: float, consensus: float,
+                               margin_usdt: float, leverage: int,
+                               total_equity: float, n_existing_shorts: int,
+                               max_concurrent: int = 2,
+                               short_capital_pct: float = 0.30,
+                               min_signal: float = 0.12,
+                               min_confidence: float = 0.55) -> RiskCheck:
+        """
+        做空交易事前风控 — 在开空下单前检查。
+
+        检查项:
+          1. 做空信号强度足够 (signal_val < -min_signal)
+          2. 置信度 ≥ 最低要求
+          3. 共识度 ≥ 50%
+          4. 同时做空数 ≤ 上限
+          5. 做空总保证金 ≤ 权益上限
+          6. 杠杆不超过上限
+          7. 单笔保证金合理 (1-15% 权益)
+        """
+        # 1. 信号强度 (负值表示看空)
+        if abs(signal_val) < min_signal:
+            return RiskCheck(False,
+                f"做空信号{signal_val:+.3f} 强度不足 (需≥{min_signal})", "warning")
+
+        # 2. 置信度
+        if confidence < min_confidence:
+            return RiskCheck(False,
+                f"做空置信度{confidence:.0%} < {min_confidence:.0%}", "warning")
+
+        # 3. 共识度
+        if consensus < 0.50:
+            return RiskCheck(False,
+                f"做空共识度{consensus:.0%} < 50%", "warning")
+
+        # 4. 同时做空数
+        if n_existing_shorts >= max_concurrent:
+            return RiskCheck(False,
+                f"做空已达上限{max_concurrent}个", "warning")
+
+        # 5. 做空总保证金占比
+        margin_pct = margin_usdt / total_equity if total_equity > 0 else 1.0
+        # 估算: 当前做空总保证金 + 新保证金
+        estimated_total_short_margin = (n_existing_shorts + 1) * margin_usdt
+        estimated_short_pct = estimated_total_short_margin / total_equity if total_equity > 0 else 1.0
+        if estimated_short_pct > short_capital_pct:
+            return RiskCheck(False,
+                f"做空总保证金≈{estimated_short_pct:.0%} > {short_capital_pct:.0%}上限", "warning")
+
+        # 6. 杠杆检查 (不超过风控上限)
+        if leverage > self.MAX_LEVERAGE:
+            return RiskCheck(False,
+                f"做空杠杆{leverage}x > {self.MAX_LEVERAGE}x上限", "danger")
+
+        # 7. 单笔保证金占比 (1%-15%)
+        if margin_pct > 0.15:
+            return RiskCheck(False,
+                f"单笔做空保证金{margin_pct:.1%} > 15%上限", "warning")
+        if margin_pct < 0.01:
+            return RiskCheck(False,
+                f"单笔做空保证金{margin_pct:.1%} < 1%, 太小不值得做", "warning")
+
+        return RiskCheck(True,
+            f"做空风控通过 (信号{signal_val:+.3f}, {leverage}x, 保证金{margin_usdt:.0f}USDT)", "info")
+
+    # ── 原有持仓风控 ──
+
     def position_check(self, position_id: str) -> List[RiskCheck]:
         """持仓风控: 每笔持仓定期检查"""
         checks = []

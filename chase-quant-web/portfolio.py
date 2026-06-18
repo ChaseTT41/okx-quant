@@ -64,13 +64,16 @@ class Position:
     current_price: float
     quantity: float
     entry_time: str       # ISO timestamp
-    entry_reason: str     # 为什么买入
+    entry_reason: str     # 为什么买入/做空
     stop_loss: float      # 止损价
     take_profit: float    # 止盈价
     status: str = "open"  # open / closed
+    side: str = "LONG"    # LONG / SHORT — 做多还是做空
+    leverage: int = 1     # 杠杆倍数 (1=现货, >1=合约)
     avg_entry_price: float = 0.0     # Phase 13: 分笔成交后的加权均价
     entry_prices: list = field(default_factory=list)  # Phase 13: 各切片成交价记录
     execution_strategy: str = ""     # Phase 13: 使用的执行策略
+    margin_usdt: float = 0.0         # 🐻 做空保证金 (USDT)
 
     @property
     def cost(self) -> float:
@@ -83,11 +86,22 @@ class Position:
 
     @property
     def pnl(self) -> float:
+        if self.side == "SHORT":
+            # 做空盈亏 = 入场价 - 现价 (价格跌=赚钱)
+            px = self.avg_entry_price if self.avg_entry_price > 0 else self.entry_price
+            return (px - self.current_price) * self.quantity
         return self.value - self.cost
 
     @property
     def pnl_pct(self) -> float:
         px = self.avg_entry_price if self.avg_entry_price > 0 else self.entry_price
+        if px <= 0:
+            return 0
+        if self.side == "SHORT":
+            # 做空收益率 = (入场价/现价 - 1) * 100
+            # 考虑杠杆: 收益率 * leverage
+            base_pct = (px / self.current_price - 1) * 100 if self.current_price > 0 else 0
+            return base_pct * self.leverage
         return (self.current_price / px - 1) * 100 if px > 0 else 0
 
 
@@ -401,6 +415,105 @@ class PortfolioManager:
         self.trades.append(trade)
         self._save()
         return trade
+
+    # ── 🐻 做空交易 ──
+
+    def open_short(self, market: str, symbol: str, name: str, price: float,
+                   quantity: float, margin_usdt: float, leverage: int,
+                   reason: str, stop_loss: float = None,
+                   take_profit: float = None) -> Optional[Trade]:
+        """
+        开空仓 (OKX 永续合约)。
+
+        Args:
+          quantity: 合约张数
+          margin_usdt: 保证金 (USDT)
+          leverage: 杠杆倍数
+          stop_loss: 止损价 (做空止损在入场价上方, None=自动计算)
+          take_profit: 止盈价 (做空止盈在入场价下方, None=自动计算)
+        """
+        amount = price * quantity
+        fee = amount * FEES.get(market, 0.001)
+
+        if not self.can_buy(market, margin_usdt + fee):
+            return None
+
+        # 扣保证金
+        self.cash[market] -= (margin_usdt + fee)
+
+        # 建空仓
+        pid = f"{market}_short_{symbol}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+        # 做空止损止盈方向相反
+        if stop_loss is None:
+            stop_loss = price * (1 + 0.08)   # 涨8%止损
+        if take_profit is None:
+            take_profit = price * (1 - 0.12)  # 跌12%止盈
+
+        pos = Position(
+            id=pid, market=market, symbol=symbol, name=name,
+            entry_price=price, current_price=price, quantity=quantity,
+            entry_time=datetime.now(timezone.utc).isoformat(),
+            entry_reason=f"[🐻做空] {reason}",
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            side="SHORT",
+            leverage=leverage,
+            avg_entry_price=price,
+            entry_prices=[price],
+            margin_usdt=margin_usdt,
+        )
+        self.positions[pid] = pos
+
+        trade = Trade(
+            id=pid, market=market, symbol=symbol, name=name,
+            side="sell_short", price=price, quantity=quantity,
+            amount=margin_usdt, fee=fee,
+            time=datetime.now(timezone.utc).isoformat(),
+            reason=f"[🐻做空 {leverage}x] {reason}",
+        )
+        self.trades.append(trade)
+        self._save()
+        return trade
+
+    def cover_short(self, position_id: str, price: float, reason: str) -> Optional[Trade]:
+        """平空仓 (买入平仓)"""
+        pos = self.positions.get(position_id)
+        if not pos or pos.status == "closed" or pos.side != "SHORT":
+            return None
+
+        amount = price * pos.quantity
+        fee = amount * FEES.get(pos.market, 0.001)
+
+        # 释放保证金 + 盈亏
+        return_amount = pos.margin_usdt + pos.pnl - fee
+        self.cash[pos.market] += max(0, return_amount)
+
+        pos.status = "closed"
+        pos.current_price = price
+
+        trade = Trade(
+            id=position_id, market=pos.market, symbol=pos.symbol,
+            name=pos.name, side="buy_cover", price=price,
+            quantity=pos.quantity, amount=amount, fee=fee,
+            time=datetime.now(timezone.utc).isoformat(),
+            reason=reason, pnl=pos.pnl, pnl_pct=pos.pnl_pct,
+        )
+        self.trades.append(trade)
+        self._save()
+        return trade
+
+    def get_short_positions(self) -> List[Position]:
+        """获取所有做空持仓"""
+        return [p for p in self.positions.values()
+                if p.status == "open" and p.side == "SHORT"]
+
+    def get_long_positions(self) -> List[Position]:
+        """获取所有做多持仓"""
+        return [p for p in self.positions.values()
+                if p.status == "open" and p.side == "LONG"]
+
+    # ── 价格更新 ──
 
     def update_price(self, position_id: str, price: float):
         """更新持仓市价"""

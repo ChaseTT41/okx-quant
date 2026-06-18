@@ -110,6 +110,17 @@ class TradingConfig:
     cooldown_after_stop_minutes: int = 30   # 止损后冷静期（分钟）
     min_notional_usdt: float = 10.0         # 现货最小交易额
 
+    # ── 做空参数（OKX 永续合约）──
+    short_enabled: bool = True               # 做空开关（False=只做多）
+    short_max_leverage: int = 3              # 做空最大杠杆（1-5，默认3x保守）
+    short_max_concurrent: int = 2            # 同时最多做空持仓数
+    short_max_capital_pct: float = 0.30      # 做空总资金占比上限（30%）
+    short_single_max_pct: float = 0.15       # 单笔做空最大资金占比（15%）
+    short_stop_loss_pct: float = 0.08        # 做空止损（涨8%止损）
+    short_take_profit_pct: float = 0.12      # 做空止盈（跌12%止盈）
+    short_min_signal_strength: float = 0.12  # 做空最低信号强度（v5阈值，v4用0.5）
+    short_min_confidence: float = 0.55       # 做空最低置信度
+
     # 路径
     data_dir: Path = field(default_factory=lambda: Path(__file__).parent / "data")
     kill_switch_path: Path = field(default=None)
@@ -180,6 +191,17 @@ class TradingConfig:
         max_trades = int(os.environ.get("LIVE_MAX_DAILY_TRADES", "100"))
         max_dd = float(os.environ.get("LIVE_MAX_DRAWDOWN", "0.10"))
 
+        # 做空参数（支持环境变量覆盖）
+        short_enabled = os.environ.get("SHORT_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+        short_max_leverage = int(os.environ.get("SHORT_MAX_LEVERAGE", "3"))
+        short_max_concurrent = int(os.environ.get("SHORT_MAX_CONCURRENT", "2"))
+        short_max_capital_pct = float(os.environ.get("SHORT_MAX_CAPITAL_PCT", "0.30"))
+        short_single_max_pct = float(os.environ.get("SHORT_SINGLE_MAX_PCT", "0.15"))
+        short_stop_loss = float(os.environ.get("SHORT_STOP_LOSS_PCT", "0.08"))
+        short_take_profit = float(os.environ.get("SHORT_TAKE_PROFIT_PCT", "0.12"))
+        short_min_signal = float(os.environ.get("SHORT_MIN_SIGNAL", "0.12"))
+        short_min_conf = float(os.environ.get("SHORT_MIN_CONFIDENCE", "0.55"))
+
         # 代理 & 备用域名 (中国大陆/泰国访问 OKX 需要)
         proxy_url = os.environ.get("PROXY_URL", "").strip()
         okx_api_url = os.environ.get("OKX_API_URL", "").strip()
@@ -193,6 +215,15 @@ class TradingConfig:
             min_balance_usdt=min_balance,
             max_daily_trades=max_trades,
             max_drawdown_pct=max_dd,
+            short_enabled=short_enabled,
+            short_max_leverage=short_max_leverage,
+            short_max_concurrent=short_max_concurrent,
+            short_max_capital_pct=short_max_capital_pct,
+            short_single_max_pct=short_single_max_pct,
+            short_stop_loss_pct=short_stop_loss,
+            short_take_profit_pct=short_take_profit,
+            short_min_signal_strength=short_min_signal,
+            short_min_confidence=short_min_conf,
             proxy_url=proxy_url,
             okx_api_url=okx_api_url,
         )
