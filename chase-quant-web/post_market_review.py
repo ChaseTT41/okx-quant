@@ -948,6 +948,21 @@ def main():
             print("❌ 推送失败")
             sys.exit(1)
 
+        # 🧠 自动生成策略叠加参数 (供交易引擎消费)
+        if not args.dry_run and args.mode == "evening":
+            try:
+                from review_strategy_bridge import build_overlay, save_overlay, load_latest_review
+                latest = load_latest_review()
+                if latest:
+                    print("🧠 生成策略叠加参数...")
+                    overlay = build_overlay(latest)
+                    save_overlay(overlay)
+                    print(f"   ✅ 策略叠加: 置信x{overlay.confidence_multiplier:.2f} | "
+                          f"{len(overlay.scenarios)}情景 | "
+                          f"优先{overlay.favor_assets} | 回避{overlay.avoid_assets}")
+            except Exception as e:
+                print(f"   ⚠️ 策略叠加生成失败: {e}")
+
     print(f"\n✅ Yina 盘后{'复盘' if args.mode == 'evening' else '简报'}完成! 🐾")
 
 

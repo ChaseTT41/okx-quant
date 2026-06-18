@@ -209,6 +209,12 @@ def execute_strategy_signals(signals: list, pf) -> list:
 
     held_symbols = [p.symbol for p in pf.open_positions if p.market == "crypto"]
 
+    # 🛡️ Fix #2: 最大持仓上限 (小资金分散过度 → 集中火力)
+    MAX_CRYPTO_POSITIONS = 6
+    if len(held_symbols) >= MAX_CRYPTO_POSITIONS:
+        log(f"  🛑 加密持仓已达上限 {MAX_CRYPTO_POSITIONS}，跳过新信号")
+        return results
+
     # 按策略分组，每策略选最强的 BUY
     buy_by_strategy = {}
     for s in signals:
@@ -275,10 +281,17 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
     for s in TIER1_ML_HEAVY + TIER2_TECHNICAL_LIGHT:
         swap_symbols.add(s)
 
+    results = []
+
     # 🛡️ 获取 OKX 现有持仓，防止重复开仓
     existing_positions = leverage_engine.fetch_open_positions()
+    existing_list = list(existing_positions) if isinstance(existing_positions, set) else existing_positions
 
-    results = []
+    # 🛡️ Fix #2: 合约最大持仓上限 (小资金集中火力)
+    MAX_SWAP_POSITIONS = 6
+    if len(existing_positions) >= MAX_SWAP_POSITIONS:
+        log_func(f"  🛑 合约持仓已达上限 {MAX_SWAP_POSITIONS}个，跳过新信号。当前持仓: {', '.join(existing_list[:8])}")
+        return results
     for sig in signals:
         sym = sig.get("symbol", "")
         if sym not in swap_symbols:
@@ -381,6 +394,19 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
         urgency=0.5,
     )
 
+    # ── 🧠 AI复盘策略叠加 ──
+    review_overlay = None
+    try:
+        from review_strategy_bridge import load_overlay
+        review_overlay = load_overlay()
+        if review_overlay and not review_overlay.is_stale:
+            log(f"🧠 AI复盘叠加: 置信乘数={review_overlay.confidence_multiplier:.2f} | "
+                f"偏好={review_overlay.favor_assets[:3]} | 回避={review_overlay.avoid_assets[:3]}")
+        elif review_overlay:
+            log(f"⚠️ AI复盘数据陈旧(>{review_overlay.ttl_hours}h)，使用默认参数")
+    except Exception as e:
+        log(f"⚠️ AI复盘桥接不可用: {e}")
+
     # ── 🎭 市场情绪引擎 ──
     sentiment_engine = None
     leverage_engine = None
@@ -396,6 +422,32 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
         if snapshot.rotation_prediction:
             r = snapshot.rotation_prediction
             log(f"🔮 轮动: {r.current_leader} → {r.next_leader} (conf={r.rotation_confidence:.0%})")
+
+        # 🎭 Fix #3: 注入情绪数据到 feature_engine (消除7个占位符)
+        try:
+            from feature_engine import set_sentiment_context
+            fg = snapshot.fear_greed
+            if fg:
+                # F&G 当前值 + 历史
+                fg_ctx = {
+                    "fg_value": fg.current_value,
+                    "fg_prev_1d": fg.value_1d_ago or fg.current_value,
+                    "fg_prev_7d": fg.value_7d_ago or fg.current_value,
+                    # 无3d/5d/14d历史, 用线性插值估计
+                    "fg_prev_3d": int(fg.current_value + (fg.value_7d_ago - fg.current_value) * 4/7) if fg.value_7d_ago else fg.current_value,
+                    "fg_prev_5d": int(fg.current_value + (fg.value_7d_ago - fg.current_value) * 2/7) if fg.value_7d_ago else fg.current_value,
+                    "fg_prev_14d": max(0, min(100, fg.current_value * 2 - (fg.value_7d_ago or fg.current_value))),
+                }
+                # 资金费率 (从缓存读取)
+                fr_cache = sentiment_engine._read_cache("funding_rates") or {}
+                funding_rates = {}
+                for sym, data in fr_cache.items():
+                    if isinstance(data, dict):
+                        funding_rates[sym] = data.get("funding_rate", 0.0)
+                fg_ctx["funding_rates"] = funding_rates
+                set_sentiment_context(**fg_ctx)
+        except Exception:
+            pass
 
         # ⚡ 杠杆引擎 (实盘时才启用)
         if trading_mode.is_real:
@@ -420,7 +472,7 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
                 sentiment_engine=sentiment_engine,  # 🎭
             )
             log(f"🚀 引擎: {trader.engine_label}")
-            results, pf = trader.run()
+            results, pf = trader.run(review_overlay=review_overlay)
         else:
             from auto_trade import MLAutoTrader, ML_SIGNAL_AVAILABLE
             if ML_SIGNAL_AVAILABLE:
@@ -466,7 +518,8 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
                 existing_swap_positions = set()
                 try:
                     okx_pos = leverage_engine.fetch_open_positions()
-                    existing_swap_positions = set(okx_pos.keys())
+                    # fetch_open_positions 返回 set，直接使用
+                    existing_swap_positions = okx_pos if isinstance(okx_pos, set) else set(okx_pos.keys() if hasattr(okx_pos, 'keys') else okx_pos)
                 except Exception:
                     pass
 

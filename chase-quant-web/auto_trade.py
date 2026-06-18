@@ -140,17 +140,31 @@ class MLAutoTrader:
         return self._exchange
 
     def fetch_ohlcv(self, symbol: str, limit: int = 400) -> pd.DataFrame | None:
-        """拉取OHLCV数据"""
+        """拉取OHLCV数据 (Binance + OKX fallback for OKX-only coins)"""
+        ohlcv = None
+        # 1. 尝试 Binance ccxt
         try:
             ex = self.exchange
-            if ex is None:
-                return None
-            ohlcv = ex.fetch_ohlcv(symbol, "1d", limit=limit)
+            if ex is not None:
+                ohlcv = ex.fetch_ohlcv(symbol, "1d", limit=limit)
+        except Exception:
+            ohlcv = None
+        # 2. Fix #6: OKX fallback (HYPE 等 OKX-only 币种)
+        if ohlcv is None or len(ohlcv) < 50:
+            try:
+                from market_sentiment import MarketSentimentEngine
+                okx_engine = MarketSentimentEngine()
+                ohlcv = okx_engine.fetch_okx_ohlcv(symbol, limit=limit)
+            except Exception:
+                pass
+        if ohlcv is None or len(ohlcv) == 0:
+            return None
+        try:
             df = pd.DataFrame(ohlcv, columns=["date", "open", "high", "low", "close", "volume"])
             df["date"] = pd.to_datetime(df["date"], unit="ms")
             return df
         except Exception as e:
-            print(f"  ⚠️ {symbol} 数据拉取失败: {e}")
+            print(f"  ⚠️ {symbol} 数据解析失败: {e}")
             return None
 
     def scan(self, symbols: list = None) -> list[dict]:
@@ -348,17 +362,34 @@ class RollingAwareAutoTrader:
         return self._exchange
 
     def fetch_ohlcv(self, symbol: str, limit: int = 400) -> pd.DataFrame | None:
-        """拉取OHLCV数据"""
+        """拉取OHLCV数据 (Binance + OKX fallback for OKX-only coins)"""
+        ohlcv = None
+        # 1. 尝试 Binance ccxt
         try:
             ex = self.exchange
-            if ex is None:
-                return None
-            ohlcv = ex.fetch_ohlcv(symbol, "1d", limit=limit)
+            if ex is not None:
+                ohlcv = ex.fetch_ohlcv(symbol, "1d", limit=limit)
+        except Exception:
+            ohlcv = None
+        # 2. Fix #6: OKX fallback (HYPE 等 OKX-only 币种)
+        if ohlcv is None or len(ohlcv) < 50:
+            try:
+                if self.sentiment_engine:
+                    ohlcv = self.sentiment_engine.fetch_okx_ohlcv(symbol, limit=limit)
+                else:
+                    from market_sentiment import MarketSentimentEngine
+                    okx_engine = MarketSentimentEngine()
+                    ohlcv = okx_engine.fetch_okx_ohlcv(symbol, limit=limit)
+            except Exception:
+                pass
+        if ohlcv is None or len(ohlcv) == 0:
+            return None
+        try:
             df = pd.DataFrame(ohlcv, columns=["date", "open", "high", "low", "close", "volume"])
             df["date"] = pd.to_datetime(df["date"], unit="ms")
             return df
         except Exception as e:
-            print(f"  ⚠️ {symbol} 数据拉取失败: {e}")
+            print(f"  ⚠️ {symbol} 数据解析失败: {e}")
             return None
 
     def pre_trade_check(self) -> dict:
@@ -577,9 +608,13 @@ class RollingAwareAutoTrader:
         results.sort(key=lambda r: abs(r["signal_val"]), reverse=True)
         return results
 
-    def run(self, symbols: list = None) -> tuple:
+    def run(self, symbols: list = None, review_overlay=None) -> tuple:
         """
         完整交易流程: 检查→扫描→决策→执行
+
+        Args:
+            symbols: 自定义扫描列表
+            review_overlay: AI复盘策略叠加 (StrategyOverlay from review_strategy_bridge)
 
         Returns:
             (results: list, pf: PortfolioManager)
@@ -601,8 +636,36 @@ class RollingAwareAutoTrader:
         total_value = pf.total_value
         results = []
 
+        # ── 🧠 AI复盘叠加: 动态风控参数 ──
+        overlay_risk = {}
+        if review_overlay and not review_overlay.is_stale:
+            from review_strategy_bridge import apply_overlay_to_risk, get_dont_do_list, get_risk_reminders
+            overlay_risk = apply_overlay_to_risk(review_overlay)
+            if overlay_risk:
+                print(f"🧠 AI复盘叠加: 置信x{overlay_risk.get('confidence_multiplier', 1.0):.2f} | "
+                      f"止损{overlay_risk.get('stop_loss_pct', -8):+.0f}% | "
+                      f"止盈+{overlay_risk.get('take_profit_pct', 15):.0f}% "
+                      f"| 最多{overlay_risk.get('max_positions', 6)}仓")
+
+            dont_do = get_dont_do_list(review_overlay)
+            if dont_do:
+                print(f"🛑 AI复盘「不做什么」: {', '.join(dont_do[:3])}")
+
+            risk_reminders = get_risk_reminders(review_overlay)
+            if risk_reminders:
+                print(f"⚠️ AI复盘风控提醒: {', '.join(risk_reminders[:2])}")
+
         # 3. 扫描信号
         ml_signals = self.scan(symbols)
+
+        # ── 🧠 AI复盘叠加: 信号调整 ──
+        if review_overlay and not review_overlay.is_stale:
+            from review_strategy_bridge import apply_overlay_to_signals
+            n_before = sum(1 for s in ml_signals if s.get("action") == "BUY")
+            ml_signals = apply_overlay_to_signals(ml_signals, review_overlay)
+            n_after = sum(1 for s in ml_signals if s.get("action") == "BUY")
+            if n_before != n_after:
+                print(f"🧠 AI复盘信号调整: BUY {n_before}→{n_after} (回避/优先/偏见)")
 
         # ── 🎭 情绪叠加: 调整信号置信度 ──
         if self.sentiment_engine:
@@ -621,7 +684,9 @@ class RollingAwareAutoTrader:
         print(f"\n📊 扫描结果: {len(buy_sigs)} BUY, {len(sell_sigs)} SELL, "
               f"{len(ml_signals) - len(buy_sigs) - len(sell_sigs)} HOLD")
 
-        # 4. 持仓管理 (止损/止盈)
+        # 4. 持仓管理 (止损/止盈) — 🧠 动态参数来自AI复盘叠加
+        dynamic_sl = overlay_risk.get("stop_loss_pct", -8.0)
+        dynamic_tp = overlay_risk.get("take_profit_pct", 15.0)
         for pos in pf.open_positions:
             if pos.market != "crypto":
                 continue
@@ -632,13 +697,15 @@ class RollingAwareAutoTrader:
                     pf.update_price(pos.id, sig["price"])
                     break
 
-            # 止损
-            if pos.pnl_pct <= -8.0:
-                pf.sell(pos.id, pos.current_price, f"硬止损: {pos.pnl_pct:.1f}%")
+            # 止损 (AI复盘可动态调整)
+            if pos.pnl_pct <= dynamic_sl:
+                pf.sell(pos.id, pos.current_price,
+                       f"止损: {pos.pnl_pct:.1f}% (动态SL={dynamic_sl:+.0f}%)")
                 results.append(f"🔴 止损 {pos.symbol}: {pos.pnl_pct:.1f}%")
-            # 止盈
-            elif pos.pnl_pct >= 15.0:
-                pf.sell(pos.id, pos.current_price, f"止盈: +{pos.pnl_pct:.1f}%")
+            # 止盈 (AI复盘可动态调整)
+            elif pos.pnl_pct >= dynamic_tp:
+                pf.sell(pos.id, pos.current_price,
+                       f"止盈: +{pos.pnl_pct:.1f}% (动态TP=+{dynamic_tp:.0f}%)")
                 results.append(f"🟢 止盈 {pos.symbol}: +{pos.pnl_pct:.1f}%")
             # ML 出场信号 (最小仓位不受ML卖出影响, 仅止损止盈)
             else:
@@ -651,8 +718,15 @@ class RollingAwareAutoTrader:
                             results.append(f"🔴 ML卖出 {pos.symbol}: {pos.pnl_pct:+.1f}%")
                             break
 
-        # 5. 入场信号
+        # 5. 入场信号 — 🧠 AI复盘叠加: 仓位动态调整
         held_symbols = [p.symbol for p in pf.open_positions if p.market == "crypto"]
+
+        # AI复盘最大持仓限制
+        max_positions = overlay_risk.get("max_positions", 6)
+        if len(held_symbols) >= max_positions:
+            print(f"  🛑 持仓已达AI复盘上限 {max_positions}，跳过新入场")
+            buy_sigs = []  # skip all new entries
+
         for sig in buy_sigs[:3]:
             if sig["symbol"] in held_symbols:
                 continue
@@ -663,7 +737,12 @@ class RollingAwareAutoTrader:
                 pass  # already decimal
             elif isinstance(size_pct, float):
                 size_pct = size_pct / 100
-            max_size = min(cash * size_pct, cash * 0.5)
+
+            # 🧠 AI复盘: 应用置信度乘数到仓位大小
+            conf_mult = overlay_risk.get("confidence_multiplier", 1.0)
+            single_max_pct = overlay_risk.get("single_trade_max_pct", 0.5)
+            adjusted_size_pct = size_pct * conf_mult
+            max_size = min(cash * adjusted_size_pct, cash * single_max_pct)
 
             if max_size < 10:
                 # OKX/Binance 现货最小交易额 ≈ $10
@@ -683,16 +762,31 @@ class RollingAwareAutoTrader:
                 f"置信={sig['confidence']:.0%} | "
                 f"活跃={sig['n_active']}"
             )
+            # 🧠 AI复盘标注
+            overlay_note = sig.get("overlay_note", "")
+            if overlay_note:
+                reasoning += f" | 🧠{overlay_note}"
+            if overlay_risk:
+                reasoning += f" | AI复盘x{conf_mult:.2f}"
 
             # Phase 15: 实盘交易 vs 模拟盘
             if self.trading_mode.is_real and self.live_trader is not None:
                 # ── 实盘路径 ──
                 amount_usdt = quantity * sig["price"]
+                # Fix #5: 从 OKX 获取实时点差 (fallback 0.001 = 10bps 保守)
+                real_spread = 0.001
+                if self.sentiment_engine:
+                    try:
+                        s = self.sentiment_engine.fetch_okx_spread(sig["symbol"])
+                        if s is not None and s > 0:
+                            real_spread = s
+                    except Exception:
+                        pass
                 mdata = {
                     "price": sig["price"],
                     "avg_daily_volume": 35000 if "BTC" in sig["symbol"] else 500000,
                     "volatility": 0.025,
-                    "spread": 0.0005,
+                    "spread": real_spread,
                 }
 
                 # 执行层风控
@@ -750,11 +844,20 @@ class RollingAwareAutoTrader:
 
             elif self.use_execution and self.execution_engine is not None:
                 # ── 模拟盘: 拆单执行 ──
+                # Fix #5: 从 OKX 获取实时点差
+                sim_spread = 0.001
+                if self.sentiment_engine:
+                    try:
+                        s = self.sentiment_engine.fetch_okx_spread(sig["symbol"])
+                        if s is not None and s > 0:
+                            sim_spread = s
+                    except Exception:
+                        pass
                 mdata = {
                     "price": sig["price"],
                     "avg_daily_volume": 35000 if "BTC" in sig["symbol"] else 500000,
                     "volatility": 0.025,
-                    "spread": 0.0005,
+                    "spread": sim_spread,
                 }
                 exec_check = rc.execution_risk_check(
                     quantity, mdata["avg_daily_volume"],
@@ -1037,7 +1140,7 @@ def auto_scan_and_trade(markets: list = None, use_ml: bool = False,
         all_sigs = scanner.scan()
         # 股票市场降低门槛 (A股/港股波动小, 需要更灵敏的入场)
         # bStocks 新品波动大, 也降低门槛
-        min_score = 40 if market in ("a_stock", "hk_stock", "b_stock") else 50
+        min_score = 40 if market in ("a_stock", "hk_stock", "b_stock", "crypto") else 50
         buy_sigs = [s for s in all_sigs if s.action == "BUY" and s.score >= min_score]
         buy_sigs.sort(key=lambda s: s.score, reverse=True)
 
