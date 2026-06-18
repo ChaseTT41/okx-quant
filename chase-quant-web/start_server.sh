@@ -106,7 +106,9 @@ if [ "$MODE" = "hard" ]; then
   TUNNEL_URL=$(grep -o 'https://[^ ]*\.trycloudflare\.com' "$LOG_TUNNEL" 2>/dev/null | tail -1)
   if [ -n "$TUNNEL_URL" ]; then
     echo "🔗 公网地址: $TUNNEL_URL"
-    echo "⚠️  请更新 chase-quant-web-deployment.md 中的公网地址!"
+    echo "⚠️  Tunnel URL 已变更！请更新 vercel.json 中的 destination 字段:"
+    echo "   sed -i '' 's|https://[^/]*\.trycloudflare\.com|${TUNNEL_URL}|g' $DIR/vercel.json"
+    echo "   然后 git push 让 Vercel 自动部署新配置"
   else
     echo "⚠️  Tunnel URL 未就绪，检查: tail -20 $LOG_TUNNEL"
   fi
@@ -137,6 +139,7 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  🐾 全部就绪! "
 echo "  📊 仪表板: http://localhost:$PORT"
+echo "  🌍 Vercel:  https://chase-quant-web.vercel.app"
 echo "  📖 API文档: http://localhost:$PORT/docs"
 echo "  ❤️  健康:   http://localhost:$PORT/api/health"
 echo "  🐶 Watchdog: 自动守护中"
