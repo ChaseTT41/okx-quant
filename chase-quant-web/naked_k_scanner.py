@@ -205,6 +205,74 @@ class StructureAnalysis:
 
 
 @dataclass
+class ComplexPullback:
+    """复杂回调结构"""
+    start_idx: int
+    end_idx: int
+    leg1_length: float       # 第一段回调长度
+    leg2_length: float       # 第二段回调长度
+    ratio: float             # leg2/leg1 比例
+    target_price: float      # 测量目标价 (腿1≈腿2)
+    direction: str           # 'bullish' / 'bearish' (回调结束后目标方向)
+    confidence: float
+
+
+@dataclass
+class FVGap:
+    """Fair Value Gap — SMC合理价值缺口"""
+    index: int               # 缺口形成位置 (第2根K的索引)
+    kind: str                # 'BISI' (看涨缺口) / 'SIBI' (看跌缺口)
+    gap_top: float
+    gap_bottom: float
+    gap_size_pct: float      # 缺口大小%
+    filled: bool = False     # 是否已被回补
+    age_bars: int = 0        # 形成后经过了多少根K
+
+@dataclass
+class LowHighCount:
+    """Low1/Low2/High1/High2 入场计数 — Vision识图: 熊猫教练核心入场系统
+
+    Low 1: 上升趋势中第一次回调产生的低点 (打底)
+    Low 2: 上升趋势中第二次回调产生的低点 (出击, 胜率更高)
+    High 1: 下降趋势中第一次反弹产生的高点
+    High 2: 下降趋势中第二次反弹产生的高点
+
+    "低1打底, 低2出击" — 熊猫教练原话
+    "有效信号K +入场K: 低2" — 两步确认+低2=高胜率
+    """
+    index: int
+    count: int                # 1 or 2
+    price: float
+    kind: str                 # 'low1' / 'low2' / 'high1' / 'high2'
+    signal_k_idx: int = -1    # 对应的信号K位置
+    entry_k_idx: int = -1     # 对应的入场K位置
+    quality: float = 0.0      # 0-1 信号质量
+    confirmed: bool = False   # 信号K+入场K两步都满足?
+
+    def __repr__(self):
+        return f"{self.kind.upper()} @ {self.price:.4f} q={self.quality:.1f} conf={self.confirmed}"
+
+
+@dataclass
+class SignalEntryPair:
+    """信号K+入场K两步确认对 — Vision识图核心概念
+
+    信号K = 非趋势K线 (逆主趋势方向的小K线, "警报")
+    入场K = 趋势K线 (顺主趋势方向的确认K线, "出击")
+
+    "不需要数入场K线" — 入场K只看第1根顺趋势K, 不是数K线数量
+    """
+    signal_idx: int           # 信号K索引
+    entry_idx: int            # 入场K索引
+    direction: str            # 'LONG' / 'SHORT'
+    signal_k_kind: str        # K线类型
+    entry_k_kind: str         # 入场K类型
+    at_key_level: bool = False  # 是否在关键位
+    low_high_count: str = ''  # 'low1'/'low2'/'high1'/'high2'
+    quality: float = 0.0
+
+
+@dataclass
 class ScanResult:
     """一次完整扫描的结果"""
     symbol: str
@@ -214,10 +282,17 @@ class ScanResult:
     signals: List[TradingSignal]
     structure: StructureAnalysis
     kline_summary: Dict[str, int]    # 各类型K线计数
+    complex_pullbacks: List[ComplexPullback] = field(default_factory=list)
+    fvgs: List[FVGap] = field(default_factory=list)
+    order_blocks: List[Dict] = field(default_factory=list)
+    channel_outcome: Optional[str] = None  # 通道三结局预测
+    low_high_counts: List[Dict] = field(default_factory=list)  # 🆕 Low1/Low2/High1/High2
+    signal_entry_pairs: List[Dict] = field(default_factory=list)  # 🆕 信号K+入场K对
+    momentum_warnings: List[Dict] = field(default_factory=list)  # 🆕 强动能追单警告
     timestamp: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "symbol": self.symbol,
             "timeframe": self.timeframe,
             "market_bias": self.market_bias.value,
@@ -233,8 +308,27 @@ class ScanResult:
                 "description": self.structure.description,
             },
             "kline_summary": self.kline_summary,
+            "complex_pullbacks": [
+                {"start": cp.start_idx, "end": cp.end_idx,
+                 "leg1": round(cp.leg1_length, 4), "leg2": round(cp.leg2_length, 4),
+                 "ratio": round(cp.ratio, 2), "target": round(cp.target_price, 4),
+                 "direction": cp.direction, "confidence": round(cp.confidence, 2)}
+                for cp in self.complex_pullbacks
+            ],
+            "fvgs": [
+                {"index": f.index, "kind": f.kind,
+                 "gap_top": round(f.gap_top, 4), "gap_bottom": round(f.gap_bottom, 4),
+                 "size_pct": round(f.gap_size_pct, 2), "filled": f.filled}
+                for f in self.fvgs
+            ],
+            "order_blocks": self.order_blocks,
+            "channel_outcome": self.channel_outcome,
+            "low_high_counts": self.low_high_counts,       # 🆕
+            "signal_entry_pairs": self.signal_entry_pairs, # 🆕
+            "momentum_warnings": self.momentum_warnings,   # 🆕
             "timestamp": self.timestamp,
         }
+        return result
 
 
 # ═══════════════════════════════════════════
@@ -354,7 +448,33 @@ class NakedKScanner:
         # 5. 三步法扫描入场信号
         signals = self._scan_signals(structure)
 
-        # 6. 汇总
+        # 6. 🆕 2B/SB结构信号
+        signals_2b_sb = self._scan_2b_sb_signals(structure)
+        signals.extend(signals_2b_sb)
+        signals = self._deduplicate_signals(signals)
+
+        # 7. 🆕 复杂回调检测
+        complex_pullbacks = self._detect_complex_pullback(structure)
+
+        # 8. 🆕 FVG检测
+        fvgs = self._detect_fvg()
+
+        # 9. 🆕 Order Block检测
+        order_blocks = self._detect_order_blocks()
+
+        # 10. 🆕 通道三结局预测
+        channel_outcome = self._predict_channel_outcome(structure)
+
+        # 11. 🆕 Low1/Low2/High1/High2 入场计数 (Vision识图核心)
+        low_high_counts = self._detect_low_high_sequence(structure)
+
+        # 12. 🆕 信号K+入场K两步确认对
+        signal_entry_pairs = self._detect_signal_entry_pairs(structure)
+
+        # 13. 🆕 强动能追单警告
+        momentum_warnings = self._detect_momentum_chase(structure)
+
+        # 14. 汇总
         kline_counts = {}
         for ki in self._kline_infos:
             kline_counts[ki.kind.value] = kline_counts.get(ki.kind.value, 0) + 1
@@ -367,6 +487,13 @@ class NakedKScanner:
             signals=signals,
             structure=structure,
             kline_summary=kline_counts,
+            complex_pullbacks=complex_pullbacks,
+            fvgs=fvgs,
+            order_blocks=order_blocks,
+            channel_outcome=channel_outcome,
+            low_high_counts=[lh.__dict__ for lh in low_high_counts],      # 🆕
+            signal_entry_pairs=[sp.__dict__ for sp in signal_entry_pairs], # 🆕
+            momentum_warnings=momentum_warnings,                           # 🆕
             timestamp=datetime.now().isoformat(),
         )
 
@@ -1256,6 +1383,442 @@ class NakedKScanner:
         return (prev_l <= curr_body_bot and curr_body_top <= prev_h
                 and curr_range > prev_range)
 
+    # ═══════════════════════════════════════
+    # 🆕 2B结构 & SB结构检测
+    # ═══════════════════════════════════════
+
+    def _scan_2b_sb_signals(self, structure: StructureAnalysis) -> List[TradingSignal]:
+        """扫描2B反转结构和SB二次突破结构的入场信号"""
+        signals = []
+        if self._n < 6:
+            return signals
+
+        # 2B结构: 价格突破前高(低)后立即被拉回 → 假突破反转
+        for i in range(3, self._n - 1):
+            highs = [float(self.df.iloc[j]['high']) for j in range(i-3, i+1)]
+            lows = [float(self.df.iloc[j]['low']) for j in range(i-3, i+1)]
+            closes = [float(self.df.iloc[j]['close']) for j in range(i-3, i+1)]
+
+            # 2B顶: 突破前高→被拉回收阴
+            if highs[-2] > highs[-3] and closes[-1] < highs[-3]:
+                # 突破后立即回落
+                entry = closes[-1]
+                stop = highs[-2] * 1.005
+                target = entry - (stop - entry) * 2.0
+                if target < entry * 0.9:  # RR >= 2
+                    signals.append(TradingSignal(
+                        action=SignalAction.SELL,
+                        entry_price=entry,
+                        stop_loss=stop,
+                        take_profit=target,
+                        score_3step=8,
+                        score_2plus3=5,
+                        confidence=0.75,
+                        risk_reward=2.0,
+                        reasons=["2B顶反转: 突破前高后立即被拉回收阴", "假突破陷阱"],
+                        signal_bar_idx=i,
+                        kline_type=KLineKind.PINBAR_BEAR,
+                    ))
+
+            # 2B底: 跌破前低→被拉回收阳
+            if lows[-2] < lows[-3] and closes[-1] > lows[-3]:
+                entry = closes[-1]
+                stop = lows[-2] * 0.995
+                target = entry + (entry - stop) * 2.0
+                if target > entry * 1.01:
+                    signals.append(TradingSignal(
+                        action=SignalAction.BUY,
+                        entry_price=entry,
+                        stop_loss=stop,
+                        take_profit=target,
+                        score_3step=8,
+                        score_2plus3=5,
+                        confidence=0.75,
+                        risk_reward=2.0,
+                        reasons=["2B底反转: 跌破前低后立即被拉回收阳", "假突破陷阱"],
+                        signal_bar_idx=i,
+                        kline_type=KLineKind.PINBAR_BULL,
+                    ))
+
+        # SB结构 (二次突破): 高1+低1→回调→高2+低2 顺势
+        if structure.bias in (MarketBias.BULLISH, MarketBias.BEARISH):
+            swing_points = structure.swing_points
+            if len(swing_points) >= 4:
+                recent = swing_points[-4:]
+                # 看涨SB: 两个逐步抬高的低点(HL) + 其间有小回调
+                if structure.bias == MarketBias.BULLISH:
+                    hl_points = [sp for sp in recent if sp.kind == SwingKind.HL]
+                    if len(hl_points) >= 2:
+                        h1, h2 = hl_points[-2], hl_points[-1]
+                        bars_between = abs(h2.index - h1.index)
+                        if 2 <= bars_between <= 8 and h2.price > h1.price:
+                            # SB做多信号
+                            entry = float(self.df.iloc[-1]['close'])
+                            stop = h2.price * 0.995
+                            target = entry + (entry - stop) * 2.5
+                            signals.append(TradingSignal(
+                                action=SignalAction.BUY,
+                                entry_price=entry,
+                                stop_loss=stop,
+                                take_profit=target,
+                                score_3step=9,
+                                score_2plus3=5,
+                                confidence=0.80,
+                                risk_reward=2.5,
+                                reasons=[f"SB结构做多: HL#1→HL#2({bars_between}根K线)", "高胜率二次突破"],
+                                signal_bar_idx=h2.index,
+                                kline_type=KLineKind.TREND_BULL,
+                            ))
+
+                # 看跌SB
+                else:
+                    lh_points = [sp for sp in recent if sp.kind == SwingKind.LH]
+                    if len(lh_points) >= 2:
+                        l1, l2 = lh_points[-2], lh_points[-1]
+                        bars_between = abs(l2.index - l1.index)
+                        if 2 <= bars_between <= 8 and l2.price < l1.price:
+                            entry = float(self.df.iloc[-1]['close'])
+                            stop = l2.price * 1.005
+                            target = entry - (stop - entry) * 2.5
+                            signals.append(TradingSignal(
+                                action=SignalAction.SELL,
+                                entry_price=entry,
+                                stop_loss=stop,
+                                take_profit=target,
+                                score_3step=9,
+                                score_2plus3=5,
+                                confidence=0.80,
+                                risk_reward=2.5,
+                                reasons=[f"SB结构做空: LH#1→LH#2({bars_between}根K线)", "高胜率二次突破"],
+                                signal_bar_idx=l2.index,
+                                kline_type=KLineKind.TREND_BEAR,
+                            ))
+
+        return signals
+
+    # ═══════════════════════════════════════
+    # 🆕 复杂回调检测 (腿1≈腿2)
+    # ═══════════════════════════════════════
+
+    def _detect_complex_pullback(self, structure: StructureAnalysis) -> List[ComplexPullback]:
+        """检测复杂回调: 两段式ABC调整, 腿1≈腿2测量目标"""
+        results = []
+        if self._n < 20 or len(structure.swing_points) < 4:
+            return results
+
+        closes = self.df['close'].values.astype(float)
+
+        # 找最近的两段式回调
+        swing_points = structure.swing_points
+        for i in range(len(swing_points) - 3):
+            s1, s2, s3, s4 = swing_points[i:i+4]
+
+            # 看涨复杂回调: HH→HL→LH→LL 或 上升趋势中的两段回调
+            if s1.kind == SwingKind.HH and s3.kind == SwingKind.HH:
+                leg1 = abs(s1.price - s2.price) if s2.kind in (SwingKind.HL, SwingKind.LL) else 0
+                leg2 = abs(s3.price - s4.price) if s4.kind in (SwingKind.HL, SwingKind.LL) else 0
+                if leg1 > 0 and leg2 > 0:
+                    ratio = leg2 / leg1 if leg1 > 0 else 0
+                    if 0.5 <= ratio <= 2.0:  # 腿1≈腿2
+                        target = float(closes[-1]) + leg1  # 测量目标
+                        results.append(ComplexPullback(
+                            start_idx=s1.index, end_idx=s4.index,
+                            leg1_length=leg1, leg2_length=leg2,
+                            ratio=ratio, target_price=target,
+                            direction='bullish',
+                            confidence=min(1.0, 1.0 - abs(1.0 - ratio)),
+                        ))
+
+            # 看跌复杂回调
+            if s1.kind == SwingKind.LL and s3.kind == SwingKind.LL:
+                leg1 = abs(s1.price - s2.price) if s2.kind in (SwingKind.LH, SwingKind.HH) else 0
+                leg2 = abs(s3.price - s4.price) if s4.kind in (SwingKind.LH, SwingKind.HH) else 0
+                if leg1 > 0 and leg2 > 0:
+                    ratio = leg2 / leg1 if leg1 > 0 else 0
+                    if 0.5 <= ratio <= 2.0:
+                        target = float(closes[-1]) - leg1
+                        results.append(ComplexPullback(
+                            start_idx=s1.index, end_idx=s4.index,
+                            leg1_length=leg1, leg2_length=leg2,
+                            ratio=ratio, target_price=target,
+                            direction='bearish',
+                            confidence=min(1.0, 1.0 - abs(1.0 - ratio)),
+                        ))
+
+        return results
+
+    # ═══════════════════════════════════════
+    # 🆕 FVG (Fair Value Gap) 检测
+    # ═══════════════════════════════════════
+
+    def _detect_fvg(self) -> List[FVGap]:
+        """检测SMC Fair Value Gap (合理价值缺口)
+
+        BISI: 第1根K高点 > 第3根K低点 → 买方不平衡缺口
+        SIBI: 第1根K低点 < 第3根K高点 → 卖方不平衡缺口
+        """
+        fvgs = []
+        if self._n < 3:
+            return fvgs
+
+        for i in range(1, self._n - 1):
+            bar0_high = float(self.df.iloc[i-1]['high'])
+            bar0_low = float(self.df.iloc[i-1]['low'])
+            bar1_high = float(self.df.iloc[i]['high'])    # 中间K (形成FVG的K)
+            bar1_low = float(self.df.iloc[i]['low'])
+            bar2_high = float(self.df.iloc[i+1]['high'])
+            bar2_low = float(self.df.iloc[i+1]['low'])
+
+            # BISI: 看涨FVG (第1根高 > 第3根低, 之间有空隙)
+            if bar0_low > bar2_high:
+                gap_top = bar0_low
+                gap_bottom = bar2_high
+                gap_size = (gap_top - gap_bottom) / gap_bottom * 100
+                if gap_size > 0.05:  # 至少0.05%
+                    # 检查是否已被回补
+                    filled = False
+                    age = self._n - 1 - i
+                    for j in range(i+2, self._n):
+                        if float(self.df.iloc[j]['low']) <= gap_bottom:
+                            filled = True
+                            break
+                    fvgs.append(FVGap(
+                        index=i, kind='BISI',
+                        gap_top=gap_top, gap_bottom=gap_bottom,
+                        gap_size_pct=gap_size, filled=filled, age_bars=age,
+                    ))
+
+            # SIBI: 看跌FVG
+            if bar0_high < bar2_low:
+                gap_top = bar2_low
+                gap_bottom = bar0_high
+                gap_size = (gap_top - gap_bottom) / gap_bottom * 100
+                if gap_size > 0.05:
+                    filled = False
+                    age = self._n - 1 - i
+                    for j in range(i+2, self._n):
+                        if float(self.df.iloc[j]['high']) >= gap_top:
+                            filled = True
+                            break
+                    fvgs.append(FVGap(
+                        index=i, kind='SIBI',
+                        gap_top=gap_top, gap_bottom=gap_bottom,
+                        gap_size_pct=gap_size, filled=filled, age_bars=age,
+                    ))
+
+        return fvgs
+
+    # ═══════════════════════════════════════
+    # 🆕 Order Block 检测
+    # ═══════════════════════════════════════
+
+    def _detect_order_blocks(self) -> List[Dict]:
+        """检测Order Block: 大阳线/大阴线启动前的那根反向K线
+
+        推进块: 趋势中推动方向的OB
+        拒绝块: 关键位附近被拒绝的OB
+        """
+        obs = []
+        if self._n < 5:
+            return obs
+
+        closes = self.df['close'].values.astype(float)
+        opens = self.df['open'].values.astype(float)
+        highs = self.df['high'].values.astype(float)
+        lows = self.df['low'].values.astype(float)
+        avg_range = np.mean(self._range[-20:]) if self._n >= 20 else np.mean(self._range)
+
+        for i in range(2, self._n - 1):
+            # 看涨OB: 一根大阴线后出现大阳线, OB=那根大阴线
+            prev_range = self._range[i-1]
+            curr_range = self._range[i]
+            prev_body = abs(closes[i-1] - opens[i-1])
+            curr_body = abs(closes[i] - opens[i])
+
+            if (prev_body > avg_range * 1.2 and closes[i-1] < opens[i-1] and  # 前一根大阴线
+                curr_body > avg_range * 1.2 and closes[i] > opens[i] and       # 当前大阳线
+                closes[i] > highs[i-1]):                                       # 覆盖前K
+                obs.append({
+                    "index": i-1,
+                    "kind": "bullish_ob",
+                    "price_top": highs[i-1],
+                    "price_bottom": lows[i-1],
+                    "mid": round((highs[i-1] + lows[i-1]) / 2, 6),
+                    "strength": "strong" if curr_body > avg_range * 2 else "normal",
+                })
+
+            # 看跌OB: 一根大阳线后出现大阴线, OB=那根大阳线
+            if (prev_body > avg_range * 1.2 and closes[i-1] > opens[i-1] and
+                curr_body > avg_range * 1.2 and closes[i] < opens[i] and
+                closes[i] < lows[i-1]):
+                obs.append({
+                    "index": i-1,
+                    "kind": "bearish_ob",
+                    "price_top": highs[i-1],
+                    "price_bottom": lows[i-1],
+                    "mid": round((highs[i-1] + lows[i-1]) / 2, 6),
+                    "strength": "strong" if curr_body > avg_range * 2 else "normal",
+                })
+
+        return obs
+
+    # ═══════════════════════════════════════
+    # 🆕 通道三结局预测
+    # ═══════════════════════════════════════
+
+    def _predict_channel_outcome(self, structure: StructureAnalysis) -> Optional[str]:
+        """预测通道的三种结局: 加速突破/向下破位/演变为区间
+
+        判断依据:
+        - 通道角度变化 (变陡→加速, 变平→区间)
+        - 最近触及边界的反应强度
+        - 是否出现端点旗形
+        """
+        if structure.bias not in (MarketBias.CHANNEL_UP, MarketBias.CHANNEL_DOWN):
+            return None
+
+        swing_points = structure.swing_points
+        if len(swing_points) < 6:
+            return None
+
+        closes = self.df['close'].values.astype(float)
+        recent_close = closes[-1]
+
+        # 取最近的极点计算通道斜率
+        highs = sorted([sp for sp in swing_points if sp.kind in (SwingKind.HH, SwingKind.LH)],
+                       key=lambda x: x.index)
+        lows = sorted([sp for sp in swing_points if sp.kind in (SwingKind.HL, SwingKind.LL)],
+                      key=lambda x: x.index)
+
+        if len(highs) < 3 or len(lows) < 3:
+            return None
+
+        # 通道中线位置和宽度
+        recent_highs = highs[-3:]
+        recent_lows = lows[-3:]
+
+        # 趋势K占比 — 如果趋势K越来越少→可能变区间
+        recent_klines = self._kline_infos[-10:]
+        trend_count = sum(1 for k in recent_klines
+                         if k.kind in (KLineKind.TREND_BULL, KLineKind.TREND_BEAR))
+        trend_ratio = trend_count / len(recent_klines) if recent_klines else 0
+
+        # 判断通道结局
+        if trend_ratio >= 0.5:
+            # 趋势K占比高 → 可能在加速
+            # 检查是否在通道上轨附近
+            if structure.bias == MarketBias.CHANNEL_UP:
+                upper_bound = max(h.price for h in recent_highs)
+                if recent_close > upper_bound * 0.995:
+                    return "accelerate_breakout_up"  # 即将加速突破
+                return "continue_channel_up"
+            else:
+                lower_bound = min(l.price for l in recent_lows)
+                if recent_close < lower_bound * 1.005:
+                    return "accelerate_breakout_down"
+                return "continue_channel_down"
+
+        elif trend_ratio <= 0.2:
+            # 趋势K占比很低 → 通道在变平, 可能转为区间
+            return "flattening_to_range"
+
+        else:
+            # 中性: K线越来越小 → 末端旗形 → 可能反转
+            recent_ranges = self._range[-5:]
+            if len(recent_ranges) >= 3:
+                if recent_ranges[-1] < np.mean(recent_ranges[:-1]) * 0.7:
+                    return "terminal_flag_wedge"  # 末端旗形/楔形反转预警
+
+            return "normal_channel"
+
+    # ═══════════════════════════════════════
+    # 🆕 末端旗形 & 楔形反转检测
+    # ═══════════════════════════════════════
+
+    def _detect_terminal_flag_wedge(self) -> List[Dict]:
+        """检测末端旗形和楔形反转形态
+
+        末端旗形: 趋势末尾出现的紧凑旗形整理, 幅度越来越小
+        楔形反转: 三推楔形, 每次推动幅度递减
+        """
+        results = []
+        if self._n < 15:
+            return results
+
+        closes = self.df['close'].values.astype(float)
+        highs = self.df['high'].values.astype(float)
+        lows = self.df['low'].values.astype(float)
+
+        # 检测最近10-15根K线是否形成收敛形态
+        window = min(15, self._n - 1)
+        recent_highs = highs[-window:]
+        recent_lows = lows[-window:]
+
+        # 高点越来越低 + 低点越来越高 = 收敛三角形/楔形
+        h_trend = np.polyfit(range(len(recent_highs)), recent_highs, 1)[0]
+        l_trend = np.polyfit(range(len(recent_lows)), recent_lows, 1)[0]
+
+        if h_trend < 0 and l_trend > 0:
+            # 收敛!
+            # 测量收敛幅度
+            first_range = recent_highs[0] - recent_lows[0]
+            last_range = recent_highs[-1] - recent_lows[-1]
+            compression = last_range / first_range if first_range > 0 else 1.0
+
+            if compression < 0.5:  # 幅度压缩超过50%
+                # 判断是末端旗形还是楔形
+                # 看之前是否有明显趋势
+                prev_closes = closes[-window*2:-window]
+                if len(prev_closes) > 5:
+                    prev_trend = np.polyfit(range(len(prev_closes)), prev_closes, 1)[0]
+                    wedge_width = recent_highs[0] - recent_lows[0]
+
+                    results.append({
+                        "type": "terminal_flag" if compression < 0.3 else "wedge",
+                        "compression_ratio": round(compression, 2),
+                        "prev_trend": "up" if prev_trend > 0 else "down",
+                        "wedge_width": round(wedge_width, 4),
+                        "breakout_target": round(
+                            closes[-1] + wedge_width if prev_trend > 0
+                            else closes[-1] - wedge_width, 4
+                        ),
+                        "signal": "Trend exhaustion — prepare for reversal",
+                        "confidence": round(min(0.9, 1.0 - compression), 2),
+                    })
+
+        return results
+
+    # ═══════════════════════════════════════
+    # 🆕 斐波那契扩张目标计算 (公用方法)
+    # ═══════════════════════════════════════
+
+    def calc_fib_expansion_targets(self, swing_low: float, swing_high: float,
+                                     direction: str = 'long') -> Dict[str, float]:
+        """计算斐波那契扩张目标位
+
+        用于测量趋势空间的扩展目标:
+          -0.618: 回调目标
+           1.000: 腿1=腿2 等距目标
+           1.618: 大级别扩张
+           2.618: 超大级别扩张
+        """
+        base_range = abs(swing_high - swing_low)
+
+        if direction == 'long':
+            return {
+                '-0.618': round(swing_high - base_range * 0.618, 4),
+                '1.000': round(swing_low + base_range * 1.000, 4),
+                '1.618': round(swing_low + base_range * 1.618, 4),
+                '2.618': round(swing_low + base_range * 2.618, 4),
+            }
+        else:
+            return {
+                '-0.618': round(swing_low + base_range * 0.618, 4),
+                '1.000': round(swing_high - base_range * 1.000, 4),
+                '1.618': round(swing_high - base_range * 1.618, 4),
+                '2.618': round(swing_high - base_range * 2.618, 4),
+            }
+
     def _calc_stop_target(
         self, idx: int, ki: KLineInfo, trade_direction: str,
         zone: Optional[SRZone], structure: StructureAnalysis
@@ -1300,6 +1863,384 @@ class NakedKScanner:
         rr = reward / risk if risk > 0 else 0
 
         return round(stop, 6), round(target, 6), round(rr, 2)
+
+    # ═══════════════════════════════════════
+    # 🆕 Low1/Low2/High1/High2 入场计数 (Vision识图: 熊猫教练核心)
+    # ═══════════════════════════════════════
+
+    def _detect_low_high_sequence(self, structure: StructureAnalysis) -> List[LowHighCount]:
+        """检测 Low1/Low2 (做多) 和 High1/High2 (做空) 序列
+
+        熊猫教练Vision识图核心:
+          - Low 1: 上升趋势中第一次回调低点 → "打底", 胜率较低
+          - Low 2: 上升趋势中第二次回调低点 → "出击", 胜率更高
+          - "有效信号K +入场K: 低2" → 信号K+入场K+低2 = 最高胜率组合
+          - "信号K = 非趋势K线" (逆主趋势的小K线, 表示方向犹豫)
+          - "入场K = 趋势K线" (顺主趋势方向, 确认出击)
+
+        算法:
+          1. 在上升趋势中找 pullback lows → 标为 Low1, Low2
+          2. 在下降趋势中找 rally highs → 标为 High1, High2
+          3. 检查每个 Low/High 是否有信号K+入场K确认
+        """
+        results = []
+        if self._n < 10 or len(structure.swing_points) < 3:
+            return results
+
+        closes = self.df['close'].values.astype(float)
+        highs_arr = self.df['high'].values.astype(float)
+        lows_arr = self.df['low'].values.astype(float)
+        avg_price = closes[-1]
+
+        # ── 上升趋势中找 Low1/Low2 ──
+        if structure.bias in (MarketBias.BULLISH, MarketBias.CHANNEL_UP):
+            swing_lows = sorted(
+                [sp for sp in structure.swing_points
+                 if sp.kind in (SwingKind.HL, SwingKind.LL) and sp.index > self._n - 50],
+                key=lambda x: x.index
+            )
+
+            for i, sl in enumerate(swing_lows[-6:]):  # 最近6个低点
+                # 是否在关键支撑位附近?
+                near_key_level = False
+                for zone in self._sr_zones:
+                    if zone.kind == 'support' and zone.contains(sl.price):
+                        near_key_level = True
+                        break
+
+                # 检查信号K+入场K
+                sig_entry = self._find_signal_entry_at_swing(
+                    sl.index, 'LONG', sl.price
+                )
+
+                # 判断是Low1还是Low2
+                low_count = 1 if i % 2 == 0 else 2  # 简化为交替
+                # 精确判断: 与前一个低点比较
+                if i > 0:
+                    prev_sl = swing_lows[-6:][i-1]
+                    low_count = 2 if sl.price > prev_sl.price else 1
+
+                lh = LowHighCount(
+                    index=sl.index,
+                    count=low_count,
+                    price=sl.price,
+                    kind=f'low{low_count}',
+                    signal_k_idx=sig_entry[0] if sig_entry else -1,
+                    entry_k_idx=sig_entry[1] if sig_entry else -1,
+                    quality=0.7 if near_key_level else 0.4,
+                    confirmed=sig_entry is not None,
+                )
+
+                # 低2 + 关键位 + 信号K确认 = 最高质量
+                if lh.count == 2 and near_key_level and lh.confirmed:
+                    lh.quality = 0.95
+                elif lh.count == 2 and lh.confirmed:
+                    lh.quality = 0.85
+
+                results.append(lh)
+
+        # ── 下降趋势中找 High1/High2 ──
+        elif structure.bias in (MarketBias.BEARISH, MarketBias.CHANNEL_DOWN):
+            swing_highs = sorted(
+                [sp for sp in structure.swing_points
+                 if sp.kind in (SwingKind.LH, SwingKind.HH) and sp.index > self._n - 50],
+                key=lambda x: x.index
+            )
+
+            for i, sh in enumerate(swing_highs[-6:]):
+                near_key_level = False
+                for zone in self._sr_zones:
+                    if zone.kind == 'resistance' and zone.contains(sh.price):
+                        near_key_level = True
+                        break
+
+                sig_entry = self._find_signal_entry_at_swing(
+                    sh.index, 'SHORT', sh.price
+                )
+
+                high_count = 1 if i % 2 == 0 else 2
+                if i > 0:
+                    prev_sh = swing_highs[-6:][i-1]
+                    high_count = 2 if sh.price < prev_sh.price else 1
+
+                lh = LowHighCount(
+                    index=sh.index,
+                    count=high_count,
+                    price=sh.price,
+                    kind=f'high{high_count}',
+                    signal_k_idx=sig_entry[0] if sig_entry else -1,
+                    entry_k_idx=sig_entry[1] if sig_entry else -1,
+                    quality=0.7 if near_key_level else 0.4,
+                    confirmed=sig_entry is not None,
+                )
+
+                if lh.count == 2 and near_key_level and lh.confirmed:
+                    lh.quality = 0.95
+                elif lh.count == 2 and lh.confirmed:
+                    lh.quality = 0.85
+
+                results.append(lh)
+
+        return results
+
+    def _find_signal_entry_at_swing(
+        self, swing_idx: int, direction: str, swing_price: float
+    ) -> Optional[Tuple[int, int]]:
+        """在摆动点附近找信号K+入场K两步确认
+
+        信号K = 非趋势K线 (表示多空犹豫, 原趋势暂停)
+        入场K = 趋势K线 (确认方向, 重新启动)
+
+        Returns: (signal_k_idx, entry_k_idx) or None
+        """
+        if swing_idx >= self._n - 2:
+            return None
+
+        closes = self.df['close'].values.astype(float)
+
+        # 在摆动点后1-5根K线内寻找
+        for look in range(1, min(6, self._n - swing_idx - 1)):
+            si = swing_idx + look
+            ki = self._kline_infos[si] if si < len(self._kline_infos) else None
+            if ki is None:
+                continue
+
+            # 信号K: 非趋势K线 (NON_TREND / DOJI / INSIDE)
+            is_signal_k = ki.kind in (
+                KLineKind.NON_TREND, KLineKind.DOJI, KLineKind.INSIDE,
+                KLineKind.PINBAR_BULL, KLineKind.PINBAR_BEAR
+            )
+
+            if not is_signal_k:
+                continue
+
+            # 确认信号K方向正确
+            if direction == 'LONG' and ki.kind == KLineKind.PINBAR_BULL:
+                pass  # 看涨Pinbar = 优秀信号K
+            elif direction == 'SHORT' and ki.kind == KLineKind.PINBAR_BEAR:
+                pass  # 看跌Pinbar = 优秀信号K
+            elif ki.kind in (KLineKind.NON_TREND, KLineKind.DOJI, KLineKind.INSIDE):
+                pass  # 非趋势K = 可接受信号K
+            else:
+                continue
+
+            # 入场K: 在信号K后1-3根内找趋势K
+            for entry_look in range(1, min(4, self._n - si - 1)):
+                ei = si + entry_look
+                eki = self._kline_infos[ei] if ei < len(self._kline_infos) else None
+                if eki is None:
+                    continue
+
+                if direction == 'LONG':
+                    is_entry_k = eki.kind in (
+                        KLineKind.TREND_BULL, KLineKind.ENGULFING_BULL,
+                        KLineKind.OUTSIDE_BULL
+                    )
+                    if is_entry_k and closes[ei] > closes[si]:
+                        return (si, ei)
+                else:
+                    is_entry_k = eki.kind in (
+                        KLineKind.TREND_BEAR, KLineKind.ENGULFING_BEAR,
+                        KLineKind.OUTSIDE_BEAR
+                    )
+                    if is_entry_k and closes[ei] < closes[si]:
+                        return (si, ei)
+
+        return None
+
+    # ═══════════════════════════════════════
+    # 🆕 信号K+入场K两步确认对 (Vision识图)
+    # ═══════════════════════════════════════
+
+    def _detect_signal_entry_pairs(self, structure: StructureAnalysis) -> List[SignalEntryPair]:
+        """检测所有信号K+入场K两步确认对
+
+        "不需要数入场K线" — 只看第1根确认的顺趋势K
+        信号K = 非趋势K线 (不能是趋势K!)
+        入场K = 趋势K线 (顺主趋势方向的第一根)
+        """
+        pairs = []
+        if self._n < 5:
+            return pairs
+
+        closes = self.df['close'].values.astype(float)
+        avg_price = closes[-1]
+
+        for i in range(1, self._n - 3):
+            ki = self._kline_infos[i]
+
+            # 信号K必须是 非趋势K / 十字星 / 内包K / Pinbar
+            is_signal = ki.kind in (
+                KLineKind.NON_TREND, KLineKind.DOJI, KLineKind.INSIDE,
+                KLineKind.PINBAR_BULL, KLineKind.PINBAR_BEAR
+            )
+            if not is_signal:
+                continue
+
+            # 检查关键位
+            at_key_level = False
+            for zone in self._sr_zones:
+                if zone.contains(self.df.iloc[i]['low']) or zone.contains(self.df.iloc[i]['high']):
+                    at_key_level = True
+                    break
+
+            # 找接下来的入场K (1-3根内)
+            for j in range(i + 1, min(i + 4, self._n)):
+                ek = self._kline_infos[j]
+
+                # ── 做多信号对 ──
+                if ki.kind in (KLineKind.PINBAR_BULL, KLineKind.NON_TREND, KLineKind.DOJI, KLineKind.INSIDE):
+                    if ek.kind in (KLineKind.TREND_BULL, KLineKind.ENGULFING_BULL, KLineKind.OUTSIDE_BULL):
+                        if closes[j] > closes[i]:  # 入场K收盘高于信号K
+                            # 判断是Low1还是Low2
+                            lh_count = self._classify_low_high_count(i, 'LONG', structure)
+
+                            quality = 0.5
+                            if at_key_level:
+                                quality += 0.2
+                            if ki.kind == KLineKind.PINBAR_BULL:
+                                quality += 0.15  # Pinbar信号K加分
+                            if lh_count == 'low2':
+                                quality += 0.15  # Low2加分
+
+                            pairs.append(SignalEntryPair(
+                                signal_idx=i, entry_idx=j,
+                                direction='LONG',
+                                signal_k_kind=ki.kind.value,
+                                entry_k_kind=ek.kind.value,
+                                at_key_level=at_key_level,
+                                low_high_count=lh_count,
+                                quality=min(0.95, quality),
+                            ))
+                            break  # 找到第一根入场K就够了
+
+                # ── 做空信号对 ──
+                elif ki.kind in (KLineKind.PINBAR_BEAR, KLineKind.NON_TREND, KLineKind.DOJI, KLineKind.INSIDE):
+                    if ek.kind in (KLineKind.TREND_BEAR, KLineKind.ENGULFING_BEAR, KLineKind.OUTSIDE_BEAR):
+                        if closes[j] < closes[i]:
+                            lh_count = self._classify_low_high_count(i, 'SHORT', structure)
+
+                            quality = 0.5
+                            if at_key_level:
+                                quality += 0.2
+                            if ki.kind == KLineKind.PINBAR_BEAR:
+                                quality += 0.15
+                            if lh_count == 'high2':
+                                quality += 0.15
+
+                            pairs.append(SignalEntryPair(
+                                signal_idx=i, entry_idx=j,
+                                direction='SHORT',
+                                signal_k_kind=ki.kind.value,
+                                entry_k_kind=ek.kind.value,
+                                at_key_level=at_key_level,
+                                low_high_count=lh_count,
+                                quality=min(0.95, quality),
+                            ))
+                            break
+
+        # 按质量排序, 只保留最近的高质量对
+        pairs.sort(key=lambda p: p.quality, reverse=True)
+        return pairs[:10]
+
+    def _classify_low_high_count(self, idx: int, direction: str,
+                                  structure: StructureAnalysis) -> str:
+        """判断当前信号K处于Low1/Low2或High1/High2"""
+        swing_points = structure.swing_points
+        if len(swing_points) < 2:
+            return ''
+
+        # 找idx之前的最近摆动点
+        if direction == 'LONG':
+            prior_lows = [sp for sp in swing_points
+                         if sp.kind in (SwingKind.HL, SwingKind.LL) and sp.index < idx]
+            if len(prior_lows) >= 2:
+                return 'low2'
+            elif len(prior_lows) >= 1:
+                return 'low1'
+        else:
+            prior_highs = [sp for sp in swing_points
+                          if sp.kind in (SwingKind.HH, SwingKind.LH) and sp.index < idx]
+            if len(prior_highs) >= 2:
+                return 'high2'
+            elif len(prior_highs) >= 1:
+                return 'high1'
+
+        return ''
+
+    # ═══════════════════════════════════════
+    # 🆕 强动能追单警告 (Vision识图: "不要在强动能K线追单")
+    # ═══════════════════════════════════════
+
+    def _detect_momentum_chase(self, structure: StructureAnalysis) -> List[Dict]:
+        """检测强动能K线追单风险
+
+        熊猫教练原话: "不要在强动能K线追单"
+        - 大实体趋势K线之后立即入场 = 追单
+        - 应该等回调到关键位再入场
+        - 追单的风险: 入场后立即被回调止损
+
+        检测条件:
+          1. 最近1-2根K线实体 >= 平均实体的2倍 (强动能)
+          2. 价格远离关键位 (>1 ATR)
+          3. 没有信号K确认
+        """
+        warnings = []
+        if self._n < 5:
+            return warnings
+
+        closes = self.df['close'].values.astype(float)
+        avg_body = float(np.mean(self._body[-20:])) if self._n >= 20 else float(np.mean(self._body))
+        if avg_body <= 0:
+            return warnings
+
+        # 检查最近2根K线
+        for lookback in range(1, min(4, self._n)):
+            idx = self._n - lookback
+            ki = self._kline_infos[idx] if idx < len(self._kline_infos) else None
+            if ki is None:
+                continue
+
+            # 是否强动能?
+            body_r = self._body[idx] / avg_body if avg_body > 0 else 0
+            is_strong_momentum = (
+                body_r >= 2.0 and
+                ki.kind in (KLineKind.TREND_BULL, KLineKind.TREND_BEAR,
+                           KLineKind.OUTSIDE_BULL, KLineKind.OUTSIDE_BEAR)
+            )
+
+            if not is_strong_momentum:
+                continue
+
+            # 距离关键位多远?
+            nearest_zone_dist = 999.0
+            nearest_zone_kind = ''
+            for zone in self._sr_zones:
+                if ki.kind == KLineKind.TREND_BULL:
+                    dist = (closes[idx] - zone.bottom) / closes[idx]
+                    if zone.kind == 'resistance' and dist < nearest_zone_dist:
+                        nearest_zone_dist = dist
+                        nearest_zone_kind = 'resistance'
+                elif ki.kind == KLineKind.TREND_BEAR:
+                    dist = (zone.top - closes[idx]) / closes[idx]
+                    if zone.kind == 'support' and dist < nearest_zone_dist:
+                        nearest_zone_dist = dist
+                        nearest_zone_kind = 'support'
+
+            atr = float(np.mean(self._range[-14:]))
+            far_from_zone = nearest_zone_dist > (atr / closes[idx]) if atr > 0 else True
+
+            if far_from_zone:
+                warnings.append({
+                    "bar_idx": int(idx),
+                    "warning": "强动能追单风险!",
+                    "kline_type": ki.kind.value,
+                    "body_vs_avg": round(body_r, 1),
+                    "distance_to_zone_pct": round(nearest_zone_dist * 100, 2),
+                    "advice": "不要在强动能K线追单 — 等回调到关键位+信号K确认后再入场",
+                })
+
+        return warnings
 
     def _deduplicate_signals(self, signals: List[TradingSignal]) -> List[TradingSignal]:
         """去重: 相邻信号只保留评分最高的"""
