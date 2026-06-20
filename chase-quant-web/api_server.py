@@ -1299,7 +1299,17 @@ async def execute_trade(body: dict):
         if side == "buy":
             result = pf.buy(market, symbol, name, price, quantity, reason)
         else:
-            result = pf.sell(market, symbol, name, price, quantity, reason)
+            # 🆕 用 open_short 开空仓 (做空)，与 daemon 一致
+            margin_usdt = price * quantity
+            if hasattr(pf, 'open_short'):
+                result = pf.open_short(
+                    market=market, symbol=symbol, name=name,
+                    price=price, quantity=quantity,
+                    margin_usdt=margin_usdt, leverage=1,
+                    reason=reason,
+                )
+            else:
+                raise HTTPException(status_code=400, detail="当前版本不支持做空")
 
         if result is None:
             raise HTTPException(status_code=400, detail="交易失败：资金不足或持仓不存在")

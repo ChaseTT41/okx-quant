@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 # ── 配置 ──
 SCAN_INTERVAL_MINUTES = 10  # 扫描间隔 (加密永不休市, 10分钟捕捉机会)
+PUSH_INTERVAL_MINUTES = 30  # 🆕 企微推送间隔 (30分钟, 避免刷屏)
 DATA_DIR = Path(__file__).parent / "data"
 LOG_DIR = DATA_DIR / "daemon_logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -205,6 +206,26 @@ def _enforce_hard_stop_loss(pf, log_func) -> list:
     from collections import Counter
     results = []
     now = datetime.now(timezone.utc)
+
+    # ── 🆕 刷新 crypto 持仓实时价格 ──
+    crypto_positions = [p for p in pf.open_positions if p.market == "crypto"]
+    if crypto_positions:
+        try:
+            import ccxt
+            ex = ccxt.okx({'enableRateLimit': True})
+            symbols = list(set(p.symbol for p in crypto_positions))
+            for sym in symbols:
+                try:
+                    ticker = ex.fetch_ticker(sym)
+                    if ticker and ticker.get('last', 0) > 0:
+                        for p in crypto_positions:
+                            if p.symbol == sym:
+                                p.current_price = ticker['last']
+                    time.sleep(0.15)  # 速率限制
+                except Exception:
+                    pass  # 单个币种失败不影响整体
+        except Exception:
+            pass  # ccxt 不可用时跳过价格刷新
 
     # ── 碎片化检测: 同币种 > 3笔 ──
     symbol_counts = Counter(p.symbol for p in pf.open_positions if p.market == "crypto")
@@ -863,7 +884,7 @@ def main():
         f"🐾 Yina自主交易已启动 [{mode_label}]",
         f"> 🚀 交易引擎已就绪\n"
         f"> 📡 [查看仪表板](https://runs-student-skill-seeds.trycloudflare.com)\n"
-        f"> ⏱️ 扫描间隔: {SCAN_INTERVAL_MINUTES}分钟\n"
+        f"> ⏱️ 扫描间隔: {SCAN_INTERVAL_MINUTES}分钟 | 推送间隔: {PUSH_INTERVAL_MINUTES}分钟\n"
         f"> 🧠 引擎: v5 Qlib融合 + 图增强 + Alpha + SMART拆单\n"
         f"> 🎮 模式: {mode_label}\n"
         f"> ⏰ {beijing_now().strftime('%Y-%m-%d %H:%M')}"
@@ -890,11 +911,18 @@ def main():
                 state["total_trades"] += n_trades
                 state["today_trades"] = state.get("today_trades", 0) + n_trades
 
-            # 有交易时推送
+            # 🆕 每30分钟推送一次 (有交易才推, 避免刷屏)
             if n_trades > 0:
-                log(f"📋 {n_trades} 笔操作, 推送企微...")
-                summary = build_trade_summary(results, pf, beijing_now().strftime("%Y-%m-%d %H:%M"))
-                push_wechat("📊 Yina交易通知", summary)
+                now_ts = time.time()
+                last_push = state.get("last_push_ts", 0)
+                if now_ts - last_push >= PUSH_INTERVAL_MINUTES * 60:
+                    log(f"📋 {n_trades} 笔操作, 推送企微...")
+                    summary = build_trade_summary(results, pf, beijing_now().strftime("%Y-%m-%d %H:%M"))
+                    push_wechat("📊 Yina交易通知", summary)
+                    state["last_push_ts"] = now_ts
+                else:
+                    remaining = PUSH_INTERVAL_MINUTES * 60 - (now_ts - last_push)
+                    log(f"📋 {n_trades} 笔操作 (下次推送 {remaining/60:.0f}分钟后)")
             else:
                 log("💤 本次无操作")
 
