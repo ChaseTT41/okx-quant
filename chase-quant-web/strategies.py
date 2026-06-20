@@ -1337,98 +1337,8 @@ class FiveDimScorecardStrategy(BaseStrategy):
 # 策略 6: 激进交易
 # ═══════════════════════════════════════════
 
-class AggressiveStrategy(BaseStrategy):
-    """
-    激进交易策略 — 多时间框架 + 大仓位 + 快进快出
-
-    目标月化30%，使用1h/4h双时间框架确认，5分钟扫描。
-
-    风险警告: 此策略波动极大，默认关闭。仅在市场趋势明确时启用。
-    """
-
-    @classmethod
-    def create(cls) -> "AggressiveStrategy":
-        config = StrategyConfig(
-            id="strat-aggressive-006",
-            name="激进交易 (多时间框架)",
-            version="v1.0",
-            market="crypto",
-            symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"],
-            status="stopped",  # 默认关闭
-
-            logic_explanation="""这是一个高风险高收益的激进策略，目标月化30%。
-
-第一层 · 双时间框架确认:
-1h K线做主力信号判断，4h K线做大趋势方向确认。
-只有当1h和4h方向一致时才入场。
-
-第二层 · 多指标共振:
-RSI(14): 1h超卖(<38)+4h超卖(<42) → 强买入
-MACD: 1h金叉+4h柱放大 → 动量确认
-布林带: 触及下轨+下影线 → 反弹信号
-短期超跌: 4h跌>3%+12h跌>5% → 超跌反弹
-
-第三层 · 大仓位快进快出:
-每次用30%现金建仓 (vs 常规5-20%)
-止损-5% (更紧), 止盈+8% (更快)
-5分钟扫描频率 (vs 常规30分钟)
-最多同时持有5个标的""",
-
-            entry_conditions="""做多条件 (评分≥52):
-1. 1h RSI < 38 (超卖) 或 4h RSI < 42
-2. MACD金叉或MACD柱增强
-3. 触及布林下轨 (bb_position < 0.15) 或短期超跌
-4. 双时间框架方向一致
-
-做空条件 (评分≤48):
-1. 1h RSI > 70 (超买) 或 4h RSI > 72
-2. MACD死叉
-3. 触及布林上轨 (bb_position > 0.85)""",
-
-            exit_conditions="""止损: -5% 硬止损 (比常规更紧)
-止盈: +8% 止盈 (快进快出)
-时间止损: 持仓>24h强制平仓""",
-
-            position_sizing="""每次用30%加密现金建仓 (大仓位)
-最低交易额 ¥200
-最多同时持有5个标的
-单标的最高仓位 = 总资金25%""",
-
-            risk_management="""高风险警告:
-⚠️ 止损更紧 (-5%), 可能频繁被扫
-⚠️ 大仓位 (30%), 回撤风险高
-⚠️ 5分钟扫描, 容易过度交易
-⚠️ 仅在趋势明确时使用
-默认关闭, 需手动开启""",
-
-            parameters=[
-                StrategyParam("scan_interval_sec", 300, "int", "扫描间隔(秒)",
-                    "扫描频率, 默认5分钟", min_val=60, max_val=900, step=60),
-                StrategyParam("rsi_oversold_1h", 38, "int", "1h RSI超卖阈值",
-                    "低于此值触发买入", min_val=20, max_val=45, step=2),
-                StrategyParam("rsi_overbought_1h", 70, "int", "1h RSI超买阈值",
-                    "高于此值触发卖出", min_val=60, max_val=85, step=5),
-                StrategyParam("stop_loss_pct", -5, "float", "止损%",
-                    "比常规更紧的止损", min_val=-10, max_val=-2, step=1),
-                StrategyParam("take_profit_pct", 8, "float", "止盈%",
-                    "快进快出目标", min_val=3, max_val=20, step=1),
-                StrategyParam("position_pct", 30, "float", "仓位%",
-                    "每次使用的现金比例", min_val=10, max_val=50, step=5),
-            ],
-
-            sharpe=1.15, win_rate=52.0, max_drawdown=-18.5,
-            annual_return=45.0, total_trades=230, signals_today=0,
-            last_signal_at=None, last_signal=None,
-        )
-        return cls(config)
-
-    def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[Dict]:
-        """由 aggressive_trader.scan_symbol() 驱动"""
-        return []
-
-
 # ═══════════════════════════════════════════
-# 策略 8: 裸K价格行为策略 (熊猫教练体系) 🕯️ 优先
+# 策略 7: 裸K价格行为策略 (熊猫教练体系) 🕯️ 优先
 # ═══════════════════════════════════════════
 
 class KLineStrategy(BaseStrategy):
@@ -1647,7 +1557,6 @@ STRATEGY_BUILDERS = {
     "strat-alpha-arb-003": CrossMarketAlphaStrategy.create,
     "strat-v5-qlib-fusion-004": V5QlibFusionStrategy.create,
     "strat-five-dim-scorecard-005": FiveDimScorecardStrategy.create,
-    "strat-aggressive-006": AggressiveStrategy.create,
     "strat-naked-k-007": KLineStrategy.create,  # 🕯️ 裸K策略
 }
 
