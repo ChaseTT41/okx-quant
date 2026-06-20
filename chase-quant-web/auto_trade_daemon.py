@@ -192,6 +192,78 @@ STRATEGY_CONFIG = {
 }
 
 
+def _enforce_hard_stop_loss(pf, log_func) -> list:
+    """
+    🛡️ 硬止损强制执行 + 碎片化清理 — 所有持仓通用
+
+    规则:
+      - 浮动亏损 >= 8% → 立即平仓
+      - 持有 > 7天且亏损 → 僵尸仓清理
+      - 同币种 > 3笔持仓 → 只保留最好的3笔
+    """
+    from datetime import datetime, timezone, timedelta
+    from collections import Counter
+    results = []
+    now = datetime.now(timezone.utc)
+
+    # ── 碎片化检测: 同币种 > 3笔 ──
+    symbol_counts = Counter(p.symbol for p in pf.open_positions if p.market == "crypto")
+    fragmented_symbols = {sym for sym, cnt in symbol_counts.items() if cnt > 3}
+
+    for pos in list(pf.open_positions):
+        # 计算浮动盈亏%
+        if pos.side == "LONG":
+            pnl_pct = (pos.current_price / pos.entry_price - 1) * 100 if pos.current_price > 0 else 0
+        else:
+            pnl_pct = (pos.entry_price / pos.current_price - 1) * 100 if pos.current_price > 0 else 0
+
+        should_close = False
+        reason = ""
+
+        # 1. 硬止损 -8%
+        if pnl_pct <= -8.0:
+            should_close = True
+            reason = f"🛑 硬止损触发: {pnl_pct:.1f}% (<= -8%)"
+
+        # 2. 僵尸仓 (持有 > 7天且亏损)
+        elif pnl_pct < 0:
+            held_days = 0
+            if hasattr(pos, 'entry_time') and pos.entry_time:
+                try:
+                    entry_dt = datetime.fromisoformat(pos.entry_time.replace('+00:00', '+0000'))
+                    held_days = (now.replace(tzinfo=None) - entry_dt.replace(tzinfo=None)).days
+                except Exception:
+                    pass
+            if held_days > 7:
+                should_close = True
+                reason = f"💀 僵尸仓: 持有{held_days}天, 亏损{pnl_pct:.1f}%"
+
+        # 3. 碎片化清理: 同币种 > 3笔, 关最差的
+        if not should_close and pos.symbol in fragmented_symbols and pos.market == "crypto":
+            same_symbol = [p for p in pf.open_positions
+                          if p.symbol == pos.symbol and p.market == "crypto"]
+            same_symbol_sorted = sorted(same_symbol,
+                                       key=lambda p: (p.current_price / p.entry_price - 1) * 100
+                                       if p.side == "LONG" else (p.entry_price / p.current_price - 1) * 100,
+                                       reverse=True)
+            if len(same_symbol_sorted) > 3 and pos in same_symbol_sorted[3:]:
+                should_close = True
+                reason = f"🧹 碎片化清理: {pos.symbol} {len(same_symbol_sorted)}笔→保留3笔"
+
+        if should_close:
+            try:
+                if pos.side == "LONG":
+                    pf.sell(pos.id, pos.current_price, reason=reason)
+                else:
+                    pf.cover_short(pos.id, pos.current_price, reason=reason)
+                log_func(f"  {reason} | {pos.symbol} | 入场{pos.entry_price}→现价{pos.current_price}")
+                results.append(f"🛑 止损/清理: {pos.symbol} ({reason})")
+            except Exception as e:
+                log_func(f"  ❌ 止损平仓失败 {pos.symbol}: {e}")
+
+    return results
+
+
 def _manage_kline_positions(kline_positions: list, pf, log_func) -> list:
     """
     🕯️ 裸K专属持仓管理 — 结构止盈止损
@@ -352,14 +424,20 @@ def execute_strategy_signals(signals: list, pf) -> list:
                 )
                 icon = "🟢" if not is_kline else "🕯️"
                 action_word = "BUY"
-            else:  # SELL → 模拟盘记做空
-                # 模拟盘用 sell 方法 (如果portfolio支持) 或记录在案
-                trade = pf.sell(
-                    market="crypto", symbol=sig["symbol"],
-                    name=sig.get("name", sig["symbol"]),
-                    price=sig["price"], quantity=quantity,
-                    reason=reason,
-                ) if hasattr(pf, 'sell') else None
+            else:  # SELL → 模拟盘开空仓
+                # 🆕 用 open_short 开空仓 (做空)
+                if hasattr(pf, 'open_short'):
+                    trade = pf.open_short(
+                        market="crypto", symbol=sig["symbol"],
+                        name=sig.get("name", sig["symbol"]),
+                        price=sig["price"], quantity=quantity,
+                        margin_usdt=max_size, leverage=1,
+                        reason=reason,
+                        stop_loss=sig["price"] * 1.08,
+                        take_profit=sig["price"] * 0.88,
+                    )
+                else:
+                    trade = None
                 icon = "🔴" if not is_kline else "🕯️"
                 action_word = "SHORT"
 
@@ -477,7 +555,7 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
             log_func(f"  ⚡ 跳过 {sym}: 无法获取余额")
             continue
         price = sig.get("price", 100.0)
-        pos = leverage_engine.calculate_position(total_equity, price, decision)
+        pos = leverage_engine.calculate_position(total_equity, price, decision, side=side)
 
         icon = "🟢" if action == "BUY" else "🔴"
         log_func(
@@ -699,6 +777,13 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
                 log(f"📊 A股/美股/港股/bStocks: {len(trad_results)} 笔信号")
         except Exception as e:
             log(f"⚠️ A股/美股/港股扫描异常: {e}")
+
+        # ── 🛡️ 硬止损强制执行 (所有持仓) ──
+        if pf and pf.open_positions:
+            sl_results = _enforce_hard_stop_loss(pf, log)
+            if sl_results:
+                results.extend(sl_results)
+                log(f"🛡️ 硬止损: {len(sl_results)} 笔强制平仓")
 
         # ── 🕯️ 裸K持仓管理 (结构止盈止损) ──
         if pf and pf.open_positions:

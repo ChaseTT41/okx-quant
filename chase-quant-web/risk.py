@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 # ── 风控参数 ──
 MAX_SINGLE_LOSS_PCT = 2.0     # 单笔最大亏损 ≤ 总资金2%
-MAX_POSITIONS = 5             # 最大同时持仓数
+MAX_POSITIONS = 10            # 最大同时持仓数 (🆕 与 daemon 对齐)
 HARD_STOP_LOSS_PCT = -8.0     # 硬止损线
 DAILY_LOSS_LIMIT_PCT = -5.0   # 日亏损上限
 MONTHLY_TARGET_PCT = 30.0     # 月盈利目标

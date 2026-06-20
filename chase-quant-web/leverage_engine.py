@@ -673,7 +673,7 @@ class LeverageEngine:
     # ═══════════════════════════════════════════════════════════
 
     def calculate_position(self, total_equity: float, price: float,
-                            decision: LeverageDecision) -> dict:
+                            decision: LeverageDecision, side: str = "buy") -> dict:
         """
         根据杠杆决策计算实际仓位。
 
@@ -681,6 +681,7 @@ class LeverageEngine:
           total_equity: 总权益 (USDT)
           price: 当前价格
           decision: LeverageDecision
+          side: 'buy' 做多 / 'sell' 做空 (默认 buy)
 
         Returns:
           {
