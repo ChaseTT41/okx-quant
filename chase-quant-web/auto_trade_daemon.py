@@ -578,6 +578,12 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
         price = sig.get("price", 100.0)
         pos = leverage_engine.calculate_position(total_equity, price, decision, side=side)
 
+        # 🐜 最低保证金过滤: 几U的单没必要做, 浪费手续费
+        MIN_MARGIN_USDT = 10.0
+        if pos['margin_usdt'] < MIN_MARGIN_USDT:
+            log_func(f"  🐜 跳过 {sym}: 保证金${pos['margin_usdt']:.2f} < ${MIN_MARGIN_USDT} (不值得做)")
+            continue
+
         icon = "🟢" if action == "BUY" else "🔴"
         log_func(
             f"  {icon} {sym}: {decision.recommended_leverage}x | "

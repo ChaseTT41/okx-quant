@@ -1,10 +1,10 @@
 {
   "cash": {
-    "crypto": 2076.457510306735,
-    "a_stock": 187.71933848740105,
+    "crypto": 1695.1304310456894,
+    "a_stock": 2312.109769676133,
     "us_stock": 307.83589843749996,
-    "hk_stock": 166.87937382973132,
-    "b_stock": 371.5413863702837
+    "hk_stock": 484.7403241894287,
+    "b_stock": 554.5970403936797
   },
   "positions": {
     "a_stock_600900_20260609105003": {
@@ -19,12 +19,18 @@
       "entry_reason": "RSI=55 中性 | MACD正柱 | 多头排列",
       "stop_loss": 25.309200000000004,
       "take_profit": 31.636499999999998,
-      "status": "open",
+      "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 27.51,
       "entry_prices": [
         27.51
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "a_stock_000001_20260609105003": {
       "id": "a_stock_000001_20260609105003",
@@ -38,12 +44,18 @@
       "entry_reason": "RSI=56 中性 | MACD正柱",
       "stop_loss": 10.1476,
       "take_profit": 12.684499999999998,
-      "status": "open",
+      "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 11.03,
       "entry_prices": [
         11.03
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_BNB/USDT_20260609122144": {
       "id": "crypto_BNB/USDT_20260609122144",
@@ -51,18 +63,24 @@
       "symbol": "BNB/USDT",
       "name": "BNB",
       "entry_price": 602.9,
-      "current_price": 589.45,
+      "current_price": 582.95,
       "quantity": 0.3317299718029524,
       "entry_time": "2026-06-09T05:21:44.374434+00:00",
       "entry_reason": "[最小仓位] 信号=-0.148 | 全市场偏空中选最强, 自动建仓",
       "stop_loss": 554.668,
       "take_profit": 693.3349999999999,
-      "status": "open",
+      "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 602.9,
       "entry_prices": [
         602.9
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_BTC/USDT_20260610033744": {
       "id": "crypto_BTC/USDT_20260610033744",
@@ -77,11 +95,17 @@
       "stop_loss": 58818.299999999996,
       "take_profit": 66867.12000000001,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 61914.0,
       "entry_prices": [
         61914.0
       ],
-      "execution_strategy": "aggressive"
+      "execution_strategy": "aggressive",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_XRP/USDT_20260610033744": {
       "id": "crypto_XRP/USDT_20260610033744",
@@ -96,11 +120,17 @@
       "stop_loss": 1.08509,
       "take_profit": 1.2335760000000002,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 1.1422,
       "entry_prices": [
         1.1422
       ],
-      "execution_strategy": "aggressive"
+      "execution_strategy": "aggressive",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "hk_stock_03690_20260610144559": {
       "id": "hk_stock_03690_20260610144559",
@@ -115,11 +145,17 @@
       "stop_loss": 78.84400000000001,
       "take_profit": 98.55499999999999,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 85.7,
       "entry_prices": [
         85.7
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "hk_stock_01109_20260610144559": {
       "id": "hk_stock_01109_20260610144559",
@@ -127,18 +163,24 @@
       "symbol": "01109",
       "name": "华润置地",
       "entry_price": 37.62,
-      "current_price": 37.279998779296875,
+      "current_price": 32.08000183105469,
       "quantity": 9.938197767145136,
       "entry_time": "2026-06-10T07:45:59.410708+00:00",
       "entry_reason": "MACD正柱 | 多头排列 | RSI=75(超买)⚠️ | 放量(1.7x)",
       "stop_loss": 34.6104,
       "take_profit": 43.26299999999999,
-      "status": "open",
+      "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 37.62,
       "entry_prices": [
         37.62
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "hk_stock_02020_20260615093550": {
       "id": "hk_stock_02020_20260615093550",
@@ -146,18 +188,24 @@
       "symbol": "02020",
       "name": "安踏体育",
       "entry_price": 76.25,
-      "current_price": 76.25,
+      "current_price": 71.05000305175781,
       "quantity": 8.281548555132938,
       "entry_time": "2026-06-15T02:35:50.188258+00:00",
       "entry_reason": "MACD正柱 | MACD柱放大 | RSI=55(健康) | 波动适中(19%)",
       "stop_loss": 70.15,
       "take_profit": 87.6875,
       "status": "open",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 76.25,
       "entry_prices": [
         76.25
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "us_stock_IWM_20260616005117": {
       "id": "us_stock_IWM_20260616005117",
@@ -165,18 +213,24 @@
       "symbol": "IWM",
       "name": "罗素2000ETF ($295.07)",
       "entry_price": 295.07000732421875,
-      "current_price": 293.7200012207031,
+      "current_price": 295.5899963378906,
       "quantity": 4.236282810765371,
       "entry_time": "2026-06-15T17:51:17.129516+00:00",
       "entry_reason": "RSI=55 健康 | MACD金叉 | 站上20日线 | 20日+6.3%",
       "stop_loss": 271.46440673828124,
       "take_profit": 339.33050842285155,
       "status": "open",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 295.07000732421875,
       "entry_prices": [
         295.07000732421875
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "us_stock_SMH_20260616005117": {
       "id": "us_stock_SMH_20260616005117",
@@ -184,18 +238,24 @@
       "symbol": "SMH",
       "name": "半导体ETF ($647.18)",
       "entry_price": 647.1798706054688,
-      "current_price": 652.4749755859375,
+      "current_price": 659.8800048828125,
       "quantity": 0.9608997872851099,
       "entry_time": "2026-06-15T17:51:17.146171+00:00",
       "entry_reason": "RSI=59 健康 | 站上20日线 | 20日+16.3%",
       "stop_loss": 595.4054809570313,
       "take_profit": 744.256851196289,
       "status": "open",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 647.1798706054688,
       "entry_prices": [
         647.1798706054688
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "us_stock_TLT_20260616005117": {
       "id": "us_stock_TLT_20260616005117",
@@ -203,18 +263,24 @@
       "symbol": "TLT",
       "name": "长期国债ETF ($85.75)",
       "entry_price": 85.7488021850586,
-      "current_price": 87.12000274658203,
+      "current_price": 86.75,
       "quantity": 3.608013227197111,
       "entry_time": "2026-06-15T17:51:17.156423+00:00",
       "entry_reason": "MACD金叉 | 站上20日线",
       "stop_loss": 78.88889801025391,
       "take_profit": 98.61112251281737,
       "status": "open",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 85.7488021850586,
       "entry_prices": [
         85.7488021850586
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_ETH/USDT_20260616005210": {
       "id": "crypto_ETH/USDT_20260616005210",
@@ -229,11 +295,17 @@
       "stop_loss": 1684.0048000000002,
       "take_profit": 2105.006,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 1830.44,
       "entry_prices": [
         1830.44
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_ETH/USDT_20260616012316": {
       "id": "crypto_ETH/USDT_20260616012316",
@@ -248,11 +320,17 @@
       "stop_loss": 1685.1456,
       "take_profit": 2106.432,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 1831.68,
       "entry_prices": [
         1831.68
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_ETH/USDT_20260616015418": {
       "id": "crypto_ETH/USDT_20260616015418",
@@ -267,11 +345,17 @@
       "stop_loss": 1684.6764,
       "take_profit": 2105.8455,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 1831.17,
       "entry_prices": [
         1831.17
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_ETH/USDT_20260616022515": {
       "id": "crypto_ETH/USDT_20260616022515",
@@ -286,11 +370,17 @@
       "stop_loss": 1673.4984,
       "take_profit": 2091.8729999999996,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 1819.02,
       "entry_prices": [
         1819.02
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_ETH/USDT_20260616025612": {
       "id": "crypto_ETH/USDT_20260616025612",
@@ -305,11 +395,17 @@
       "stop_loss": 1677.0312,
       "take_profit": 2096.2889999999998,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 1822.86,
       "entry_prices": [
         1822.86
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_ETH/USDT_20260616060034": {
       "id": "crypto_ETH/USDT_20260616060034",
@@ -324,11 +420,17 @@
       "stop_loss": 1647.2784000000001,
       "take_profit": 2059.098,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 1790.52,
       "entry_prices": [
         1790.52
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_ETH/USDT_20260616063132": {
       "id": "crypto_ETH/USDT_20260616063132",
@@ -343,11 +445,17 @@
       "stop_loss": 1645.2176,
       "take_profit": 2056.522,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 1788.28,
       "entry_prices": [
         1788.28
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "a_stock_601888_20260616093749": {
       "id": "a_stock_601888_20260616093749",
@@ -362,11 +470,17 @@
       "stop_loss": 54.3536,
       "take_profit": 67.942,
       "status": "open",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 59.08,
       "entry_prices": [
         59.08
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "hk_stock_00939_20260616093754": {
       "id": "hk_stock_00939_20260616093754",
@@ -374,18 +488,24 @@
       "symbol": "00939",
       "name": "建设银行",
       "entry_price": 8.979999542236328,
-      "current_price": 8.979999542236328,
+      "current_price": 8.619999885559082,
       "quantity": 28.00118053566657,
       "entry_time": "2026-06-16T02:37:54.392174+00:00",
       "entry_reason": "MACD正柱 | MACD柱放大 | RSI=58(健康) | 波动适中(19%)",
       "stop_loss": 8.261599578857423,
       "take_profit": 10.326999473571776,
       "status": "open",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 8.979999542236328,
       "entry_prices": [
         8.979999542236328
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616144658": {
       "id": "crypto_SOL/USDT_20260616144658",
@@ -400,11 +520,17 @@
       "stop_loss": 68.4204,
       "take_profit": 85.5255,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 74.37,
       "entry_prices": [
         74.37
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616151756": {
       "id": "crypto_SOL/USDT_20260616151756",
@@ -419,11 +545,17 @@
       "stop_loss": 69.03680000000001,
       "take_profit": 86.296,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 75.04,
       "entry_prices": [
         75.04
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616154852": {
       "id": "crypto_SOL/USDT_20260616154852",
@@ -438,11 +570,17 @@
       "stop_loss": 69.138,
       "take_profit": 86.4225,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 75.15,
       "entry_prices": [
         75.15
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616161949": {
       "id": "crypto_SOL/USDT_20260616161949",
@@ -457,11 +595,17 @@
       "stop_loss": 69.0828,
       "take_profit": 86.3535,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 75.09,
       "entry_prices": [
         75.09
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616165045": {
       "id": "crypto_SOL/USDT_20260616165045",
@@ -476,11 +620,17 @@
       "stop_loss": 68.862,
       "take_profit": 86.07749999999999,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 74.85,
       "entry_prices": [
         74.85
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616172148": {
       "id": "crypto_SOL/USDT_20260616172148",
@@ -495,11 +645,17 @@
       "stop_loss": 69.06439999999999,
       "take_profit": 86.33049999999999,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 75.07,
       "entry_prices": [
         75.07
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616174301": {
       "id": "crypto_SOL/USDT_20260616174301",
@@ -514,11 +670,17 @@
       "stop_loss": 69.0092,
       "take_profit": 86.2615,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 75.01,
       "entry_prices": [
         75.01
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "b_stock_MUB/USDT_20260616174337": {
       "id": "b_stock_MUB/USDT_20260616174337",
@@ -533,11 +695,17 @@
       "stop_loss": 7473.6604800000005,
       "take_profit": 9342.075599999998,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 8123.544,
       "entry_prices": [
         8123.544
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "b_stock_NVDAB/USDT_20260616174337": {
       "id": "b_stock_NVDAB/USDT_20260616174337",
@@ -545,18 +713,24 @@
       "symbol": "NVDAB/USDT",
       "name": "英伟达·b ($212.06)",
       "entry_price": 1526.832,
-      "current_price": 1496.448,
+      "current_price": 1509.12,
       "quantity": 0.26198036195206803,
       "entry_time": "2026-06-16T10:43:37.660509+00:00",
       "entry_reason": "站上5日线 | 🆕 bStocks新品 (上线<1周)",
       "stop_loss": 1404.6854400000002,
       "take_profit": 1755.8568,
       "status": "open",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 1526.832,
       "entry_prices": [
         1526.832
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "b_stock_CRCLB/USDT_20260616174337": {
       "id": "b_stock_CRCLB/USDT_20260616174337",
@@ -564,18 +738,24 @@
       "symbol": "CRCLB/USDT",
       "name": "Circle·b ($84.63)",
       "entry_price": 609.336,
-      "current_price": 568.8000000000001,
+      "current_price": 557.712,
       "quantity": 0.32822613467774764,
       "entry_time": "2026-06-16T10:43:37.673421+00:00",
       "entry_reason": "站上5日线 | 🆕 bStocks新品 (上线<1周)",
       "stop_loss": 560.58912,
       "take_profit": 700.7364,
-      "status": "open",
+      "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 609.336,
       "entry_prices": [
         609.336
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616181402": {
       "id": "crypto_SOL/USDT_20260616181402",
@@ -590,11 +770,17 @@
       "stop_loss": 68.6688,
       "take_profit": 85.836,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 74.64,
       "entry_prices": [
         74.64
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616181854": {
       "id": "crypto_SOL/USDT_20260616181854",
@@ -609,11 +795,17 @@
       "stop_loss": 68.7424,
       "take_profit": 85.928,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 74.72,
       "entry_prices": [
         74.72
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616184953": {
       "id": "crypto_SOL/USDT_20260616184953",
@@ -628,11 +820,17 @@
       "stop_loss": 68.50319999999999,
       "take_profit": 85.62899999999999,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 74.46,
       "entry_prices": [
         74.46
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616192056": {
       "id": "crypto_SOL/USDT_20260616192056",
@@ -647,11 +845,17 @@
       "stop_loss": 69.0552,
       "take_profit": 86.319,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 75.06,
       "entry_prices": [
         75.06
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616195155": {
       "id": "crypto_SOL/USDT_20260616195155",
@@ -666,11 +870,17 @@
       "stop_loss": 68.816,
       "take_profit": 86.02,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 74.8,
       "entry_prices": [
         74.8
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616202255": {
       "id": "crypto_SOL/USDT_20260616202255",
@@ -685,11 +895,17 @@
       "stop_loss": 68.24560000000001,
       "take_profit": 85.307,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 74.18,
       "entry_prices": [
         74.18
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260616205356": {
       "id": "crypto_SOL/USDT_20260616205356",
@@ -704,11 +920,17 @@
       "stop_loss": 68.11680000000001,
       "take_profit": 85.146,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 74.04,
       "entry_prices": [
         74.04
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260617010236": {
       "id": "crypto_SOL/USDT_20260617010236",
@@ -723,11 +945,17 @@
       "stop_loss": 68.172,
       "take_profit": 85.21499999999999,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 74.1,
       "entry_prices": [
         74.1
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_ETH/USDT_20260617013334": {
       "id": "crypto_ETH/USDT_20260617013334",
@@ -742,11 +970,17 @@
       "stop_loss": 1653.0376,
       "take_profit": 2066.297,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 1796.78,
       "entry_prices": [
         1796.78
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_ETH/USDT_20260617023537": {
       "id": "crypto_ETH/USDT_20260617023537",
@@ -761,11 +995,17 @@
       "stop_loss": 1655.6044,
       "take_profit": 2069.5054999999998,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 1799.57,
       "entry_prices": [
         1799.57
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_ETH/USDT_20260617060026": {
       "id": "crypto_ETH/USDT_20260617060026",
@@ -780,11 +1020,17 @@
       "stop_loss": 1653.0468,
       "take_profit": 2066.3084999999996,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 1796.79,
       "entry_prices": [
         1796.79
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260617070226": {
       "id": "crypto_SOL/USDT_20260617070226",
@@ -799,11 +1045,17 @@
       "stop_loss": 67.6936,
       "take_profit": 84.61699999999999,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 73.58,
       "entry_prices": [
         73.58
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260617073325": {
       "id": "crypto_SOL/USDT_20260617073325",
@@ -818,11 +1070,17 @@
       "stop_loss": 67.7304,
       "take_profit": 84.663,
       "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 73.62,
       "entry_prices": [
         73.62
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_AVAX/USDT_20260617080422": {
       "id": "crypto_AVAX/USDT_20260617080422",
@@ -830,18 +1088,24 @@
       "symbol": "AVAX/USDT",
       "name": "Avalanche",
       "entry_price": 6.917,
-      "current_price": 6.611,
+      "current_price": 6.344,
       "quantity": 164.86323947475182,
       "entry_time": "2026-06-17T01:04:22.847073+00:00",
       "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0032 | 动量因子: -21.64% (权重0.5)",
       "stop_loss": 6.36364,
       "take_profit": 7.954549999999999,
-      "status": "open",
+      "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 6.917,
       "entry_prices": [
         6.917
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_SOL/USDT_20260617083530": {
       "id": "crypto_SOL/USDT_20260617083530",
@@ -849,18 +1113,24 @@
       "symbol": "SOL/USDT",
       "name": "Solana",
       "entry_price": 73.36,
-      "current_price": 71.04,
+      "current_price": 70.72,
       "quantity": 11.654637143242667,
       "entry_time": "2026-06-17T01:35:30.625298+00:00",
       "entry_reason": "[跨市场Alpha套利] Alpha排名: #1/4 | 综合Alpha: 0.0015 | 动量因子: -10.58% (权重0.5)",
       "stop_loss": 67.4912,
       "take_profit": 84.36399999999999,
       "status": "open",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 73.36,
       "entry_prices": [
         73.36
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "b_stock_SNDKB/USDT_20260617123348": {
       "id": "b_stock_SNDKB/USDT_20260617123348",
@@ -868,18 +1138,24 @@
       "symbol": "SNDKB/USDT",
       "name": "闪迪·b ($2049.92)",
       "entry_price": 14759.424,
-      "current_price": 15117.983999999999,
+      "current_price": 16000.704000000002,
       "quantity": 0.006775332153883513,
       "entry_time": "2026-06-17T05:33:48.582578+00:00",
       "entry_reason": "站上5日线 | 🆕 bStocks新品 (上线<1周)",
       "stop_loss": 13578.670080000002,
       "take_profit": 16973.3376,
       "status": "open",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 14759.424,
       "entry_prices": [
         14759.424
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "b_stock_MUB/USDT_20260617212408": {
       "id": "b_stock_MUB/USDT_20260617212408",
@@ -887,18 +1163,24 @@
       "symbol": "MUB/USDT",
       "name": "微策略·b ($1043.04)",
       "entry_price": 7509.888,
-      "current_price": 7969.8240000000005,
+      "current_price": 8122.32,
       "quantity": 0.049473625488194194,
       "entry_time": "2026-06-17T14:24:08.665384+00:00",
       "entry_reason": "站上5日线 | 🆕 bStocks新品 (上线<1周)",
       "stop_loss": 6909.09696,
       "take_profit": 8636.3712,
       "status": "open",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 7509.888,
       "entry_prices": [
         7509.888
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_NEAR/USDT_20260618070636": {
       "id": "crypto_NEAR/USDT_20260618070636",
@@ -906,18 +1188,24 @@
       "symbol": "NEAR/USDT",
       "name": "NEAR",
       "entry_price": 2.19,
-      "current_price": 2.246,
+      "current_price": 2.115,
       "quantity": 117.0820802878547,
       "entry_time": "2026-06-18T00:06:36.636108+00:00",
       "entry_reason": "[激进交易] 1hRSI超卖(30) | 4hRSI超卖(35) | 触布林下轨 | 超跌反弹(-3.2%)",
       "stop_loss": 2.0148,
       "take_profit": 2.5185,
       "status": "open",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 2.19,
       "entry_prices": [
         2.19
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "crypto_ATOM/USDT_20260618072013": {
       "id": "crypto_ATOM/USDT_20260618072013",
@@ -925,18 +1213,24 @@
       "symbol": "ATOM/USDT",
       "name": "ATOM",
       "entry_price": 1.903,
-      "current_price": 1.828,
+      "current_price": 1.768,
       "quantity": 121.25230650119734,
       "entry_time": "2026-06-18T00:20:13.052086+00:00",
       "entry_reason": "[激进交易] 1hRSI超卖(25) | 4hRSI超卖(29) | 触布林下轨",
       "stop_loss": 1.75076,
       "take_profit": 2.18845,
       "status": "open",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 1.903,
       "entry_prices": [
         1.903
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     },
     "a_stock_002415_20260618093822": {
       "id": "a_stock_002415_20260618093822",
@@ -951,11 +1245,167 @@
       "stop_loss": 29.7712,
       "take_profit": 37.214,
       "status": "open",
+      "side": "LONG",
+      "leverage": 1,
       "avg_entry_price": 32.36,
       "entry_prices": [
         32.36
       ],
-      "execution_strategy": ""
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
+    },
+    "crypto_AVAX/USDT_20260618223803": {
+      "id": "crypto_AVAX/USDT_20260618223803",
+      "market": "crypto",
+      "symbol": "AVAX/USDT",
+      "name": "AVAX",
+      "entry_price": 6.309,
+      "current_price": 5.739,
+      "quantity": 49.47383117995455,
+      "entry_time": "2026-06-18T15:38:03.301513+00:00",
+      "entry_reason": "[激进交易] 1hRSI超卖(14) | 4hRSI超卖(22) | 触布林下轨 | 超跌反弹(-4.7%)",
+      "stop_loss": 5.80428,
+      "take_profit": 7.25535,
+      "status": "closed",
+      "side": "LONG",
+      "leverage": 1,
+      "avg_entry_price": 6.309,
+      "entry_prices": [
+        6.309
+      ],
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
+    },
+    "a_stock_603259_20260619093139": {
+      "id": "a_stock_603259_20260619093139",
+      "market": "a_stock",
+      "symbol": "603259",
+      "name": "药明康德",
+      "entry_price": 102.72,
+      "current_price": 102.72,
+      "quantity": 1.0964914631273426,
+      "entry_time": "2026-06-19T02:31:39.507518+00:00",
+      "entry_reason": "RSI=53 中性 | MACD正柱 | 10日+6.2%",
+      "stop_loss": 94.50240000000001,
+      "take_profit": 118.12799999999999,
+      "status": "open",
+      "side": "LONG",
+      "leverage": 1,
+      "avg_entry_price": 102.72,
+      "entry_prices": [
+        102.72
+      ],
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
+    },
+    "crypto_SUI/USDT_20260620021947": {
+      "id": "crypto_SUI/USDT_20260620021947",
+      "market": "crypto",
+      "symbol": "SUI/USDT",
+      "name": "SUI",
+      "entry_price": 0.7081,
+      "current_price": 0.7021,
+      "quantity": 436.73321065565636,
+      "entry_time": "2026-06-19T19:19:47.057346+00:00",
+      "entry_reason": "[激进交易] 1hRSI超卖(36) | 4hRSI超卖(28) | 低于布林中轨",
+      "stop_loss": 0.651452,
+      "take_profit": 0.8143149999999999,
+      "status": "open",
+      "side": "LONG",
+      "leverage": 1,
+      "avg_entry_price": 0.7081,
+      "entry_prices": [
+        0.7081
+      ],
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
+    },
+    "crypto_ONDO/USDT_20260620192914": {
+      "id": "crypto_ONDO/USDT_20260620192914",
+      "market": "crypto",
+      "symbol": "ONDO/USDT",
+      "name": "ONDO",
+      "entry_price": 0.3489,
+      "current_price": 0.3384,
+      "quantity": 797.634802923751,
+      "entry_time": "2026-06-20T12:29:14.646702+00:00",
+      "entry_reason": "[激进交易] 1hRSI偏低(42) | 4hRSI超卖(40) | 低于布林中轨",
+      "stop_loss": 0.320988,
+      "take_profit": 0.40123499999999995,
+      "status": "open",
+      "side": "LONG",
+      "leverage": 1,
+      "avg_entry_price": 0.3489,
+      "entry_prices": [
+        0.3489
+      ],
+      "execution_strategy": "",
+      "margin_usdt": 0.0,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
+    },
+    "crypto_short_AVAX/USDT_20260620193342": {
+      "id": "crypto_short_AVAX/USDT_20260620193342",
+      "market": "crypto",
+      "symbol": "AVAX/USDT",
+      "name": "Avalanche",
+      "entry_price": 6.185,
+      "current_price": 6.092,
+      "quantity": 101.22775868545395,
+      "entry_time": "2026-06-20T12:33:42.526464+00:00",
+      "entry_reason": "[🐻做空] [跨市场Alpha套利] Alpha排名: 倒数#1 | 综合Alpha: -0.3452 (显著为负) | 动量因子: -30.79% (权重0.5)",
+      "stop_loss": 6.6798,
+      "take_profit": 5.4428,
+      "status": "open",
+      "side": "SHORT",
+      "leverage": 1,
+      "avg_entry_price": 6.185,
+      "entry_prices": [
+        6.185
+      ],
+      "execution_strategy": "",
+      "margin_usdt": 626.0936874695326,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
+    },
+    "crypto_short_ETH/USDT_20260620193342": {
+      "id": "crypto_short_ETH/USDT_20260620193342",
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "name": "Ethereum",
+      "entry_price": 1727.92,
+      "current_price": 1711.71,
+      "quantity": 0.2173312385667309,
+      "entry_time": "2026-06-20T12:33:42.535881+00:00",
+      "entry_reason": "[🐻做空] [均值回归网格] 价格 1727.92 在布林上半区 (中轨=1724.11) | RSI=66.5 接近超买区 (≥55)，提前布局 | 上影线确认",
+      "stop_loss": 1866.1536,
+      "take_profit": 1520.5696,
+      "status": "open",
+      "side": "SHORT",
+      "leverage": 1,
+      "avg_entry_price": 1727.92,
+      "entry_prices": [
+        1727.92
+      ],
+      "execution_strategy": "",
+      "margin_usdt": 375.53099374422567,
+      "kline_stop_loss": 0.0,
+      "kline_take_profit": 0.0,
+      "kline_signal_score": 0
     }
   },
   "initial_capital": 10000.0,
