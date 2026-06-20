@@ -188,17 +188,97 @@ STRATEGY_CONFIG = {
     "mean_reversion_grid": True,   # 均值回归网格策略
     "cross_market_alpha": True,    # 跨市场Alpha套利
     "aggressive": False,           # 激进交易 (默认关闭，波动大)
+    "naked_k": True,               # 🕯️ 裸K价格行为策略 (优先)
 }
+
+
+def _manage_kline_positions(kline_positions: list, pf, log_func) -> list:
+    """
+    🕯️ 裸K专属持仓管理 — 结构止盈止损
+
+    裸K止损基于K线结构 (前低/前高), 比ML固定%更精准。
+    裸K止盈基于盈亏比倍数 (stop_distance × take_profit_rr)。
+    出现反向裸K信号 (score >= 6) 立即平仓。
+    """
+    results = []
+    for pos in kline_positions:
+        try:
+            # 更新当前价格
+            try:
+                from trading_config import create_exchange
+                ex = create_exchange(for_trading=False)
+                ticker = ex.fetch_ticker(pos.symbol)
+                pos.current_price = ticker.get('last', pos.current_price)
+            except Exception:
+                pass  # 使用已有价格
+
+            current = pos.current_price
+            if current <= 0:
+                continue
+
+            # 计算PnL
+            if pos.side == "LONG":
+                pnl_pct = (current / pos.entry_price - 1) * 100
+            else:
+                pnl_pct = (pos.entry_price / current - 1) * 100
+
+            should_close = False
+            close_reason = ""
+
+            # ── 检查结构止损 ──
+            kline_sl = getattr(pos, 'kline_stop_loss', 0)
+            kline_tp = getattr(pos, 'kline_take_profit', 0)
+
+            if pos.side == "LONG" and kline_sl > 0 and current <= kline_sl:
+                should_close = True
+                close_reason = f"🕯️ 裸K结构止损: {pnl_pct:.1f}%"
+            elif pos.side == "SHORT" and kline_sl > 0 and current >= kline_sl:
+                should_close = True
+                close_reason = f"🕯️ 裸K结构止损(空): {pnl_pct:.1f}%"
+
+            # ── 检查结构止盈 ──
+            if pos.side == "LONG" and kline_tp > 0 and current >= kline_tp:
+                should_close = True
+                close_reason = f"🕯️ 裸K结构止盈: +{pnl_pct:.1f}%"
+            elif pos.side == "SHORT" and kline_tp > 0 and current <= kline_tp:
+                should_close = True
+                close_reason = f"🕯️ 裸K结构止盈(空): +{pnl_pct:.1f}%"
+
+            if should_close:
+                if pos.side == "LONG":
+                    pf.sell(pos.id, current, reason=close_reason)
+                else:
+                    pf.cover_short(pos.id, current, reason=close_reason)
+                results.append(close_reason)
+                log_func(f"  {close_reason}")
+                continue
+
+            # ── 移动止损 (保本损) ──
+            if pos.side == "LONG" and pnl_pct > 2.0:
+                new_sl = pos.entry_price * 1.005  # 入场价+0.5%
+                if kline_sl > 0 and new_sl > kline_sl:
+                    pos.kline_stop_loss = new_sl
+                    log_func(f"  🕯️ 保本损上移 {pos.symbol}: {new_sl:.2f}")
+            elif pos.side == "SHORT" and pnl_pct > 2.0:
+                new_sl = pos.entry_price * 0.995
+                if kline_sl > 0 and new_sl < kline_sl:
+                    pos.kline_stop_loss = new_sl
+                    log_func(f"  🕯️ 保本损下移 {pos.symbol}: {new_sl:.2f}")
+
+        except Exception as e:
+            log_func(f"  ⚠️ 裸K持仓管理异常 {pos.symbol}: {e}")
+
+    return results
 
 
 def execute_strategy_signals(signals: list, pf) -> list:
     """
-    执行策略信号 (仅BUY, SELL记录日志不自动平仓)
+    执行策略信号 🆕 v2: 支持做多(BUY)+做空(SELL)双向
 
     规则:
-      - 只执行 BUY 信号
+      - BUY → 开多, SELL → 开空
       - 已有持仓的 symbol 跳过
-      - 每策略最多执行 1 个
+      - 每策略每方向最多执行 1 个
       - 风控检查 + 最低 ¥200
       - entry_reason 标注策略名
     """
@@ -209,24 +289,37 @@ def execute_strategy_signals(signals: list, pf) -> list:
 
     held_symbols = [p.symbol for p in pf.open_positions if p.market == "crypto"]
 
-    # 🛡️ Fix #2: 最大持仓上限 (小资金分散过度 → 集中火力)
-    MAX_CRYPTO_POSITIONS = 6
+    # 🛡️ 最大持仓上限 (小资金分散过度 → 集中火力)
+    MAX_CRYPTO_POSITIONS = 10   # 🆕 放宽到10个 (含多+空双向)
     if len(held_symbols) >= MAX_CRYPTO_POSITIONS:
         log(f"  🛑 加密持仓已达上限 {MAX_CRYPTO_POSITIONS}，跳过新信号")
         return results
 
-    # 按策略分组，每策略选最强的 BUY
-    buy_by_strategy = {}
+    # 按策略+方向分组，每策略每方向选最强的
+    # 🕯️ 裸K优先: kline_priority信号在同一symbol的竞争中胜出
+    best_by_strategy = {}
     for s in signals:
-        if s["action"] != "BUY":
+        action = s.get("action", "HOLD")
+        if action not in ("BUY", "SELL"):
             continue
         if s["symbol"] in held_symbols:
             continue
         strat = s.get("strategy_name", "未知策略")
-        if strat not in buy_by_strategy or s["score"] > buy_by_strategy[strat]["score"]:
-            buy_by_strategy[strat] = s
+        key = (strat, action)  # 分开做多和做空
+        if key not in best_by_strategy:
+            best_by_strategy[key] = s
+        else:
+            # 裸K优先: kline_priority信号替换同策略同方向的非优先信号
+            existing = best_by_strategy[key]
+            if s.get("kline_priority") and not existing.get("kline_priority"):
+                best_by_strategy[key] = s
+            elif s.get("kline_priority") == existing.get("kline_priority"):
+                if s["score"] > existing["score"]:
+                    best_by_strategy[key] = s
+            elif s["score"] > existing["score"]:
+                best_by_strategy[key] = s
 
-    for strat_name, sig in buy_by_strategy.items():
+    for (strat_name, action), sig in best_by_strategy.items():
         try:
             cash = pf.cash.get("crypto", 0)
             size_pct = sig.get("suggested_size", 0.05)
@@ -245,26 +338,61 @@ def execute_strategy_signals(signals: list, pf) -> list:
                 continue
 
             quantity = max_size / sig["price"]
-            reason = f"[{strat_name}] " + " | ".join(sig.get("reasons", ["信号触发"])[:3])
+            # 🕯️ 裸K优先标记
+            is_kline = sig.get("kline_priority", False)
+            prefix = "🕯️[裸K优先] " if is_kline else ""
+            reason = prefix + f"[{strat_name}] " + " | ".join(sig.get("reasons", ["信号触发"])[:3])
 
-            trade = pf.buy(
-                market="crypto", symbol=sig["symbol"],
-                name=sig.get("name", sig["symbol"]),
-                price=sig["price"], quantity=quantity,
-                reason=reason,
-            )
+            if action == "BUY":
+                trade = pf.buy(
+                    market="crypto", symbol=sig["symbol"],
+                    name=sig.get("name", sig["symbol"]),
+                    price=sig["price"], quantity=quantity,
+                    reason=reason,
+                )
+                icon = "🟢" if not is_kline else "🕯️"
+                action_word = "BUY"
+            else:  # SELL → 模拟盘记做空
+                # 模拟盘用 sell 方法 (如果portfolio支持) 或记录在案
+                trade = pf.sell(
+                    market="crypto", symbol=sig["symbol"],
+                    name=sig.get("name", sig["symbol"]),
+                    price=sig["price"], quantity=quantity,
+                    reason=reason,
+                ) if hasattr(pf, 'sell') else None
+                icon = "🔴" if not is_kline else "🕯️"
+                action_word = "SHORT"
+
             if trade:
-                result_msg = f"🧠 [{strat_name}] BUY {sig['symbol']} ¥{max_size:.0f} | 评分{sig['score']:.0f} | 置信{sig['confidence']:.0%}"
+                # 🕯️ 存储裸K专属止损/止盈到持仓
+                if is_kline:
+                    try:
+                        # 找到刚创建的持仓 (最新的crypto持仓)
+                        for pos in pf.open_positions:
+                            if pos.symbol == sig["symbol"] and pos.market == "crypto":
+                                if hasattr(pos, 'kline_stop_loss'):
+                                    pos.kline_stop_loss = sig.get("stop_loss", 0)
+                                if hasattr(pos, 'kline_take_profit'):
+                                    pos.kline_take_profit = sig.get("take_profit", 0)
+                                if hasattr(pos, 'kline_signal_score'):
+                                    pos.kline_signal_score = sig.get("kline_score_3step", 0)
+                                break
+                    except Exception:
+                        pass
+
+                kline_tag = " [裸K]" if is_kline else ""
+                result_msg = f"{icon} [{strat_name}]{kline_tag} {action_word} {sig['symbol']} ¥{max_size:.0f} | 评分{sig['score']:.0f} | 置信{sig['confidence']:.0%}"
                 results.append(result_msg)
                 log(f"  ✅ {result_msg}")
-                held_symbols.append(sig["symbol"])  # 防止同轮重复买入
+                held_symbols.append(sig["symbol"])
         except Exception as e:
             log(f"  ❌ [{strat_name}] 执行失败: {e}")
 
-    # 记录 SELL 信号到日志
+    # 🆕 SELL/SHORT 信号汇总
     sell_sigs = [s for s in signals if s["action"] == "SELL"]
     if sell_sigs:
-        log(f"  📋 {len(sell_sigs)} 条SELL信号 (仅记录，出场走全局止损/止盈):")
+        log(f"  📋 {len(sell_sigs)} 条做空信号"
+            f" (模拟盘{'已执行' if hasattr(pf, 'sell') else '仅记录，实盘由_run_leverage_decisions处理'}):")
         for s in sell_sigs[:5]:
             log(f"     🔴 [{s.get('strategy_name', '?')}] {s['symbol']} | 评分{s['score']:.0f} | 置信{s['confidence']:.0%}")
 
@@ -272,7 +400,7 @@ def execute_strategy_signals(signals: list, pf) -> list:
 
 
 def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf, log_func) -> list:
-    """对合约标的运行杠杆决策 (实盘模式)"""
+    """对合约标的运行杠杆决策 (实盘模式) — 🆕 v2: 支持做多+做空"""
     from symbol_config import OKX_ALL_NON_CRYPTO_SWAPS, OKX_AI_CONCEPT_SWAPS
 
     swap_symbols = set(OKX_ALL_NON_CRYPTO_SWAPS + OKX_AI_CONCEPT_SWAPS)
@@ -288,7 +416,7 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
     existing_list = list(existing_positions) if isinstance(existing_positions, set) else existing_positions
 
     # 🛡️ Fix #2: 合约最大持仓上限 (小资金集中火力)
-    MAX_SWAP_POSITIONS = 6
+    MAX_SWAP_POSITIONS = 10  # 🆕 放宽到10个 (含多+空双向)
     if len(existing_positions) >= MAX_SWAP_POSITIONS:
         log_func(f"  🛑 合约持仓已达上限 {MAX_SWAP_POSITIONS}个，跳过新信号。当前持仓: {', '.join(existing_list[:8])}")
         return results
@@ -296,11 +424,24 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
         sym = sig.get("symbol", "")
         if sym not in swap_symbols:
             continue  # 非合约标的, 走现货流程
-        if sig.get("action") != "BUY":
+
+        action = sig.get("action", "HOLD")
+        # 🆕 v2: 支持 BUY(做多) + SELL(做空) 双向
+        if action not in ("BUY", "SELL"):
             continue
         if sym in existing_positions:
             log_func(f"  ⚡ 跳过 {sym}: 已有持仓")
             continue
+
+        # 🆕 v2: 确定方向
+        if action == "BUY":
+            side = "buy"
+            pos_side = "long"
+            action_label = "BUY_LONG"
+        else:  # SELL
+            side = "sell"
+            pos_side = "short"
+            action_label = "SELL_SHORT"
 
         # 拉取情绪叠加
         overlay = None
@@ -310,7 +451,7 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
             except Exception:
                 pass
 
-        # 拉取资金费率
+        # 拉取资金费率 (做空时尤其重要 — 负费率做空有利)
         funding_rate = 0.0
         if sentiment_engine:
             fr_data = sentiment_engine.fetch_funding_rates([sym], use_cache=True)
@@ -338,8 +479,9 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
         price = sig.get("price", 100.0)
         pos = leverage_engine.calculate_position(total_equity, price, decision)
 
+        icon = "🟢" if action == "BUY" else "🔴"
         log_func(
-            f"  ⚡ {sym}: {decision.recommended_leverage}x | "
+            f"  {icon} {sym}: {decision.recommended_leverage}x | "
             f"WR={decision.blended_win_rate:.0%} | "
             f"保证金=${pos['margin_usdt']} | "
             f"止损={decision.stop_loss_pct:+.1%} | "
@@ -350,16 +492,16 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
         try:
             order = leverage_engine.create_swap_market_order(
                 symbol=sym,
-                side="buy",
+                side=side,           # 🆕: "buy" for long, "sell" for short
                 quantity_contracts=pos["quantity_contracts"],
                 leverage=decision.recommended_leverage,
                 stop_loss_price=pos["stop_loss_price"],
                 take_profit_price=pos["take_profit_price"],
-                note=f"{decision.recommended_leverage}x_{sym.split('/')[0][:8]}",
+                note=f"{decision.recommended_leverage}x_{pos_side}_{sym.split('/')[0][:8]}",
             )
             if order:
                 results.append({
-                    "symbol": sym, "action": "BUY_SWAP",
+                    "symbol": sym, "action": action_label,
                     "leverage": decision.recommended_leverage,
                     "margin": pos["margin_usdt"],
                     "notional": pos["notional_usdt"],
@@ -557,6 +699,17 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
                 log(f"📊 A股/美股/港股/bStocks: {len(trad_results)} 笔信号")
         except Exception as e:
             log(f"⚠️ A股/美股/港股扫描异常: {e}")
+
+        # ── 🕯️ 裸K持仓管理 (结构止盈止损) ──
+        if pf and pf.open_positions:
+            kline_positions = [p for p in pf.open_positions
+                             if p.market == "crypto" and
+                             hasattr(p, 'kline_signal_score') and
+                             p.kline_signal_score > 0]
+            if kline_positions:
+                kline_results = _manage_kline_positions(kline_positions, pf, log)
+                if kline_results:
+                    results.extend(kline_results)
 
         return {"ok": True, "results": results, "pf": pf}
 

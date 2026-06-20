@@ -343,6 +343,27 @@ with tab1:
         st.metric("存活评分", f"{survival:.0f}/100",
                   delta="🟢 安全" if survival > 60 else "🟡 注意" if survival > 30 else "🔴 危险")
 
+    # 🕯️ 裸K系统状态 (如果可用)
+    if NAKED_K_AVAILABLE:
+        kline_positions = [p for p in pf.open_positions
+                          if hasattr(p, 'kline_signal_score') and p.kline_signal_score > 0]
+        if kline_positions:
+            st.divider()
+            st.subheader("🕯️ 裸K系统状态")
+            kline_cols = st.columns(min(5, len(kline_positions)))
+            for i, pos in enumerate(kline_positions):
+                with kline_cols[i % 5]:
+                    k_pnl = (pos.current_price / pos.entry_price - 1) * 100 if pos.side == "LONG" else \
+                            (pos.entry_price / pos.current_price - 1) * 100
+                    st.metric(
+                        f"🕯️ {pos.symbol}",
+                        f"¥{pos.value:.0f}",
+                        delta=f"{k_pnl:+.1f}%",
+                        help=f"裸K评分: {pos.kline_signal_score}/10 | "
+                             f"结构止损: {pos.kline_stop_loss:.2f} | "
+                             f"结构止盈: {pos.kline_take_profit:.2f}"
+                    )
+
     # 净值曲线
     st.subheader("📈 净值曲线")
     if pf.snapshots:
@@ -617,6 +638,37 @@ with tab2:
 
     # 自动刷新提示
     st.caption("💡 点击「扫描全市场」更新信号 | 信号每5分钟自动更新建议")
+
+    # 🕯️ 裸K优先信号专区
+    if NAKED_K_AVAILABLE:
+        try:
+            from strategy_runner import run_all_strategies, STRATEGY_CONFIG as ST_CFG
+            if ST_CFG.get("naked_k", False):
+                with st.expander("🕯️ 裸K优先信号 (熊猫教练体系)", expanded=True):
+                    st.caption("\"先画地图 → 再看天气 → 最后等信号\" — 三步读图法")
+                    if st.button("🕯️ 生成裸K信号", key="kline_gen_tab2"):
+                        with st.spinner("正在拉取1h/4h数据 + 裸K扫描..."):
+                            try:
+                                kline_sigs = run_all_strategies()
+                                kline_only = [s for s in kline_sigs if s.get("kline_priority")]
+                                if kline_only:
+                                    for ks in kline_only:
+                                        score_color = "#00ff88" if ks.get("kline_score_3step", 0) >= 8 else "#ffaa00"
+                                        st.markdown(f"""
+                                        <div style="background:linear-gradient(135deg, #1a1a0a 0%, #0a0a1a 100%);
+                                                    border:2px solid #ffaa00; border-radius:12px; padding:16px; margin:8px 0;">
+                                        <b style="color:#ffaa00; font-size:16px;">🔝 优先</b>
+                                        <b style="font-size:16px;"> {ks['symbol']} {ks['action']}</b>
+                                        <span style="color:#888; margin-left:8px;">裸K评分: {ks.get('kline_score_3step', '?')}/10</span><br>
+                                        <span style="color:#aaa;">趋势{ks.get('kline_score_trend', '?')}/4 + 关键位{ks.get('kline_score_keylevel', '?')}/3 + 信号K{ks.get('kline_score_signalk', '?')}/3</span>
+                                        </div>
+                                        """, unsafe_allow_html=True)
+                                else:
+                                    st.info("🕯️ 当前无裸K入场信号 — 三步法评分未达标或等待Low2/High2确认")
+                            except Exception as e:
+                                st.warning(f"裸K扫描异常: {e}")
+        except ImportError:
+            pass
 
     # 历史信号表现的简单统计
     st.divider()
@@ -3270,6 +3322,63 @@ with tab8:
                             icon = "✅" if bms.kind.startswith("BMS") else "⚠️"
                             st.info(f"{icon} **{sym}** — {bms.kind}: {bms.description} "
                                    f"(置信度={bms.confidence:.0%})")
+
+                    # ── 🕯️ Low1/Low2 + High1/High2 计数 (Vision核心发现) ──
+                    lh_all = []
+                    for sym, result in all_results.items():
+                        for lh in result.low_high_counts:
+                            lh_all.append((sym, lh))
+
+                    if lh_all:
+                        st.divider()
+                        st.subheader("🔢 Low/High 入场计数系统")
+                        st.caption("Low1=打底(胜率低) | Low2=出击(胜率高) | High1/High2同理做空")
+                        for sym, lh in lh_all:
+                            lh_type = lh.get('type', '?')
+                            confirmed = lh.get('confirmed', False)
+                            quality = lh.get('quality', 0)
+                            direction = lh.get('direction', '?')
+                            quality_color = "#00ff88" if quality >= 0.7 else "#ffaa00" if quality >= 0.5 else "#ff4444"
+                            icon = "✅" if confirmed else "⏳"
+                            st.markdown(f"""
+                            <div style="background:#151820; border-radius:8px; padding:8px 12px;
+                                        margin:4px 0; border-left:3px solid {quality_color}; font-size:13px;">
+                            {icon} <b>{sym}</b> — {lh_type} |
+                            方向: {direction} |
+                            质量: <b style="color:{quality_color}">{quality:.0%}</b> |
+                            {'已确认 ✅' if confirmed else '等待确认...'}
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                    # ── 🕯️ 信号K+入场K 两步确认对 ──
+                    se_all = []
+                    for sym, result in all_results.items():
+                        for se in result.signal_entry_pairs:
+                            se_all.append((sym, se))
+
+                    if se_all:
+                        st.divider()
+                        st.subheader("🔄 信号K+入场K 两步确认")
+                        st.caption("信号K(非趋势K) → 入场K(趋势K): 方向从犹豫到确认")
+                        for sym, se in se_all:
+                            sig_type = se.get('signal_type', '?')
+                            entry_type = se.get('entry_type', '?')
+                            valid = se.get('valid', False)
+                            icon = "✅" if valid else "⚠️"
+                            st.info(f"{icon} **{sym}**: 信号K({sig_type}) → 入场K({entry_type}) "
+                                   f"| 有效: {valid}")
+
+                    # ── 🕯️ 动量追单警告 ──
+                    mw_all = []
+                    for sym, result in all_results.items():
+                        for mw in result.momentum_warnings:
+                            mw_all.append((sym, mw))
+                    if mw_all:
+                        st.divider()
+                        st.subheader("⚠️ 动量追单警告")
+                        for sym, mw in mw_all:
+                            st.warning(f"⚡ **{sym}**: 检测到强动能K线，不建议追单 — "
+                                      f"等待回调到关键位后再找信号K确认")
 
                 else:
                     st.warning("未能获取任何数据, 请检查网络或稍后重试")

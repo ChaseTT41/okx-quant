@@ -42,7 +42,7 @@ class StrategyParam:
     """策略参数定义 — 带中文说明"""
     key: str
     value: any
-    type: str  # int | float | str | list | select
+    type: str  # int | float | str | list | select | bool
     label: str  # 中文名称
     description: str  # 中文解释
     options: Optional[List[str]] = None  # select类型的可选项
@@ -1428,6 +1428,215 @@ MACD: 1h金叉+4h柱放大 → 动量确认
 
 
 # ═══════════════════════════════════════════
+# 策略 8: 裸K价格行为策略 (熊猫教练体系) 🕯️ 优先
+# ═══════════════════════════════════════════
+
+class KLineStrategy(BaseStrategy):
+    """
+    裸K价格行为策略 — 熊猫教练「熊猫讲裸K」交易体系 v1.0
+
+    核心理念: "先画地图 → 再看天气 → 最后等信号"
+    三步法评分: ①判趋势(0-4分) + ②找关键位(0-3分) + ③信号K确认(0-3分) = 总分10
+
+    入场三问: ①趋势对吗? ②位置对吗? ③信号对吗?(信号K+入场K)
+    三大铁律: ①顺大势逆小势 ②第一次机会是陷阱 ③只做看得懂的行情
+
+    125个K线指标/17大类 — Vision识图从250+熊猫学社YouTube视频蒸馏
+    """
+
+    # ── 默认参数 ──
+    PASS_SCORE = 7               # 三步法及格线 (7/10)
+    MIN_RISK_REWARD = 1.2        # 最低盈亏比
+    REQUIRE_LOW2 = True           # 要求Low2/High2确认
+    BLOCK_MOMENTUM_CHASE = True   # 阻止追单
+    MAX_POSITION_PCT = 25         # 最大仓位%
+    TAKE_PROFIT_RR = 2.0          # 止盈盈亏比倍数
+    PRIORITY_OVERRIDE = True      # 优先覆盖ML信号
+    SCAN_TIMEFRAMES = ['1h', '4h'] # 主扫描周期
+    HIGHER_TF = '1d'              # 高级别确认周期
+
+    @classmethod
+    def create(cls) -> "KLineStrategy":
+        config = StrategyConfig(
+            id="strat-naked-k-007",
+            name="裸K价格行为策略",
+            version="v1.0",
+            market="crypto",
+            symbols=[],  # 运行时从 symbol_config 动态获取
+            status="running",
+            logic_explanation="""
+            🕯️ 裸K价格行为策略 — 熊猫教练「三步读图法」体系:
+
+            ① 定级别(选对周期): 主看1h/4h, 1d确认大趋势
+            ② 画结构(识别骨架): BMS回调结构/SMS反转结构/交易区间/通道
+            ③ 找信号(等待入场): 信号K线(非趋势K) + 入场K线(趋势K) 两步确认
+
+            三步评分卡:
+            - 趋势判断(0-4分): 顺大逆小+趋势能量+结构Bias
+            - 关键位置(0-3分): 支撑压力区+斐波那契+最后一个防守位
+            - 信号K质量(0-3分): 信号K+入场K两步确认+Low2/High2计数
+            综合 >= 7/10 才入场, RR >= 1.2:1
+
+            五大K线形态优先:
+            - Pinbar 2.0 (关键位+趋势末端+分组集群)
+            - SB结构/Second Breakout (第2次突破胜率>>第1次)
+            - 末端旗形/楔形三推 (趋势衰竭→反转)
+            - Low2(做多)/High2(做空) 计数系统
+            - 信号K+入场K 两步确认 (非趋势→趋势转换)
+            """,
+            entry_conditions="""
+            🚪 入场三问全部通过才入场:
+
+            ① 趋势对吗?
+              - 上升趋势做多(BMS: HH+HL), 下降趋势做空(SMS: LH+LL)
+              - 回调不破前低(多)/反弹不过前高(空)
+              - "顺大逆小"原则: 大趋势向上, 等小回调结束入场
+
+            ② 位置对吗?
+              - 价格在支撑/压力区附近 (SR Zone tolerance 0.5%)
+              - 斐波那契回调位 (0.382/0.5/0.618)
+              - 有明确的止损位 (前低下方/前高上方)
+
+            ③ 信号对吗?
+              - 信号K线出现 (非趋势K: DOJI/PINBAR/INSIDE/小实体)
+              - 入场K线确认 (趋势K: TREND_BULL/TREND_BEAR)
+              - Low2已确认(做多)/High2已确认(做空) — 质量>=0.7
+              - 无强动能追单警告 (body不超过avg×2)
+            """,
+            exit_conditions="""
+            🏃 三种出场方式:
+
+            ① 结构止盈: 到达下一个SR阻力/支撑区
+            ② RR止盈: 止盈距离 = 止损距离 × 2.0 (可调)
+            ③ 信号反转: 出现反向裸K信号(score>=6)立即平仓
+
+            移动止损: 价格向有利方向移动后, 止损移到入场价(保本损)
+            """,
+            position_sizing="""
+            ⚖️ 以损定仓:
+
+            - 单笔最大仓位: 25% (可调5-40%)
+            - 止损距离 = 入场价到前低/前高的距离
+            - 仓位大小 = (总资金 × 仓位%) / 止损距离
+            - 不追单: 大实体K线后禁止立即入场
+            """,
+            risk_management="""
+            🛡️ 五层防御 (裸K专属):
+
+            ① 信号过滤: 三步评分<7 → 不执行
+            ② Low2/High2门禁: 未确认 → 不执行(可关闭)
+            ③ 追单拦截: 检测到大实体动量K → 不执行
+            ④ 结构止损: 止损基于前低/前高(比固定%更紧)
+            ⑤ 反向覆盖: 出现6+分反向信号 → 立即平仓
+            """,
+            parameters=[
+                StrategyParam("pass_score", 7, "int", "三步法及格线",
+                    "综合评分>=此值才算有效信号 (0-10)", min_val=5, max_val=9, step=1),
+                StrategyParam("min_risk_reward", 1.2, "float", "最低盈亏比",
+                    "止损止盈比低于此值的信号忽略", min_val=1.0, max_val=3.0, step=0.1),
+                StrategyParam("require_low2", True, "bool", "要求Low2/High2确认",
+                    "仅Low2(做多)/High2(做空)已确认的信号才执行"),
+                StrategyParam("block_momentum_chase", True, "bool", "阻止追单",
+                    "有强动能追单警告的信号不执行"),
+                StrategyParam("max_position_pct", 25, "float", "最大仓位%",
+                    "单次交易最大使用资金百分比", min_val=5, max_val=40, step=5),
+                StrategyParam("take_profit_rr", 2.0, "float", "止盈盈亏比倍数",
+                    "止盈距离 = 止损距离 × 此倍数", min_val=1.5, max_val=4.0, step=0.5),
+                StrategyParam("priority_override", True, "bool", "优先覆盖ML信号",
+                    "K线信号评分达标时覆盖同symbol的ML信号"),
+            ],
+        )
+        return cls(config)
+
+    def generate_signals(self, market_data: Dict[str, pd.DataFrame]) -> List[Dict]:
+        """
+        生成裸K交易信号 — 由 strategy_runner._run_naked_k() 调用
+
+        注意: 此方法在 strategy_runner 层面被 _run_naked_k() 包装，
+        实际的数据拉取和扫描在 runner 中完成。这里提供一个备用实现。
+        """
+        return []  # 实际扫描由 strategy_runner._run_naked_k() 完成
+
+    def _convert_signal(self, scalp_sig, symbol: str,
+                         low_high: dict = None, sig_pair: dict = None,
+                         higher_tf_bias: str = None) -> dict:
+        """
+        将 NakedKScanner.TradingSignal 转换为标准策略信号 dict
+
+        Args:
+            scalp_sig: TradingSignal from NakedKScanner
+            symbol: e.g. 'BTC/USDT'
+            low_high: Low1/Low2/High1/High2 count dict
+            sig_pair: SignalK+EntryK pair dict
+            higher_tf_bias: Higher timeframe market bias
+        """
+        action = "BUY" if scalp_sig.action.value == "BUY" else "SELL"
+
+        # Score scaling: 3-step score 0-10 → 0-100
+        scaled_score = scalp_sig.score_3step * 10
+
+        # Risk level
+        if scalp_sig.score_3step >= 8:
+            risk_level = "low"
+        elif scalp_sig.score_3step >= 7:
+            risk_level = "medium"
+        else:
+            risk_level = "high"
+
+        pass_score = self.get_param("pass_score", 7)
+        min_rr = self.get_param("min_risk_reward", 1.2)
+        max_pos_pct = self.get_param("max_position_pct", 25) / 100
+        tp_rr = self.get_param("take_profit_rr", 2.0)
+
+        # Calculate take_profit based on RR ratio
+        if scalp_sig.stop_loss and scalp_sig.entry_price:
+            if action == "BUY":
+                stop_distance = scalp_sig.entry_price - scalp_sig.stop_loss
+                take_profit = scalp_sig.entry_price + stop_distance * tp_rr
+            else:
+                stop_distance = scalp_sig.stop_loss - scalp_sig.entry_price
+                take_profit = scalp_sig.entry_price - stop_distance * tp_rr
+        else:
+            take_profit = scalp_sig.take_profit
+
+        # Build reasons list
+        reasons = list(scalp_sig.reasons) if scalp_sig.reasons else []
+        if low_high and low_high.get('confirmed'):
+            reasons.insert(0, f"Low2/High2确认(质量{low_high.get('quality', 0):.0%})")
+        if sig_pair:
+            reasons.insert(0, f"信号K+入场K两步确认")
+        if higher_tf_bias:
+            reasons.append(f"高TF:{higher_tf_bias}")
+
+        return {
+            "symbol": symbol,
+            "name": symbol.split("/")[0] if "/" in symbol else symbol,
+            "action": action,
+            "price": scalp_sig.entry_price,
+            "score": scaled_score,
+            "confidence": scalp_sig.confidence,
+            "reasons": reasons[:6],
+            "risk_level": risk_level,
+            "suggested_size": max_pos_pct,
+            "stop_loss": scalp_sig.stop_loss,
+            "take_profit": take_profit,
+            "strategy_name": "裸K价格行为",
+            # ── 裸K专属标记 (用于优先级合并) ──
+            "kline_priority": True,  # ← 标记为优先信号
+            "kline_score_3step": scalp_sig.score_3step,
+            "kline_score_trend": scalp_sig.score_trend,
+            "kline_score_keylevel": scalp_sig.score_keylevel,
+            "kline_score_signalk": scalp_sig.score_signalk,
+            "kline_type": scalp_sig.kline_type.value if hasattr(scalp_sig.kline_type, 'value') else str(scalp_sig.kline_type),
+            "kline_risk_reward": scalp_sig.risk_reward,
+            "kline_low_high": low_high,
+            "kline_signal_entry_pair": sig_pair,
+            "kline_higher_tf_bias": higher_tf_bias,
+            "kline_sr_zone": str(scalp_sig.sr_zone) if scalp_sig.sr_zone else None,
+        }
+
+
+# ═══════════════════════════════════════════
 # 策略注册表
 # ═══════════════════════════════════════════
 
@@ -1439,6 +1648,7 @@ STRATEGY_BUILDERS = {
     "strat-v5-qlib-fusion-004": V5QlibFusionStrategy.create,
     "strat-five-dim-scorecard-005": FiveDimScorecardStrategy.create,
     "strat-aggressive-006": AggressiveStrategy.create,
+    "strat-naked-k-007": KLineStrategy.create,  # 🕯️ 裸K策略
 }
 
 

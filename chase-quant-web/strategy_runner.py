@@ -33,6 +33,7 @@ STRATEGY_CONFIG = {
     "mean_reversion_grid": True,   # 均值回归网格策略
     "cross_market_alpha": True,    # 跨市场Alpha套利
     "aggressive": True,            # 激进交易 (Fix #1: 开启，多时间框架RSI+MACD+布林带)
+    "naked_k": True,               # 🕯️ 裸K价格行为策略 (优先)
 }
 
 # ── 需要拉取数据的币种 (所有策略覆盖的币种并集) ──
@@ -149,6 +150,44 @@ def _deduplicate_signals(all_signals: List[dict]) -> List[dict]:
     return sorted(best.values(), key=lambda s: s["score"], reverse=True)
 
 
+def _merge_with_priority(all_signals: List[dict]) -> List[dict]:
+    """
+    🕯️ 优先级合并: 裸K信号 (score >= 7/10) 覆盖同symbol的ML信号
+
+    规则:
+      1. 裸K信号 (kline_priority=True 且 kline_score_3step >= 7)
+         → 覆盖同symbol的所有ML信号 (不管ML给BUY还是SELL)
+      2. 裸K SCORE < 7 的信号与ML并列显示但不覆盖
+      3. 裸K HOLD 信号不阻塞ML
+      4. 不同symbol的ML信号不受影响
+    """
+    # 分离裸K和ML信号
+    kline_sigs = [s for s in all_signals if s.get("kline_priority")]
+    ml_sigs = [s for s in all_signals if not s.get("kline_priority")]
+
+    # 裸K优先覆盖的symbol集合 (score_3step >= 7)
+    override_symbols = set()
+    for s in kline_sigs:
+        if s.get("kline_score_3step", 0) >= 7:
+            override_symbols.add(s["symbol"])
+
+    # 合并: 裸K信号全保留 + ML信号中未被覆盖的
+    merged = list(kline_sigs)
+    overridden_count = 0
+    for s in ml_sigs:
+        if s["symbol"] not in override_symbols:
+            merged.append(s)
+        else:
+            overridden_count += 1
+
+    if overridden_count > 0:
+        print(f"  🔝 [优先覆盖] 裸K信号覆盖了 {overridden_count} 条ML信号 "
+              f"(symbols: {', '.join(sorted(override_symbols))})")
+
+    # 按 score 降序排列，裸K优先标记置顶
+    return sorted(merged, key=lambda s: (s.get("kline_priority", False), s["score"]), reverse=True)
+
+
 # ═══════════════════════════════════════════════════════════
 # 策略 1: ML融合动量
 # ═══════════════════════════════════════════════════════════
@@ -259,14 +298,173 @@ def _run_aggressive(market_data: Dict[str, pd.DataFrame]) -> List[dict]:
 
 
 # ═══════════════════════════════════════════════════════════
-# 主入口
+# 策略 5: 裸K价格行为策略 🕯️ 优先
 # ═══════════════════════════════════════════════════════════
+
+def _run_naked_k(market_data: Dict[str, pd.DataFrame]) -> List[dict]:
+    """
+    运行裸K价格行为策略 — 熊猫教练「三步读图法」体系
+
+    独立拉取 1h/4h/1d 数据 (不同于ML的日线),
+    多时间框架扫描 (1d → 4h → 1h 逐级确认),
+    三步评分过滤 + Low2/High2门禁 + 动量追单拦截。
+    """
+    from strategies import KLineStrategy
+    from naked_k_scanner import scan_multi_timeframe, scan_symbol
+
+    strategy = KLineStrategy.create()
+    if strategy.status != "running":
+        return []
+
+    ex = _get_exchange()
+    if ex is None:
+        print("  ⚠️ [裸K] 无法连接交易所")
+        return []
+
+    # 裸K深度分析聚焦Tier1币种 (15个, 太多会超API限制)
+    try:
+        from symbol_config import TIER1_ML_HEAVY
+        scan_symbols = [s for s in TIER1_ML_HEAVY if "/USDT" in s][:20]
+    except ImportError:
+        scan_symbols = [
+            "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT",
+            "XRP/USDT", "ADA/USDT", "DOGE/USDT", "AVAX/USDT",
+            "DOT/USDT", "LINK/USDT", "UNI/USDT", "ATOM/USDT",
+            "APT/USDT", "NEAR/USDT", "LTC/USDT",
+        ]
+
+    pass_score = strategy.get_param("pass_score", 7)
+    min_rr = strategy.get_param("min_risk_reward", 1.2)
+    require_low2 = strategy.get_param("require_low2", True)
+    block_chase = strategy.get_param("block_momentum_chase", True)
+    timeframes = ['1h', '4h', '1d']
+    limit = 200
+
+    signals = []
+
+    for sym in scan_symbols:
+        try:
+            # 拉取多时间框架OHLCV
+            dfs = {}
+            for tf in timeframes:
+                try:
+                    ohlcv = ex.fetch_ohlcv(sym, tf, limit=limit)
+                    if ohlcv and len(ohlcv) >= 50:
+                        df = pd.DataFrame(ohlcv, columns=['date', 'open', 'high', 'low', 'close', 'volume'])
+                        df['date'] = pd.to_datetime(df['date'], unit='ms')
+                        dfs[tf] = df
+                except Exception:
+                    pass
+
+            # 至少需要1h数据
+            if '1h' not in dfs or '4h' not in dfs:
+                continue
+
+            # 尝试多时间框架扫描 (1d → 4h → 1h)
+            results = None
+            try:
+                if '1d' in dfs:
+                    results = scan_multi_timeframe(dfs, symbol=sym)
+            except Exception:
+                pass
+
+            # Fallback: 单时间框架扫描
+            if results is None:
+                try:
+                    result_4h = scan_symbol(dfs.get('4h'), sym, '4h',
+                                            dfs.get('1d'))
+                    result_1h = scan_symbol(dfs.get('1h'), sym, '1h',
+                                            dfs.get('4h'))
+                    results = {'4h': result_4h, '1h': result_1h}
+                except Exception:
+                    continue
+
+            # 处理每个时间框架
+            for tf in ['4h', '1h']:
+                if tf not in results or results[tf] is None:
+                    continue
+
+                result = results[tf]
+
+                for scalp_sig in result.signals:
+                    # ── 三步评分过滤 ──
+                    if scalp_sig.score_3step < pass_score:
+                        continue
+                    if scalp_sig.risk_reward < min_rr:
+                        continue
+
+                    # ── Low2/High2 门禁 ──
+                    matching_lh = None
+                    if require_low2 and result.low_high_counts:
+                        for lh_dict in result.low_high_counts:
+                            if (lh_dict.get('confirmed') and
+                                lh_dict.get('quality', 0) >= 0.6):
+                                # 匹配方向: 做多需要Low2, 做空需要High2
+                                if (scalp_sig.action.value == 'BUY' and
+                                    lh_dict.get('type', '').startswith('Low')):
+                                    matching_lh = lh_dict
+                                    break
+                                elif (scalp_sig.action.value == 'SELL' and
+                                      lh_dict.get('type', '').startswith('High')):
+                                    matching_lh = lh_dict
+                                    break
+                        if matching_lh is None:
+                            continue  # 跳过无Low2/High2确认的信号
+
+                    # ── 动量追单拦截 ──
+                    if block_chase and result.momentum_warnings:
+                        sig_bar = getattr(scalp_sig, 'signal_bar_idx', -1)
+                        has_warning = any(
+                            w.get('bar_idx', -1) >= sig_bar - 3
+                            for w in result.momentum_warnings
+                            if isinstance(w, dict)
+                        )
+                        if has_warning:
+                            continue
+
+                    # ── 找匹配的信号K+入场K对 ──
+                    matching_pair = None
+                    if result.signal_entry_pairs:
+                        sig_bar = getattr(scalp_sig, 'signal_bar_idx', -1)
+                        for sp_dict in result.signal_entry_pairs:
+                            if isinstance(sp_dict, dict):
+                                if (sp_dict.get('signal_idx') == sig_bar or
+                                    sp_dict.get('entry_idx') == sig_bar):
+                                    matching_pair = sp_dict
+                                    break
+
+                    # ── 获取高级别趋势 ──
+                    higher_bias = None
+                    larger_tf = '4h' if tf == '1h' else '1d'
+                    if larger_tf in results and results[larger_tf]:
+                        higher_bias = results[larger_tf].market_bias.value if hasattr(
+                            results[larger_tf].market_bias, 'value') else str(
+                            results[larger_tf].market_bias)
+
+                    # ── 转换信号 ──
+                    sig = strategy._convert_signal(
+                        scalp_sig, sym,
+                        low_high=matching_lh,
+                        sig_pair=matching_pair,
+                        higher_tf_bias=higher_bias,
+                    )
+                    signals.append(sig)
+
+            # 币种间延迟 (避免API限速)
+            import time as _time
+            _time.sleep(0.5)
+
+        except Exception as e:
+            print(f"  ⚠️ [裸K] {sym} 扫描失败: {e}")
+
+    return signals
 
 STRATEGY_RUNNERS = {
     "ml_momentum": _run_ml_momentum,
     "mean_reversion_grid": _run_mean_reversion,
     "cross_market_alpha": _run_cross_market_alpha,
     "aggressive": _run_aggressive,
+    "naked_k": _run_naked_k,  # 🕯️ 裸K策略 (优先)
 }
 
 STRATEGY_NAMES = {
@@ -274,6 +472,7 @@ STRATEGY_NAMES = {
     "mean_reversion_grid": "均值回归网格",
     "cross_market_alpha": "跨市场Alpha套利",
     "aggressive": "激进交易",
+    "naked_k": "裸K价格行为",
 }
 
 
@@ -326,11 +525,14 @@ def run_all_strategies(market_data: Dict[str, pd.DataFrame] = None,
             import traceback
             traceback.print_exc()
 
-    # 3. 去重
-    deduped = _deduplicate_signals(all_signals)
+    # 3. 🕯️ 优先级合并 (裸K信号>=7分覆盖ML)
+    deduped = _merge_with_priority(all_signals)
 
     if len(deduped) < len(all_signals):
-        print(f"  🔄 去重: {len(all_signals)} → {len(deduped)} 信号")
+        merged_ml = sum(1 for s in all_signals if not s.get("kline_priority"))
+        merged_kline = sum(1 for s in all_signals if s.get("kline_priority"))
+        print(f"  🔄 优先级合并: {len(all_signals)} → {len(deduped)} 信号 "
+              f"(裸K{merged_kline}条 + ML{merged_ml}条)")
 
     # 4. 🎭 情绪叠加 (如果传入 sentiment_engine)
     if sentiment_engine:

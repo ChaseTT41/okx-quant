@@ -74,6 +74,9 @@ class Position:
     entry_prices: list = field(default_factory=list)  # Phase 13: 各切片成交价记录
     execution_strategy: str = ""     # Phase 13: 使用的执行策略
     margin_usdt: float = 0.0         # 🐻 做空保证金 (USDT)
+    kline_stop_loss: float = 0.0     # 🕯️ 裸K结构止损价
+    kline_take_profit: float = 0.0   # 🕯️ 裸K结构止盈价
+    kline_signal_score: int = 0      # 🕯️ 裸K信号评分 (0=非裸K信号)
 
     @property
     def cost(self) -> float:
