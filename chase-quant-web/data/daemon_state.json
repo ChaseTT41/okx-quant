@@ -1,11 +1,11 @@
 {
-  "cycles": 409,
-  "total_trades": 180,
+  "cycles": 602,
+  "total_trades": 200,
   "started_at": "2026-06-08T22:15:00.000000+08:00",
-  "today_cycles": 63,
-  "today_trades": 4,
+  "today_cycles": 16,
+  "today_trades": 14,
   "trade_history": [],
-  "last_push_day": "20260618",
-  "last_daily_push_day": "20260617",
-  "stopped_at": "2026-06-18T03:54:53.750309+08:00"
+  "last_push_day": "20260620",
+  "last_daily_push_day": "20260620",
+  "stopped_at": "2026-06-20T22:46:54.608015+08:00"
 }

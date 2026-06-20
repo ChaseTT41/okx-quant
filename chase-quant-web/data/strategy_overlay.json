@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-06-18T20:51:44.506687+07:00",
-  "review_date": "2026-06-18",
-  "source_review": "data/reviews/2026-06-18_evening.json",
-  "core_judgment": "市场处于高 Beta 资产的共振启动期，优先布局“领头羊”以捕捉最高弹性，同时利用美股趋势标的对冲加密货币的波动。 (置信度: 75%)",
-  "core_confidence": 0.75,
+  "generated_at": "2026-06-19T22:39:54.852306+07:00",
+  "review_date": "2026-06-19",
+  "source_review": "data/reviews/2026-06-19_evening.json",
+  "core_judgment": "资金重心向美股核心资产转移，优先捕捉 SMH 的动能惯性，同时轻仓布局 Crypto 的均值回归。 (置信度: 高)",
+  "core_confidence": 0.5,
   "market_biases": {
     "crypto": {
       "direction": "bullish",
-      "confidence": 0.3,
+      "confidence": 0.5,
       "key_drivers": [],
       "key_levels": {}
     },
@@ -18,14 +18,14 @@
       "key_levels": {}
     },
     "us_stock": {
-      "direction": "bullish",
-      "confidence": 0.3,
+      "direction": "bearish",
+      "confidence": 0.6000000000000001,
       "key_drivers": [],
       "key_levels": {}
     },
     "hk_stock": {
       "direction": "neutral",
-      "confidence": 0.0,
+      "confidence": 0.09999999999999998,
       "key_drivers": [],
       "key_levels": {}
     },
@@ -38,62 +38,62 @@
   },
   "scenarios": [
     {
-      "name": "流动性共振突破",
+      "name": "AI 虹吸效应加剧",
       "probability": 50,
+      "crypto_direction": "neutral",
+      "a_stock_direction": "neutral",
+      "us_stock_direction": "bearish",
+      "hk_stock_direction": "neutral",
+      "b_stock_direction": "neutral",
+      "trigger_condition": "SMH 突破历史新高或出现单日 >3% 的再次跳空上涨，且 TLT 稳在 20 日线之上。",
+      "falsification": "如果 SMH 出现明显的回调（跌幅 > 2%），这个情景就错了"
+    },
+    {
+      "name": "风险偏好均值回归",
+      "probability": 30,
+      "crypto_direction": "bullish",
+      "a_stock_direction": "neutral",
+      "us_stock_direction": "bearish",
+      "hk_stock_direction": "bearish",
+      "b_stock_direction": "neutral",
+      "trigger_condition": "SMH 出现见顶信号（如长上影线）或 TLT 跌破 20 日线导致利率预期反弹。",
+      "falsification": "如果 BTC 价格在美股下跌时同步下跌，这个情景就错了"
+    },
+    {
+      "name": "全球流动性共振爆发",
+      "probability": 20,
       "crypto_direction": "bullish",
       "a_stock_direction": "neutral",
       "us_stock_direction": "bullish",
       "hk_stock_direction": "bullish",
       "b_stock_direction": "neutral",
-      "trigger_condition": "TLT 价格突破关键阻力位且成交量放大，同时 SOL 突破近期高点，带动 ETH 补涨。",
-      "falsification": "如果 TLT 价格在上涨后迅速回落，或 SOL 出现长上影线，这个情景就错了"
-    },
-    {
-      "name": "内部资金汰弱留强",
-      "probability": 30,
-      "crypto_direction": "neutral",
-      "a_stock_direction": "neutral",
-      "us_stock_direction": "neutral",
-      "hk_stock_direction": "bearish",
-      "b_stock_direction": "neutral",
-      "trigger_condition": "SOL 继续冲高，但 AVAX 尽管 RSI 极低却依然无法反弹，或出现“阴跌”状态。",
-      "falsification": "如果 AVAX 出现强力反弹且 RSI 迅速回升至 45 以上，这个情景就错了"
-    },
-    {
-      "name": "技术性共振陷阱",
-      "probability": 20,
-      "crypto_direction": "bearish",
-      "a_stock_direction": "neutral",
-      "us_stock_direction": "bearish",
-      "hk_stock_direction": "bearish",
-      "b_stock_direction": "neutral",
-      "trigger_condition": "任何一个核心标的（如 SOL 或 IWM）跌破 5 日线，触发量化系统的集体卖出信号。",
-      "falsification": "如果全市场在明日开盘后 4 小时内维持上涨趋势且无明显抛盘，这个情景就错了"
+      "trigger_condition": "宏观面出现超预期利好（如美联储鸽派言论或重大 AI 突破），且 BTC 突破关键压力位。",
+      "falsification": "如果任何一个主要市场（US/Crypto/HK）出现独立下跌，这个情景就错了"
     }
   ],
   "max_crypto_positions": 6,
-  "single_trade_max_pct": 0.195,
-  "confidence_multiplier": 1.15,
+  "single_trade_max_pct": 0.22499999999999998,
+  "confidence_multiplier": 1.25,
   "stop_loss_pct": -8.0,
   "take_profit_pct": 15.0,
   "trailing_stop_pct": 5.0,
   "daily_loss_meltdown_pct": -5.0,
   "favor_assets": [
-    "SOL"
+    "SMH",
+    "BTC"
   ],
   "avoid_assets": [
-    "AVAX"
+    "BUY"
   ],
   "dont_do": [
-    "不碰 AVAX: 尽管评分 75 且超卖，但“弱势反弹”在共振行情中极易被资金抛弃，不参与抄底。",
-    "不碰 bStocks (MUB/SNDKB): 评分 60 处于临界点，缺乏历史数据支撑，不在此时尝试新品。",
-    "不在 SOL 暴涨后追高: 若 SOL 开盘即跳空高开 5% 以上，等待 15 分钟回调入场，绝不追在最高点。",
-    "不增加仓位至 100%: 必须保留 20% 现金，防止全市场同步回撤时的心理崩溃。"
+    "不碰 bStocks: NVDAB 等评分死锁在 60 分，属于机械化评分，缺乏个体差异，绝对不入场。",
+    "不追高港股: 安踏、建行虽为 BUY，但动能远弱于美股，在美股确认见顶前，不浪费仓位在补涨资产上。",
+    "不加仓 Crypto: 除非 BTC 评分回升至 80 分以上，否则在 20% 的初始仓位基础上绝不加仓。"
   ],
   "risk_reminders": [
-    "**单笔亏损上限**: 严格执行单笔最大亏损 200 RMB 的限制。",
-    "**熔断机制**: 若明日总资产回撤达到 5% (500 RMB)，立即清仓所有头寸，停止交易，进入观察期。",
-    "**关键观察点**: 密切关注 **IWM 的 $289.88**。如果 IWM 跌破此位且无法快速收回，情景C（共振陷阱）概率大增，需立即减仓。"
+    "**单笔亏损上限**: 严格执行单笔最大亏损 200 RMB (2%)。若 SMH 出现剧烈回调，必须立即止损，不可死扛。",
+    "**熔断机制**: 若明日总资产跌幅达到 5% (500 RMB)，立即清仓所有持仓，强制休息一天。",
+    "**关键观察点**: 密切关注 SMH $665 突破情况（确认情景A）和 TLT $86.00 支撑情况（若跌破则触发情景B）。"
   ],
   "key_levels": {},
   "is_stale": false,

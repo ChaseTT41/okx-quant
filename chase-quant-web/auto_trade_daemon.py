@@ -383,7 +383,7 @@ def execute_strategy_signals(signals: list, pf) -> list:
     held_symbols = [p.symbol for p in pf.open_positions if p.market == "crypto"]
 
     # 🛡️ 最大持仓上限 (小资金分散过度 → 集中火力)
-    MAX_CRYPTO_POSITIONS = 10   # 🆕 放宽到10个 (含多+空双向)
+    MAX_CRYPTO_POSITIONS = 8   # 🆕 适度分散（小账户集中火力）
     if len(held_symbols) >= MAX_CRYPTO_POSITIONS:
         log(f"  🛑 加密持仓已达上限 {MAX_CRYPTO_POSITIONS}，跳过新信号")
         return results
@@ -515,7 +515,7 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
     existing_list = list(existing_positions) if isinstance(existing_positions, set) else existing_positions
 
     # 🛡️ Fix #2: 合约最大持仓上限 (小资金集中火力)
-    MAX_SWAP_POSITIONS = 10  # 🆕 放宽到10个 (含多+空双向)
+    MAX_SWAP_POSITIONS = 5   # 🆕 小账户集中火力，最多5个
     if len(existing_positions) >= MAX_SWAP_POSITIONS:
         log_func(f"  🛑 合约持仓已达上限 {MAX_SWAP_POSITIONS}个，跳过新信号。当前持仓: {', '.join(existing_list[:8])}")
         return results

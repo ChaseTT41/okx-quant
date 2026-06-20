@@ -49,3 +49,4 @@ chase-quant-web/data/models_backup*/
 chase-quant-web/data/models/*.pth
 chase-quant-web/data/models/*.pkl
 chase-quant-web/data/qlib_reports/
+.vercel
