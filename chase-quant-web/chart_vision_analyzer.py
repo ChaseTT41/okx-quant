@@ -222,79 +222,130 @@ def calc_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
 # ═══════════════════════════════════════════════════════════
 
 def detect_signals_text(df: pd.DataFrame, symbol: str, tf: str) -> str:
-    """用数据计算检测关键信号，生成文本描述"""
+    """用数据计算检测关键信号，融入熊猫教练教学：背离检测+零轴分级+三指标共振"""
     last = df.iloc[-1]
     prev = df.iloc[-2]
-    prev5 = df.iloc[-6:-1]
-
     signals = []
 
-    # KDJ 金叉死叉
+    # ═══ KDJ 金叉死叉（带超买超卖分级） ═══
     k_now = last['kdj_k']; d_now = last['kdj_d']
     k_prev = prev['kdj_k']; d_prev = prev['kdj_d']
 
     if k_prev <= d_prev and k_now > d_now:
-        signals.append(f"🔔 KDJ金叉! K上穿D (K={k_now:.1f}, D={d_now:.1f})")
+        if k_now < 30:
+            signals.append(f"🔔 KDJ超卖区金叉! K上穿D (K={k_now:.1f}, D={d_now:.1f}) ⭐⭐⭐⭐⭐")
+        else:
+            signals.append(f"🔔 KDJ金叉! K上穿D (K={k_now:.1f}, D={d_now:.1f}) ⭐⭐⭐")
     elif k_prev >= d_prev and k_now < d_now:
-        signals.append(f"🔔 KDJ死叉! K下穿D (K={k_now:.1f}, D={d_now:.1f})")
+        if k_now > 70:
+            signals.append(f"🔔 KDJ超买区死叉! K下穿D (K={k_now:.1f}, D={d_now:.1f}) ⭐⭐⭐⭐⭐")
+        else:
+            signals.append(f"🔔 KDJ死叉! K下穿D (K={k_now:.1f}, D={d_now:.1f}) ⭐⭐⭐")
     else:
         k_trend = "↑" if k_now > k_prev else "↓"
         d_trend = "↑" if d_now > d_prev else "↓"
-        signals.append(f"KDJ: K={k_now:.1f}{k_trend} D={d_now:.1f}{d_trend} J={last['kdj_j']:.1f}")
+        zone = "超买" if k_now > 80 else "超卖" if k_now < 20 else "中性"
+        signals.append(f"KDJ: K={k_now:.1f}{k_trend} D={d_now:.1f}{d_trend} J={last['kdj_j']:.1f} [{zone}]")
 
-    # MACD 金叉死叉
+    # ═══ MACD 金叉死叉 + 零轴分级 + 背离检测 ═══
     dif_now = last['macd_dif']; dif_prev = prev['macd_dif']
     dea_now = last['macd_dea']; dea_prev = prev['macd_dea']
+    above_zero = dif_now > 0
 
     if dif_prev <= dea_prev and dif_now > dea_now:
-        signals.append(f"🔔 MACD金叉! DIF上穿DEA")
+        strength = "⭐⭐⭐⭐⭐ 强势延续" if above_zero else "⭐⭐⭐ 弱势反弹"
+        signals.append(f"🔔 MACD{'零轴上' if above_zero else '零轴下'}金叉! ({strength})")
     elif dif_prev >= dea_prev and dif_now < dea_now:
-        signals.append(f"🔔 MACD死叉! DIF下穿DEA")
+        strength = "⭐⭐⭐ 高位回调" if above_zero else "⭐⭐⭐⭐⭐ 弱势加速"
+        signals.append(f"🔔 MACD{'零轴上' if above_zero else '零轴下'}死叉! ({strength})")
     else:
         hist_trend = "扩张" if abs(last['macd_hist']) > abs(prev['macd_hist']) else "缩窄"
-        signals.append(f"MACD: DIF={dif_now:.4f} DEA={dea_now:.4f} 柱{hist_trend}")
+        zero_pos = "零轴上" if above_zero else "零轴下"
+        signals.append(f"MACD: DIF={dif_now:.4f} DEA={dea_now:.4f} 柱{hist_trend} [{zero_pos}]")
 
-    # RSI
+    # ── MACD 背离检测（熊猫教练：背离>金叉死叉） ──
+    lookback = min(30, len(df) - 1)
+    recent_close = df['close'].iloc[-lookback:].values
+    recent_dif = df['macd_dif'].iloc[-lookback:].values
+    recent_hist = df['macd_hist'].iloc[-lookback:].values
+
+    # 检测顶背离：价格新高但DIF未新高
+    price_high_idx = np.argmax(recent_close)
+    dif_at_price_high = recent_dif[price_high_idx]
+    dif_max_idx = np.argmax(recent_dif)
+    if price_high_idx > lookback * 0.5:  # 近期高点
+        if recent_dif[-1] < dif_at_price_high * 0.8:
+            signals.append(f"⚠️ MACD顶背离! 价格高位但DIF未同步新高 → 多头动能衰竭")
+
+    # 检测底背离：价格新低但DIF未新低
+    price_low_idx = np.argmin(recent_close)
+    dif_at_price_low = recent_dif[price_low_idx]
+    if price_low_idx > lookback * 0.5:
+        if recent_dif[-1] > dif_at_price_low * 1.2:
+            signals.append(f"💡 MACD底背离! 价格低位但DIF未同步新低 → 空头动能衰竭")
+
+    # ═══ RSI + 50中轴 ═══
     rsi_now = last['rsi']
     rsi_trend = "↑" if rsi_now > prev['rsi'] else "↓"
+    rsi_vs_50 = "多" if rsi_now > 50 else "空"
     if rsi_now < 30:
-        signals.append(f"RSI={rsi_now:.1f}{rsi_trend} ⚠️超卖区")
+        signals.append(f"RSI={rsi_now:.1f}{rsi_trend} ⚠️超卖区 [50中轴:{rsi_vs_50}]")
     elif rsi_now > 70:
-        signals.append(f"RSI={rsi_now:.1f}{rsi_trend} ⚠️超买区")
+        signals.append(f"RSI={rsi_now:.1f}{rsi_trend} ⚠️超买区 [50中轴:{rsi_vs_50}]")
     else:
-        signals.append(f"RSI={rsi_now:.1f}{rsi_trend}")
+        signals.append(f"RSI={rsi_now:.1f}{rsi_trend} [50中轴:{rsi_vs_50}]")
 
-    # 布林带
+    # ═══ 布林带 ═══
     bb_pos = (last['close'] - last['bb_low']) / (last['bb_up'] - last['bb_low']) * 100
-    signals.append(f"布林: 位置{bb_pos:.0f}% 带宽{last['bb_width']:.1f}%")
+    bb_trend = "收窄" if df['bb_width'].iloc[-1] < df['bb_width'].iloc[-5] else "扩张"
+    signals.append(f"布林: 位置{bb_pos:.0f}% 带宽{last['bb_width']:.1f}% [{bb_trend}]")
 
-    # EMA 排列
+    # ═══ EMA 排列 ═══
     emas = [last[f'ema_{p}'] for p in [9, 20, 50, 200]]
     above = sum(1 for e in emas if last['close'] > e)
-    signals.append(f"EMA排列: 价在{above}/4均线上 {'🟢多头' if above >= 3 else '🔴空头' if above <= 1 else '🟡交织'}")
+    ema_order = "🟢多头" if above >= 3 else "🔴空头" if above <= 1 else "🟡交织"
+    # EMA9 vs EMA20 交叉预警
+    ema9_20_diff = abs(last['ema_9'] - last['ema_20']) / last['ema_20'] * 100
+    ema_warn = " ⚡EMA9/20粘合!" if ema9_20_diff < 0.5 else ""
+    signals.append(f"EMA排列: 价在{above}/4均线上 {ema_order}{ema_warn}")
 
-    # 量价关系
+    # ═══ 量价关系 ═══
     vol_ratio = last['volume'] / last['vol_ma20'] if last['vol_ma20'] > 0 else 1
     price_up = last['close'] > prev['close']
     if price_up and vol_ratio > 1.3:
         signals.append(f"量价: 放量上涨✅ (量比{vol_ratio:.1f})")
     elif price_up and vol_ratio < 0.7:
-        signals.append(f"量价: 缩量上涨⚠️ (量比{vol_ratio:.1f})")
+        signals.append(f"量价: ⚠️缩量上涨=假反弹 (量比{vol_ratio:.1f})")
     elif not price_up and vol_ratio > 1.3:
-        signals.append(f"量价: 放量下跌❌ (量比{vol_ratio:.1f})")
+        signals.append(f"量价: ❌放量下跌 (量比{vol_ratio:.1f})")
     else:
         signals.append(f"量价: 量比{vol_ratio:.1f}")
 
     # ADX
     adx_now = last['adx']
     if adx_now > 40:
-        signals.append(f"ADX={adx_now:.1f} 极强趋势 {'多头' if last['di_plus'] > last['di_minus'] else '空头'}")
+        signals.append(f"ADX={adx_now:.1f} 极强趋势 {'🟢多头' if last['di_plus'] > last['di_minus'] else '🔴空头'}")
     elif adx_now > 25:
-        signals.append(f"ADX={adx_now:.1f} 趋势中 {'多头' if last['di_plus'] > last['di_minus'] else '空头'}")
+        signals.append(f"ADX={adx_now:.1f} 趋势中 {'🟢多头' if last['di_plus'] > last['di_minus'] else '🔴空头'}")
     else:
         signals.append(f"ADX={adx_now:.1f} 无趋势/震荡")
 
-    header = f"📊 {symbol}/USDT {tf} — 数据检测信号\n"
+    # ═══ 🔑 三指标共振检查（熊猫教练：单信号不出手） ═══
+    macd_bull = dif_now > dea_now or (dif_now > 0 and abs(last['macd_hist']) > abs(prev['macd_hist']))
+    kdj_bull = k_now > d_now and k_now < 80  # KDJ多方但不是超买
+    rsi_ok = 30 < rsi_now < 70  # RSI不在极端区
+    resonance_count = sum([macd_bull, kdj_bull, rsi_ok])
+
+    if macd_bull and kdj_bull and rsi_ok:
+        signals.append(f"🎯 三指标共振做多! MACD多+KDJ多+RSI中性 → 高胜率信号")
+    elif (not macd_bull) and (not kdj_bull):
+        signals.append(f"⛔ MACD空+KDJ空 → 方向一致做空，多头回避")
+    elif resonance_count == 2:
+        signals.append(f"🟡 两指标共振，第三指标分歧 → 轻仓或观望")
+    else:
+        signals.append(f"🔴 指标方向不一致 → 观望，等共振")
+
+    header = f"📊 {symbol}/USDT {tf} — 熊猫教练框架检测\n"
     return header + "\n".join(f"  {s}" for s in signals)
 
 
@@ -302,36 +353,72 @@ def detect_signals_text(df: pd.DataFrame, symbol: str, tf: str) -> str:
 # 火山引擎识图
 # ═══════════════════════════════════════════════════════════
 
-ANALYSIS_PROMPT = """你是一位顶级加密货币技术分析师，师从熊猫教练。请仔细分析这张K线图，包含以下指标面板:
+ANALYSIS_PROMPT = """你是一位顶级加密货币技术分析师，师从熊猫教练（熊猫交易学社）。熊猫教练核心理念：
+- "没有任何一个技术指标可以独立用于实盘交易，必须多指标共振"
+- "金叉死叉只是MACD最表面的读法，背离才真正有价值"
+- "零轴位置决定信号强度：零轴上金叉=强势延续(⭐⭐⭐⭐⭐)，零轴下金叉=弱势反弹(⭐⭐⭐)"
+- "顺大逆小：大周期定方向，小周期找买点"
+- "第一次机会往往是陷阱，不见复杂回调绝不轻易出手"
+- "趋势一旦破坏，无条件空仓"
 
-**上图**: K线 + EMA均线(9/20/50/200) + 布林带 + 成交量
-**第二图**: MACD (DIF/DEA/柱状图)
-**第三图**: KDJ (K/D/J三线)
-**第四图**: RSI (14) + Stochastic RSI
+请仔细分析这张K线图（4面板：K线+EMA+布林+成交量 / MACD / KDJ / RSI+StochRSI），逐项回答：
 
-请逐项回答（必须具体，用数据说话）:
+1. **K线形态** (熊猫教练: 信号K+入场K两步确认):
+   - 最近5根K线形态（大阳/大阴/十字星/锤子/倒锤/吞没/Pinbar）
+   - 是否有信号K（DOJI/PINBAR/INSIDE/小实体）→ 方向犹豫
+   - 是否有入场K（TREND_BULL/TREND_BEAR）→ 方向确认
+   - 是否出现大实体趋势K后追单风险？（熊猫教练：大实体K后禁止入场！）
 
-1. **K线形态**: 最近5根K线是什么形态？（大阳/大阴/十字星/锤子/倒锤/吞没）有哪些关键信号K？
+2. **EMA排列** (熊猫教练: 均线=趋势骨架):
+   - 多头排列(9>20>50>200)还是空头排列？
+   - EMA9与EMA20是否粘合/即将交叉？（粘合=变盘前兆）
+   - 价格在哪些均线之上/之下？最近均线支撑/压力位是多少？
 
-2. **EMA排列**: 均线是多头排列(9>20>50>200)还是空头？价格在哪些均线之上/之下？EMA9和EMA20是否即将交叉？
+3. **MACD** (熊猫教练: 背离>零轴位置>金叉死叉>柱状图):
+   - 🔑 **背离检测（最重要！）**: 是否有顶背离（价格新高但MACD未新高）或底背离（价格新低但MACD未新低）？
+   - DIF/DEA在零轴上方还是下方？（决定信号强度等级）
+   - 金叉还是死叉？结合零轴位置判断信号强度（零轴上金叉=⭐⭐⭐⭐⭐，零轴下死叉=⭐⭐⭐⭐⭐）
+   - 柱状图扩张还是缩窄？（柱状图缩窄=动能衰减预警，早于金叉死叉）
+   - 是否有"天鹅展翅"等特殊形态？
 
-3. **MACD**: DIF和DEA在零轴上方还是下方？是金叉还是死叉状态？柱状图是在扩张还是缩窄？有没有即将金叉/死叉的迹象（两线收敛）？
+4. **KDJ** (熊猫教练: 超买超卖区分级):
+   - K/D/J三线方向（向上/向下/拐头）
+   - KDJ金叉/死叉发生在什么区域？（超卖区金叉=⭐⭐⭐⭐⭐强买入，超买区死叉=⭐⭐⭐⭐⭐强卖出，中性区=⭐⭐⭐需趋势确认）
+   - 是否出现J线钝化（>100过热/<0过冷）？
+   - KDJ三线是否出现顶背离或底背离？
 
-4. **KDJ**: K/D/J三线各自的方向（向上/向下/拐头）？K和D是否刚发生金叉或死叉？三线是否在超买(>80)或超卖(<20)区域？
+5. **RSI** (熊猫教练: 50中轴是多空分水岭):
+   - RSI数值+方向+拐头迹象
+   - RSI在50中轴上方（多头）还是下方（空头）？
+   - 是否有RSI背离？（价格新高RSI未新高=顶背离，反之底背离）
+   - StochRSI K/D是否在超买超卖区形成金叉死叉？
 
-5. **RSI**: RSI数值范围？方向是向上还是向下？是否有拐头迹象？是否在超买超卖边界？
+6. **布林带 + ATR**:
+   - 价格在布林带位置？带宽收缩还是扩张？（收窄=暴风雨前的宁静！）
+   - ATR值+波动率趋势（ATR上升=波动加大，ATR下降=波动收敛）
 
-6. **布林带**: 价格在布林带什么位置（上轨/中轨/下轨）？带宽是在扩张还是收缩？是否有收窄后即将突破的迹象？
+7. **成交量** (熊猫教练: 量价关系=资金流向):
+   - 放量还是缩量？上涨量增还是量缩？
+   - 是否有量价背离？（价涨量缩=假反弹，价跌量缩=抛压衰竭）
+   - OBV趋势方向（资金流入/流出）
 
-7. **成交量**: 最近几根量柱是放量还是缩量？上涨时量是否配合？有没有量价背离？
+8. **🔑 三指标共振检查** (熊猫教练铁律: 缺一不可):
+   ```
+   MACD方向: [多头/空头]  KDJ方向: [多头/空头]  RSI方向: [多头/空头]
+   共振: [3/3全共振 / 2/3部分 / 1/3分歧 / 0/3全反向]
+   ```
+   - 3/3共振 → 可操作信号（标注做多还是做空）
+   - 2/3共振 → 轻仓试探或等第三指标确认
+   - ≤1/3 → **观望！绝对不交易！**
 
-8. **综合判断**:
-   - 当前是多方控盘还是空方控盘？
-   - 短期(数小时)方向判断
-   - 是否有入场信号？（需同时满足: KDJ金叉+MACD多方+RSI不超买+K线信号K）
-   - 风险提示
+9. **综合判断**:
+   - 多空控盘方判定 + 趋势阶段（上涨/下跌/震荡/反转）
+   - **入场信号**: 三指标共振方向 + K线信号K确认 + 关键位配合
+   - **入场时机**: 基于当前周期，预计还需等待几根K线？
+   - **止损建议**: 基于ATR的止损距离
+   - **风险提示**: 熊猫教练风格 — 趋势破坏即空仓、追单警告、仓位管理
 
-请用中文回答，每个判断都要说明你在图上看到了什么具体特征。"""
+请用中文回答，每个判断必须说明你在图上看到的具体特征。标注信号强度用⭐（1-5）。"""
 
 
 def analyze_chart_vision(image_path: str, prompt: str = None) -> dict:
