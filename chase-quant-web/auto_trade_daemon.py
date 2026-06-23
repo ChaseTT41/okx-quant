@@ -24,8 +24,11 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent))
 
 # ── 配置 ──
-SCAN_INTERVAL_MINUTES = 10  # 扫描间隔 (加密永不休市, 10分钟捕捉机会)
+SCAN_INTERVAL_MINUTES = 5  # 扫描间隔 (加密永不休市, 5分钟捕捉机会)
 PUSH_INTERVAL_MINUTES = 30  # 🆕 企微推送间隔 (30分钟, 避免刷屏)
+MIN_MARGIN_USDT = 20.0      # 🚨 硬性最低保证金: <$20不玩，撒胡椒面没有意义
+STOPPED_OUT_COOLDOWN_CYCLES = 3  # 🆕 止损后冷却周期数 (防止反复追同一标的)
+_stopped_out_this_cycle: set = set()  # 🆕 本周期被止损/强平的币种 (用于冷却追踪)
 DATA_DIR = Path(__file__).parent / "data"
 LOG_DIR = DATA_DIR / "daemon_logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -207,25 +210,23 @@ def _enforce_hard_stop_loss(pf, log_func) -> list:
     results = []
     now = datetime.now(timezone.utc)
 
-    # ── 🆕 刷新 crypto 持仓实时价格 ──
+    # ── 🆕 刷新 crypto 持仓实时价格 (OKX REST, 零 ccxt) ──
     crypto_positions = [p for p in pf.open_positions if p.market == "crypto"]
     if crypto_positions:
         try:
-            import ccxt
-            ex = ccxt.okx({'enableRateLimit': True})
+            from okx_rest_data import get_okx_provider
+            okx = get_okx_provider()
             symbols = list(set(p.symbol for p in crypto_positions))
+            tickers = okx.fetch_tickers([s.replace("/", "-") for s in symbols])
             for sym in symbols:
-                try:
-                    ticker = ex.fetch_ticker(sym)
-                    if ticker and ticker.get('last', 0) > 0:
-                        for p in crypto_positions:
-                            if p.symbol == sym:
-                                p.current_price = ticker['last']
-                    time.sleep(0.15)  # 速率限制
-                except Exception:
-                    pass  # 单个币种失败不影响整体
+                okx_sym = sym.replace("/", "-")
+                ticker = tickers.get(okx_sym) or tickers.get(sym)
+                if ticker and ticker.get('last', 0) > 0:
+                    for p in crypto_positions:
+                        if p.symbol == sym:
+                            p.current_price = ticker['last']
         except Exception:
-            pass  # ccxt 不可用时跳过价格刷新
+            pass  # OKX REST 不可用时跳过价格刷新
 
     # ── 碎片化检测: 同币种 > 3笔 ──
     symbol_counts = Counter(p.symbol for p in pf.open_positions if p.market == "crypto")
@@ -279,6 +280,7 @@ def _enforce_hard_stop_loss(pf, log_func) -> list:
                     pf.cover_short(pos.id, pos.current_price, reason=reason)
                 log_func(f"  {reason} | {pos.symbol} | 入场{pos.entry_price}→现价{pos.current_price}")
                 results.append(f"🛑 止损/清理: {pos.symbol} ({reason})")
+                _stopped_out_this_cycle.add(pos.symbol)  # 🆕 冷却追踪
             except Exception as e:
                 log_func(f"  ❌ 止损平仓失败 {pos.symbol}: {e}")
 
@@ -296,12 +298,13 @@ def _manage_kline_positions(kline_positions: list, pf, log_func) -> list:
     results = []
     for pos in kline_positions:
         try:
-            # 更新当前价格
+            # 更新当前价格 (OKX REST, 零 ccxt)
             try:
-                from trading_config import create_exchange
-                ex = create_exchange(for_trading=False)
-                ticker = ex.fetch_ticker(pos.symbol)
-                pos.current_price = ticker.get('last', pos.current_price)
+                from okx_rest_data import fetch_okx_ticker
+                okx_sym = pos.symbol.replace("/", "-")
+                ticker = fetch_okx_ticker(okx_sym)
+                if ticker:
+                    pos.current_price = ticker.get('last', pos.current_price)
             except Exception:
                 pass  # 使用已有价格
 
@@ -364,89 +367,181 @@ def _manage_kline_positions(kline_positions: list, pf, log_func) -> list:
     return results
 
 
-def execute_strategy_signals(signals: list, pf) -> list:
+def execute_strategy_signals(signals: list, pf, leverage_engine=None, live_trader=None) -> list:
     """
-    执行策略信号 🆕 v2: 支持做多(BUY)+做空(SELL)双向
+    执行策略信号 🆕 v3: 实盘OKX现货 + 集中火力
 
     规则:
       - BUY → 开多, SELL → 开空
       - 已有持仓的 symbol 跳过
-      - 每策略每方向最多执行 1 个
+      - 🔥 集中火力: 只做top1-2个最强信号, 每笔投入40-50%资金
       - 风控检查 + 最低 ¥200
       - entry_reason 标注策略名
+      - 🔴 实盘模式: 通过BinanceLiveTrader下OKX现货单
     """
     from risk import RiskController
     rc = RiskController(pf)
-    total_value = pf.total_value
     results = []
 
-    held_symbols = [p.symbol for p in pf.open_positions if p.market == "crypto"]
+    # 🔴 实盘模式: 用交易所真实持仓+余额，不用 PortfolioManager 虚拟仓位
+    held_symbols = []
+    cash = pf.cash.get("crypto", 0)  # fallback
+    total_equity = pf.total_value     # fallback
+    if leverage_engine is not None:
+        try:
+            real_positions = leverage_engine.fetch_open_positions()
+            if real_positions:
+                held_symbols = list(real_positions) if isinstance(real_positions, set) else list(real_positions.keys())
+                log(f"  📡 实盘持仓({len(held_symbols)}): {', '.join(held_symbols) if held_symbols else '空仓'}")
+            # 🔴 用OKX真实余额计算仓位，不用虚拟盘
+            real_equity = leverage_engine.fetch_equity()
+            if real_equity > 0:
+                cash = real_equity
+                total_equity = real_equity
+                log(f"  💰 实盘可用: \${real_equity:.2f}")
+        except Exception as e:
+            log(f"  ⚠️ 获取实盘持仓失败({e})，回退到虚拟盘")
+    if not held_symbols and leverage_engine is None:
+        # 虚拟盘模式：用 PortfolioManager
+        held_symbols = [p.symbol for p in pf.open_positions if p.market == "crypto"]
 
-    # 🛡️ 最大持仓上限 (小资金分散过度 → 集中火力)
-    MAX_CRYPTO_POSITIONS = 8   # 🆕 适度分散（小账户集中火力）
+    # 🛡️ 动态持仓上限 (按账户规模集中火力)
+    # $0-100: 最多 2 仓 | $100-200: 最多 3 仓 | $200-500: 最多 4 仓 | $500+: 8 仓
+    if total_equity <= 100:
+        MAX_CRYPTO_POSITIONS = 2
+    elif total_equity <= 200:
+        MAX_CRYPTO_POSITIONS = 3
+    elif total_equity <= 500:
+        MAX_CRYPTO_POSITIONS = 4
+    else:
+        MAX_CRYPTO_POSITIONS = 8
     if len(held_symbols) >= MAX_CRYPTO_POSITIONS:
-        log(f"  🛑 加密持仓已达上限 {MAX_CRYPTO_POSITIONS}，跳过新信号")
+        log(f"  🛑 持仓已达上限 {MAX_CRYPTO_POSITIONS}个 (权益${total_equity:.0f})，跳过新信号。当前: {', '.join(held_symbols)}")
         return results
 
-    # 按策略+方向分组，每策略每方向选最强的
-    # 🕯️ 裸K优先: kline_priority信号在同一symbol的竞争中胜出
-    best_by_strategy = {}
+    # 🔥 集中火力: 按评分排序 + 最低质量门槛
+    MIN_COMPOSITE = 55   # 🆕 score*confidence 综合分最低 55 (约 70分×78% 或 80分×69%)
+    MIN_CONFIDENCE = 0.65  # 🆕 单信号置信度最低 65%
+    valid_signals = []
     for s in signals:
         action = s.get("action", "HOLD")
         if action not in ("BUY", "SELL"):
             continue
         if s["symbol"] in held_symbols:
             continue
-        strat = s.get("strategy_name", "未知策略")
-        key = (strat, action)  # 分开做多和做空
-        if key not in best_by_strategy:
-            best_by_strategy[key] = s
-        else:
-            # 裸K优先: kline_priority信号替换同策略同方向的非优先信号
-            existing = best_by_strategy[key]
-            if s.get("kline_priority") and not existing.get("kline_priority"):
-                best_by_strategy[key] = s
-            elif s.get("kline_priority") == existing.get("kline_priority"):
-                if s["score"] > existing["score"]:
-                    best_by_strategy[key] = s
-            elif s["score"] > existing["score"]:
-                best_by_strategy[key] = s
+        conf = s.get("confidence", 0.5)
+        score = s.get("score", 50)
+        composite = score * conf
+        if composite < MIN_COMPOSITE or conf < MIN_CONFIDENCE:
+            continue
+        valid_signals.append((composite, s))
 
-    for (strat_name, action), sig in best_by_strategy.items():
+    valid_signals.sort(key=lambda x: x[0], reverse=True)
+
+    # 🔥 集中火力: 每个方向只取 top 1，且总数受上限约束
+    available_slots = MAX_CRYPTO_POSITIONS - len(held_symbols)
+    best_buy = None
+    best_sell = None
+    for _, s in valid_signals:
+        action = s.get("action", "HOLD")
+        if action == "BUY" and best_buy is None:
+            best_buy = s
+        elif action == "SELL" and best_sell is None:
+            best_sell = s
+        if best_buy and best_sell:
+            break
+
+    candidates = []
+    if best_buy and available_slots > 0:
+        candidates.append(("BUY", best_buy))
+        available_slots -= 1
+    if best_sell and available_slots > 0:
+        candidates.append(("SELL", best_sell))
+
+    if not candidates:
+        log(f"  💤 无高质量策略信号 (需综合≥{MIN_COMPOSITE}, 置信≥{MIN_CONFIDENCE:.0%})")
+        return results
+
+    # 🔥 集中火力: 大仓位 — 1仓=50%可用, 2仓=各40%
+    n_candidates = len(candidates)
+    FIRE_PCT = min(0.48, 0.45 + 0.05 * (2 - n_candidates))  # 1个=50%, 2个=45% each
+
+    for idx, (action, sig) in enumerate(candidates):
         try:
-            cash = pf.cash.get("crypto", 0)
-            size_pct = sig.get("suggested_size", 0.05)
-            if isinstance(size_pct, float) and size_pct > 1:
-                size_pct = size_pct / 100
-            max_size = min(cash * size_pct, cash * 0.3)
-
-            if max_size < 200:
-                log(f"  💤 [{strat_name}] {sig['symbol']} 资金不足 (可用{cash:.0f}, 需≥200)")
+            # 🔥 集中火力仓位: 用更大比例
+            max_size = cash * FIRE_PCT
+            if max_size < MIN_MARGIN_USDT:
+                log(f"  💤 [{sig.get('strategy_name', '?')}] {sig['symbol']} 资金不足 (可用\${cash:.2f}, 需≥\${MIN_MARGIN_USDT})")
                 continue
 
             score = sig.get("score", 50)
             check = rc.pre_trade_check("crypto", max_size, score, total_value)
             if not check.passed:
-                log(f"  ⚠️ [{strat_name}] {sig['symbol']} 风控拦截: {check.reason}")
+                log(f"  ⚠️ [{sig.get('strategy_name', '?')}] {sig['symbol']} 风控拦截: {check.reason}")
                 continue
 
             quantity = max_size / sig["price"]
             # 🕯️ 裸K优先标记
             is_kline = sig.get("kline_priority", False)
-            prefix = "🕯️[裸K优先] " if is_kline else ""
-            reason = prefix + f"[{strat_name}] " + " | ".join(sig.get("reasons", ["信号触发"])[:3])
+            prefix = "🕯️[裸K] " if is_kline else ""
+            reason = prefix + f"[{sig.get('strategy_name', '?')}] " + " | ".join(sig.get("reasons", ["信号触发"])[:3])
 
             if action == "BUY":
+                icon = "🟢" if not is_kline else "🕯️"
+                action_word = "BUY"
+                # 🔴 实盘OKX现货买入
+                if live_trader is not None:
+                    try:
+                        order = live_trader.market_buy(
+                            symbol=sig["symbol"],
+                            amount_usdt=max_size,
+                            note=f"🔥集中火力 [{sig.get('strategy_name', '?')}] {reason[:80]}"
+                        )
+                        if order and order.status == "filled":
+                            log(f"  🔥 OKX实盘: {icon} BUY {sig['symbol']} ${max_size:.0f} | 成交@{order.avg_price:.2f}")
+                        else:
+                            log(f"  ⚠️ OKX下单异常: {order}")
+                    except Exception as e:
+                        log(f"  ❌ OKX买入失败 {sig['symbol']}: {e}")
+                        continue
+                # 同时记录到 PortfolioManager
                 trade = pf.buy(
                     market="crypto", symbol=sig["symbol"],
                     name=sig.get("name", sig["symbol"]),
                     price=sig["price"], quantity=quantity,
                     reason=reason,
                 )
-                icon = "🟢" if not is_kline else "🕯️"
-                action_word = "BUY"
-            else:  # SELL → 模拟盘开空仓
-                # 🆕 用 open_short 开空仓 (做空)
+            else:  # SELL → 开空仓
+                icon = "🔴" if not is_kline else "🕯️"
+                action_word = "SHORT"
+                # 🔴 实盘OKX合约做空
+                if live_trader is not None:
+                    try:
+                        # 根据信心分选杠杆: 高信心→高杠杆, 低信心→低杠杆
+                        conf = sig.get("confidence", 0.5)
+                        if conf >= 0.75:
+                            short_lev = 5
+                        elif conf >= 0.60:
+                            short_lev = 3
+                        else:
+                            short_lev = 2
+                        # 止损价: 做空止损在入场价上方
+                        sl_price = sig["price"] * 1.025 if short_lev >= 5 else sig["price"] * 1.05
+                        order = live_trader.open_short_swap(
+                            symbol=sig["symbol"],
+                            amount_usdt=max_size,
+                            leverage=short_lev,
+                            stop_loss_price=sl_price,
+                            note=f"🔥集中火力 [{sig.get('strategy_name', '?')}] {reason[:60]}"
+                        )
+                        if order and order.status == "filled":
+                            log(f"  🔥 OKX实盘: {icon} SHORT {sig['symbol']} ${max_size:.0f} @{short_lev}x | 成交@{order.avg_price:.2f}")
+                        else:
+                            log(f"  ⚠️ OKX做空异常 {sig['symbol']}: {order}")
+                    except Exception as e:
+                        log(f"  ❌ OKX做空失败 {sig['symbol']}: {e}")
+                        continue
+                # 记录到模拟盘
                 if hasattr(pf, 'open_short'):
                     trade = pf.open_short(
                         market="crypto", symbol=sig["symbol"],
@@ -459,14 +554,11 @@ def execute_strategy_signals(signals: list, pf) -> list:
                     )
                 else:
                     trade = None
-                icon = "🔴" if not is_kline else "🕯️"
-                action_word = "SHORT"
 
             if trade:
-                # 🕯️ 存储裸K专属止损/止盈到持仓
+                # 🕯️ 存储裸K专属止损/止盈
                 if is_kline:
                     try:
-                        # 找到刚创建的持仓 (最新的crypto持仓)
                         for pos in pf.open_positions:
                             if pos.symbol == sig["symbol"] and pos.market == "crypto":
                                 if hasattr(pos, 'kline_stop_loss'):
@@ -480,26 +572,327 @@ def execute_strategy_signals(signals: list, pf) -> list:
                         pass
 
                 kline_tag = " [裸K]" if is_kline else ""
-                result_msg = f"{icon} [{strat_name}]{kline_tag} {action_word} {sig['symbol']} ¥{max_size:.0f} | 评分{sig['score']:.0f} | 置信{sig['confidence']:.0%}"
+                fire_tag = "🔥" if live_trader is not None else ""
+                result_msg = f"{icon}{fire_tag} [{sig.get('strategy_name', '?')}]{kline_tag} {action_word} {sig['symbol']} ¥{max_size:.0f} | 评分{sig['score']:.0f} | 置信{sig['confidence']:.0%}"
                 results.append(result_msg)
                 log(f"  ✅ {result_msg}")
                 held_symbols.append(sig["symbol"])
         except Exception as e:
-            log(f"  ❌ [{strat_name}] 执行失败: {e}")
+            log(f"  ❌ [{sig.get('strategy_name', '?')}] 执行失败: {e}")
 
     # 🆕 SELL/SHORT 信号汇总
     sell_sigs = [s for s in signals if s["action"] == "SELL"]
     if sell_sigs:
         log(f"  📋 {len(sell_sigs)} 条做空信号"
-            f" (模拟盘{'已执行' if hasattr(pf, 'sell') else '仅记录，实盘由_run_leverage_decisions处理'}):")
+            f" ({'实盘合约执行' if live_trader else '模拟盘已执行'}):")
         for s in sell_sigs[:5]:
             log(f"     🔴 [{s.get('strategy_name', '?')}] {s['symbol']} | 评分{s['score']:.0f} | 置信{s['confidence']:.0%}")
 
     return results
 
 
-def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf, log_func) -> list:
-    """对合约标的运行杠杆决策 (实盘模式) — 🆕 v2: 支持做多+做空"""
+def _enforce_min_margin(leverage_engine, log_func) -> list:
+    """
+    🚨 硬性规则: 任何保证金 < MIN_MARGIN_USDT 的仓位，立即平仓。
+
+    这是最后一道防线 — 理论上代码的入场门槛($20) + 仓位计算(40-50%权益)
+    已经杜绝了小仓位，但如果因为任何原因（bug/旧代码/边界条件）出现了，
+    这里直接平掉，不商量。
+
+    Returns: list of close results
+    """
+    MIN_HARD = MIN_MARGIN_USDT  # 使用全局常量
+    results = []
+    try:
+        import requests as _req, hmac as _hmac, base64 as _b64, json as _json
+        from datetime import datetime as _dt, timezone as _tz
+
+        # 获取实盘持仓
+        ts = _dt.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        path = "/api/v5/account/positions?instType=SWAP"
+        sign_str = ts + "GET" + path + ""
+        sign = _b64.b64encode(_hmac.new(
+            leverage_engine._okx_trading.secret.encode(), sign_str.encode(), "sha256"
+        ).digest()).decode()
+        r = _req.get(
+            f"https://{leverage_engine._okx_trading.hostname}{path}",
+            headers={
+                "OK-ACCESS-KEY": leverage_engine._okx_trading.apiKey,
+                "OK-ACCESS-SIGN": sign,
+                "OK-ACCESS-TIMESTAMP": ts,
+                "OK-ACCESS-PASSPHRASE": leverage_engine._okx_trading.password,
+            },
+            timeout=10,
+        )
+        positions = [p for p in r.json().get('data', []) if float(p.get('pos', 0)) > 0]
+
+        for p in positions:
+            inst_id = p['instId']
+            sym = inst_id.replace('-USDT-SWAP', '').replace('-', '/')
+            pos_side = p['posSide']
+            contracts = float(p.get('pos', 0))
+            margin = float(p.get('margin', 0))
+
+            if margin >= MIN_HARD:
+                continue  # 达标，放行
+
+            # 不达标 — 直接平仓，不商量
+            upl = float(p.get('upl', 0))
+            log_func(f"  🚨 {sym}: 保证金${margin:.2f} < ${MIN_HARD}底线! 强制平仓! (UPL=${upl:+.4f})")
+
+            close_side = "sell" if pos_side == "long" else "buy"
+
+            # 取消 algo 订单
+            try:
+                algo_ts2 = _dt.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+                algo_path2 = f"/api/v5/trade/orders-algo-pending?instId={inst_id}"
+                algo_sign_str2 = algo_ts2 + "GET" + algo_path2 + ""
+                algo_sign2 = _b64.b64encode(_hmac.new(
+                    leverage_engine._okx_trading.secret.encode(), algo_sign_str2.encode(), "sha256"
+                ).digest()).decode()
+                algo_r2 = _req.get(
+                    f"https://{leverage_engine._okx_trading.hostname}{algo_path2}",
+                    headers={
+                        "OK-ACCESS-KEY": leverage_engine._okx_trading.apiKey,
+                        "OK-ACCESS-SIGN": algo_sign2,
+                        "OK-ACCESS-TIMESTAMP": algo_ts2,
+                        "OK-ACCESS-PASSPHRASE": leverage_engine._okx_trading.password,
+                    },
+                    timeout=10,
+                )
+                for ao in algo_r2.json().get('data', []):
+                    try:
+                        cancel_ts = _dt.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+                        cancel_path = f"/api/v5/trade/cancel-algo"
+                        cancel_body = _json.dumps([{"algoId": ao['algoId'], "instId": inst_id}])
+                        cancel_sign_str = cancel_ts + "POST" + cancel_path + cancel_body
+                        cancel_sign = _b64.b64encode(_hmac.new(
+                            leverage_engine._okx_trading.secret.encode(), cancel_sign_str.encode(), "sha256"
+                        ).digest()).decode()
+                        _req.post(
+                            f"https://{leverage_engine._okx_trading.hostname}{cancel_path}",
+                            headers={
+                                "OK-ACCESS-KEY": leverage_engine._okx_trading.apiKey,
+                                "OK-ACCESS-SIGN": cancel_sign,
+                                "OK-ACCESS-TIMESTAMP": cancel_ts,
+                                "OK-ACCESS-PASSPHRASE": leverage_engine._okx_trading.password,
+                                "Content-Type": "application/json",
+                            },
+                            data=cancel_body, timeout=10,
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # 下平仓市价单
+            try:
+                order_ts = _dt.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+                order_path = f"/api/v5/trade/order"
+                order_body = _json.dumps({
+                    "instId": inst_id,
+                    "tdMode": "isolated",
+                    "side": close_side,
+                    "posSide": pos_side,
+                    "ordType": "market",
+                    "sz": str(contracts),
+                })
+                order_sign_str = order_ts + "POST" + order_path + order_body
+                order_sign = _b64.b64encode(_hmac.new(
+                    leverage_engine._okx_trading.secret.encode(), order_sign_str.encode(), "sha256"
+                ).digest()).decode()
+                order_r = _req.post(
+                    f"https://{leverage_engine._okx_trading.hostname}{order_path}",
+                    headers={
+                        "OK-ACCESS-KEY": leverage_engine._okx_trading.apiKey,
+                        "OK-ACCESS-SIGN": order_sign,
+                        "OK-ACCESS-TIMESTAMP": order_ts,
+                        "OK-ACCESS-PASSPHRASE": leverage_engine._okx_trading.password,
+                        "Content-Type": "application/json",
+                    },
+                    data=order_body, timeout=10,
+                )
+                resp = order_r.json()
+                if resp.get("code") == "0":
+                    log_func(f"  ✅ 已强制平仓 {sym} (保证金${margin:.2f}不达标)")
+                    results.append({"symbol": sym, "action": "ENFORCED_CLOSE", "margin": margin, "upl": upl})
+                    _stopped_out_this_cycle.add(sym)  # 🆕 冷却追踪
+                else:
+                    log_func(f"  ❌ 强制平仓失败 {sym}: {resp}")
+            except Exception as e:
+                log_func(f"  ❌ 强制平仓异常 {sym}: {e}")
+
+    except Exception as e:
+        log_func(f"⚠️ 最低保证金检查异常: {e}")
+
+    return results
+
+
+def _clean_low_conviction_positions(leverage_engine, log_func) -> list:
+    """
+    🧹 清理低确信/低质量仓位：盈利超手续费就回收。
+
+    用于处理策略升级前遗留的"撒胡椒面"仓位。
+    不勉强赚大钱，但也不能亏。
+    盈利 > 0.3% (覆盖手续费+滑点) 就平掉。
+
+    Returns: list of close results
+    """
+    results = []
+    try:
+        import requests as _req, hmac as _hmac, base64 as _b64, json as _json
+        from datetime import datetime as _dt, timezone as _tz
+
+        # 获取实盘持仓
+        ts = _dt.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        path = "/api/v5/account/positions?instType=SWAP"
+        sign_str = ts + "GET" + path + ""
+        sign = _b64.b64encode(_hmac.new(
+            leverage_engine._okx_trading.secret.encode(), sign_str.encode(), "sha256"
+        ).digest()).decode()
+        r = _req.get(
+            f"https://{leverage_engine._okx_trading.hostname}{path}",
+            headers={
+                "OK-ACCESS-KEY": leverage_engine._okx_trading.apiKey,
+                "OK-ACCESS-SIGN": sign,
+                "OK-ACCESS-TIMESTAMP": ts,
+                "OK-ACCESS-PASSPHRASE": leverage_engine._okx_trading.password,
+            },
+            timeout=10,
+        )
+        positions = [p for p in r.json().get('data', []) if float(p.get('pos', 0)) > 0]
+
+        if not positions:
+            return results
+
+        total_equity = leverage_engine.fetch_equity()
+
+        for p in positions:
+            inst_id = p['instId']
+            sym = inst_id.replace('-USDT-SWAP', '').replace('-', '/')
+            pos_side = p['posSide']
+            contracts = float(p.get('pos', 0))
+            upl = float(p.get('upl', 0))
+            margin = float(p.get('margin', 0))
+            upl_pct = (upl / margin * 100) if margin > 0 else 0
+
+            # 🧹 判断是否低确信仓位（保守策略 — 宁少清不多清）:
+            # 1. 保证金 ≤ $12  (真正撒胡椒面的产物 — 大仓 >$12 不碰)
+            # 2. 浮盈在 0.3%~2% 之间 (微利没冲劲 → 回收；>2% 有动量 → 让它跑)
+            # 3. 不是大盘币 (BTC/ETH 大仓不清理)
+            # 4. 唯一空头不清理 (对冲价值)
+            if margin > 12:
+                continue
+            if upl_pct < 0.3 or upl_pct > 2.0:
+                continue  # 水下不割肉，强动量(>2%)不截断
+            if sym in ("BTC/USDT", "ETH/USDT"):
+                continue
+            # 检查是不是唯一空头（保留对冲）
+            long_count = sum(1 for pp in positions if pp['posSide'] == 'long' and float(pp.get('pos',0)) > 0)
+            short_count = sum(1 for pp in positions if pp['posSide'] == 'short' and float(pp.get('pos',0)) > 0)
+            if pos_side == 'short' and short_count <= 1:
+                continue  # 保留唯一空头做对冲
+            if pos_side == 'long' and long_count <= 1:
+                continue  # 保留唯一多头
+
+            log_func(f"  🧹 {sym}: 低确信仓位盈利+{upl_pct:.1f}%, 回收中...")
+
+            close_side = "sell" if pos_side == "long" else "buy"
+
+            # 取消这个币的 algo 订单
+            try:
+                algo_ts = _dt.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+                algo_path = f"/api/v5/trade/orders-algo-pending?instId={inst_id}"
+                algo_sign_str = algo_ts + "GET" + algo_path + ""
+                algo_sign = _b64.b64encode(_hmac.new(
+                    leverage_engine._okx_trading.secret.encode(), algo_sign_str.encode(), "sha256"
+                ).digest()).decode()
+                algo_r = _req.get(
+                    f"https://{leverage_engine._okx_trading.hostname}{algo_path}",
+                    headers={
+                        "OK-ACCESS-KEY": leverage_engine._okx_trading.apiKey,
+                        "OK-ACCESS-SIGN": algo_sign,
+                        "OK-ACCESS-TIMESTAMP": algo_ts,
+                        "OK-ACCESS-PASSPHRASE": leverage_engine._okx_trading.password,
+                    },
+                    timeout=10,
+                )
+                for a in algo_r.json().get('data', []):
+                    cancel_body = _json.dumps([{"algoId": a['algoId'], "instId": inst_id}])
+                    cancel_ts = _dt.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+                    cancel_path = "/api/v5/trade/cancel-algos"
+                    cancel_sign_str = cancel_ts + "POST" + cancel_path + cancel_body
+                    cancel_sign = _b64.b64encode(_hmac.new(
+                        leverage_engine._okx_trading.secret.encode(), cancel_sign_str.encode(), "sha256"
+                    ).digest()).decode()
+                    _req.post(
+                        f"https://{leverage_engine._okx_trading.hostname}{cancel_path}",
+                        headers={
+                            "OK-ACCESS-KEY": leverage_engine._okx_trading.apiKey,
+                            "OK-ACCESS-SIGN": cancel_sign,
+                            "OK-ACCESS-TIMESTAMP": cancel_ts,
+                            "OK-ACCESS-PASSPHRASE": leverage_engine._okx_trading.password,
+                            "Content-Type": "application/json",
+                        },
+                        data=cancel_body,
+                        timeout=10,
+                    )
+            except Exception:
+                pass
+
+            # 下市价平仓单
+            import math
+            lot_sz = float(p.get('lotSz', 1) or 1)
+            sz = math.floor(contracts / lot_sz) * lot_sz if lot_sz > 0 else contracts
+            if sz <= 0:
+                continue
+
+            body = _json.dumps({
+                "instId": inst_id, "tdMode": "isolated",
+                "side": close_side, "posSide": pos_side,
+                "ordType": "market", "sz": str(sz),
+            })
+            order_ts = _dt.now(_tz.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+            order_path = "/api/v5/trade/order"
+            order_sign_str = order_ts + "POST" + order_path + body
+            order_sign = _b64.b64encode(_hmac.new(
+                leverage_engine._okx_trading.secret.encode(), order_sign_str.encode(), "sha256"
+            ).digest()).decode()
+            order_r = _req.post(
+                f"https://{leverage_engine._okx_trading.hostname}{order_path}",
+                headers={
+                    "OK-ACCESS-KEY": leverage_engine._okx_trading.apiKey,
+                    "OK-ACCESS-SIGN": order_sign,
+                    "OK-ACCESS-TIMESTAMP": order_ts,
+                    "OK-ACCESS-PASSPHRASE": leverage_engine._okx_trading.password,
+                    "Content-Type": "application/json",
+                },
+                data=body,
+                timeout=10,
+            )
+            resp = order_r.json()
+            if resp.get('code') == '0':
+                log_func(f"  ✅ 回收 {sym}: 盈利约${upl:+.2f}")
+                results.append({"symbol": sym, "action": "CLEAN_CLOSE", "pnl": upl})
+                if upl < 0:
+                    _stopped_out_this_cycle.add(sym)  # 🆕 亏损平仓加入冷却
+            else:
+                log_func(f"  ⚠️ 回收失败 {sym}: {resp}")
+
+    except Exception as e:
+        log_func(f"  ⚠️ 低确信清理异常: {e}")
+
+    return results
+
+
+def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf, log_func,
+                           remaining_slots: int = None, stopped_out_symbols: set = None) -> list:
+    """对合约标的运行杠杆决策 (实盘模式) — 🆕 v2: 支持做多+做空
+
+    Args:
+        remaining_slots: 剩余可用仓位槽数 (None=自动从持仓计算)
+        stopped_out_symbols: 最近被止损的币种集合 (冷却期内跳过)
+    """
     from symbol_config import OKX_ALL_NON_CRYPTO_SWAPS, OKX_AI_CONCEPT_SWAPS
 
     swap_symbols = set(OKX_ALL_NON_CRYPTO_SWAPS + OKX_AI_CONCEPT_SWAPS)
@@ -514,23 +907,63 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
     existing_positions = leverage_engine.fetch_open_positions()
     existing_list = list(existing_positions) if isinstance(existing_positions, set) else existing_positions
 
-    # 🛡️ Fix #2: 合约最大持仓上限 (小资金集中火力)
-    MAX_SWAP_POSITIONS = 5   # 🆕 小账户集中火力，最多5个
-    if len(existing_positions) >= MAX_SWAP_POSITIONS:
-        log_func(f"  🛑 合约持仓已达上限 {MAX_SWAP_POSITIONS}个，跳过新信号。当前持仓: {', '.join(existing_list[:8])}")
+    # 🛡️ 动态持仓上限 (按账户规模)
+    total_equity = leverage_engine.fetch_equity()
+    if total_equity <= 100:
+        MAX_SWAP_POSITIONS = 2
+    elif total_equity <= 200:
+        MAX_SWAP_POSITIONS = 3
+    elif total_equity <= 500:
+        MAX_SWAP_POSITIONS = 4
+    else:
+        MAX_SWAP_POSITIONS = 5
+
+    # 🆕 使用传入的剩余槽数 (用于跨调用协调)
+    if remaining_slots is None:
+        remaining_slots = MAX_SWAP_POSITIONS - len(existing_positions)
+    else:
+        remaining_slots = min(remaining_slots, MAX_SWAP_POSITIONS - len(existing_positions))
+
+    if remaining_slots <= 0:
+        log_func(f"  🛑 合约持仓已达上限 {MAX_SWAP_POSITIONS}个 (权益${total_equity:.0f})。当前: {', '.join(existing_list[:8])}")
         return results
+
+    # 🔥 集中火力: 动态信号数 + 最低质量门槛
+    MAX_SWAP_SIGNALS = min(remaining_slots, 1 if total_equity <= 100 else (2 if total_equity <= 200 else 3))
+    MIN_COMPOSITE = 55    # 🆕 score*confidence 综合分最低 55
+    MIN_CONFIDENCE = 0.65  # 🆕 单信号置信度最低 65%
+
+    valid_swaps = []
     for sig in signals:
         sym = sig.get("symbol", "")
         if sym not in swap_symbols:
-            continue  # 非合约标的, 走现货流程
-
+            continue
         action = sig.get("action", "HOLD")
-        # 🆕 v2: 支持 BUY(做多) + SELL(做空) 双向
         if action not in ("BUY", "SELL"):
             continue
         if sym in existing_positions:
-            log_func(f"  ⚡ 跳过 {sym}: 已有持仓")
             continue
+        # 🆕 冷却期检查: 最近被止损的币种跳过
+        if stopped_out_symbols and sym in stopped_out_symbols:
+            log_func(f"  🧊 冷却期跳过 {sym}: 最近被止损，{STOPPED_OUT_COOLDOWN_CYCLES}周期后再考虑")
+            continue
+        conf = sig.get("confidence", 0.5)
+        score = sig.get("score", 50)
+        composite = score * conf
+        if composite < MIN_COMPOSITE or conf < MIN_CONFIDENCE:
+            continue
+        valid_swaps.append((composite, sig))
+
+    valid_swaps.sort(key=lambda x: x[0], reverse=True)
+    selected_swaps = valid_swaps[:MAX_SWAP_SIGNALS]
+
+    if len(valid_swaps) > len(selected_swaps):
+        skipped_names = [s[1].get('symbol','?') for s in valid_swaps[len(selected_swaps):]]
+        log_func(f"  🔥 集中火力: 只做top{len(selected_swaps)}信号，跳过: {', '.join(skipped_names[:5])}")
+
+    for _, sig in selected_swaps:
+        sym = sig.get("symbol", "")
+        action = sig.get("action", "HOLD")
 
         # 🆕 v2: 确定方向
         if action == "BUY":
@@ -566,20 +999,24 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
             sentiment_overlay=overlay,
         )
 
+        # 🏛️ Regime 杠杆帽: 安检门设定的最大杠杆
+        regime_max_lev = sig.get("_max_leverage")
+        if regime_max_lev and decision.recommended_leverage > regime_max_lev:
+            decision.recommended_leverage = regime_max_lev
+            decision.leverage_label = f"CAPPED-{regime_max_lev}x"
+
         if decision.skip_reason:
             log_func(f"  ⚡ 跳过 {sym}: {decision.skip_reason}")
             continue
 
-        # 仓位计算 — 使用真实 OKX 余额 (非模拟盘)
-        total_equity = leverage_engine.fetch_equity()
+        # 仓位计算 — 使用已缓存的 OKX 余额
         if total_equity <= 0:
             log_func(f"  ⚡ 跳过 {sym}: 无法获取余额")
             continue
         price = sig.get("price", 100.0)
         pos = leverage_engine.calculate_position(total_equity, price, decision, side=side)
 
-        # 🐜 最低保证金过滤: 几U的单没必要做, 浪费手续费
-        MIN_MARGIN_USDT = 10.0
+        # 🐜 最低保证金过滤: <$20不玩，撒胡椒面没有意义
         if pos['margin_usdt'] < MIN_MARGIN_USDT:
             log_func(f"  🐜 跳过 {sym}: 保证金${pos['margin_usdt']:.2f} < ${MIN_MARGIN_USDT} (不值得做)")
             continue
@@ -592,6 +1029,15 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
             f"止损={decision.stop_loss_pct:+.1%} | "
             f"止盈={decision.take_profit_pct:+.0%}"
         )
+
+        # 🛡️ 入场时机校验: 价格在24h区间位置
+        price_check = leverage_engine.check_price_position(sym, side, price)
+        if not price_check["safe"]:
+            log_func(f"  ⚠️ [{sym}] {price_check['reason']}")
+            continue  # 跳过，不开仓
+        elif price_check["percentile"] != 50.0:  # 正常检查通过
+            log_func(f"  ✅ [{sym}] 价格位置安全: {price_check['percentile']:.0f}%分位 "
+                    f"(区间{price_check['low_24h']:.4f}-{price_check['high_24h']:.4f})")
 
         # 执行合约单
         try:
@@ -613,6 +1059,19 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
                     "order_id": order.get("id", ""),
                 })
                 leverage_engine.increment_daily_trades()
+
+                # 🔴 下单后验证: 实际成交 vs 预期保证金 偏差>50%告警
+                actual_cost = order.get("cost", 0) or 0
+                actual_filled = order.get("filled", 0) or 0
+                expected_notional = pos["notional_usdt"]
+                if actual_cost > 0 and expected_notional > 0:
+                    deviation = abs(actual_cost - expected_notional) / expected_notional
+                    if deviation > 0.50:
+                        log_func(f"  🚨 订单偏差! {sym}: 预期保证金=${pos['margin_usdt']} 实际成交=${actual_cost:.2f} (偏差{deviation:.0%}) — 可能ctVal计算错误!")
+                    elif deviation > 0.20:
+                        log_func(f"  ⚠️ 订单偏差 {sym}: 预期=${pos['margin_usdt']} 实际成交=${actual_cost:.2f} (偏差{deviation:.0%})")
+                elif actual_filled == 0 and expected_notional > 10:
+                    log_func(f"  ⚠️ 订单未完全成交 {sym}: filled={actual_filled}, 预期名义=${expected_notional}")
         except Exception as e:
             log_func(f"  ❌ 合约下单失败 {sym}: {e}")
 
@@ -740,56 +1199,222 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
                     sentiment_engine=sentiment_engine  # 🎭 传入情绪
                 )
                 if strategy_signals:
-                    strat_results = execute_strategy_signals(strategy_signals, pf)
-                    if strat_results:
-                        results.extend(strat_results)
-                        log(f"🧠 多策略引擎: {len(strat_results)} 笔执行")
+                    # ── 🔭 四视角扫描: 权哥价值+西蒙斯量化+Serenity长期价值 ──
+                    try:
+                        from perspective_scanner import MultiPerspectiveScanner
+                        p_scanner = MultiPerspectiveScanner()
+                        p_context = {
+                            "fg_value": fg.current_value if fg else 50,
+                            "fg_label": fg.classification if fg else "Neutral",
+                            "btc_trend": "uptrend",  # will be refined by MarketRegimeClassifier
+                            "vol_level": "medium",
+                        }
+                        # 试着用 regime 分类器的 BTC 数据
+                        try:
+                            from market_regime import MarketRegimeClassifier
+                            rc = MarketRegimeClassifier()
+                            btc_data = rc._fetch_btc_data()
+                            p_context["btc_trend"] = btc_data.get("trend", "uptrend")
+                            p_context["vol_level"] = btc_data.get("vol_level", "medium")
+                        except Exception:
+                            pass
+                        perspective_signals = p_scanner.scan_all(p_context)
+                        if perspective_signals:
+                            n_val = sum(1 for s in perspective_signals if s.get("strategy_name") == "权哥价值投资")
+                            n_quant = sum(1 for s in perspective_signals if s.get("strategy_name") == "西蒙斯量化统计")
+                            n_serenity = sum(1 for s in perspective_signals if s.get("strategy_name") == "Serenity长期价值")
+                            log(f"🔭 四视角扫描: +{len(perspective_signals)}信号 "
+                                f"(权哥{n_val} + 西蒙斯{n_quant} + Serenity{n_serenity})")
+                            strategy_signals.extend(perspective_signals)
+                    except Exception as e:
+                        log(f"⚠️ 多视角扫描跳过: {e}")
 
-                    # ── ⚡ 杠杆决策 (实盘 + 合约标的) ──
-                    if leverage_engine and trading_mode.is_real:
-                        swap_results = _run_leverage_decisions(
-                            strategy_signals, sentiment_engine,
-                            leverage_engine, pf, log
+                    # ── 🏛️ 市场Regime安检门 (交易前第一道防线) ──
+                    from market_regime import check_regime, MarketRegimeClassifier
+                    alpha_summary = MarketRegimeClassifier.summarize_alpha_signals(strategy_signals)
+                    regime = check_regime(
+                        fg_value=fg.current_value if fg else 50,
+                        fg_label=fg.classification if fg else "Neutral",
+                        alpha_signals=strategy_signals,
+                    )
+                    state['last_regime'] = {
+                        "regime": regime.regime,
+                        "action_bias": regime.action_bias,
+                        "max_risk": regime.max_risk_percent,
+                        "recommended_lev": regime.recommended_leverage,
+                        "pass": regime.pass_,
+                        "reason": regime.reason,
+                    }
+
+                    icon = "🟢" if regime.pass_ else "🔴"
+                    log(f"🏛️ 安检门: {icon} {regime.regime} | bias={regime.action_bias} "
+                        f"| risk={regime.max_risk_percent:.0%} | lev≤{regime.recommended_leverage}x")
+                    log(f"   📋 {regime.reason}")
+
+                    if not regime.pass_:
+                        log(f"   🚫 市场环境禁止交易，跳过本轮全部信号")
+                        strategy_signals = []  # 清空所有信号
+                    else:
+                        # 🛡️ 方向过滤: 根据regime的action_bias过滤信号
+                        before_filter = len(strategy_signals)
+                        if regime.action_bias == "long_only":
+                            strategy_signals = [s for s in strategy_signals
+                                              if s.get("action") == "BUY"]
+                        elif regime.action_bias == "short_only":
+                            strategy_signals = [s for s in strategy_signals
+                                              if s.get("action") == "SELL"]
+                        elif regime.action_bias == "neutral":
+                            # 中性模式: 仅保留置信度 > 70% 的信号 (高度确认才做)
+                            strategy_signals = [s for s in strategy_signals
+                                              if s.get("confidence", 0) >= 0.70]
+                        filtered = before_filter - len(strategy_signals)
+                        if filtered:
+                            log(f"   🔍 方向过滤: {before_filter}→{len(strategy_signals)} "
+                                f"({regime.action_bias}模式，过滤{filtered}条)")
+
+                        # 🛡️ 风险限制: 覆盖杠杆上限
+                        max_lev = regime.recommended_leverage
+                        for s in strategy_signals:
+                            s["_max_leverage"] = max_lev
+                            s["_max_risk_pct"] = regime.max_risk_percent
+
+                        # ── ⚖️ L2+L3 策略共识 + 执行官审批 ──
+                        if strategy_signals:
+                            try:
+                                from trade_gates import run_trade_gates
+                                # 获取当前持仓列表
+                                try:
+                                    current_pos_list = list(leverage_engine.fetch_open_positions() or [])
+                                except Exception:
+                                    current_pos_list = []
+                                equity = leverage_engine.fetch_equity() if leverage_engine else 100
+                                trade_decisions = run_trade_gates(
+                                    signals=strategy_signals,
+                                    regime_result=regime,
+                                    current_positions=current_pos_list,
+                                    total_equity=equity,
+                                    fg_value=fg.current_value if fg else 50,
+                                )
+                                # 统计并过滤
+                                approved = {sym: d for sym, d in trade_decisions.items() if d.execute}
+                                rejected = {sym: d for sym, d in trade_decisions.items() if not d.execute}
+
+                                if rejected:
+                                    for sym, d in rejected.items():
+                                        reasons_short = d.reject_reason[:80] if d.reject_reason else "未知"
+                                        log(f"  🚫 [{sym}] 审批拒绝: {reasons_short}")
+
+                                if approved:
+                                    log(f"  ⚖️ 三层审批通过: {len(approved)}个信号 "
+                                        f"({', '.join(approved.keys())})")
+                                    # 更新信号: 应用执行官批准的仓位
+                                    for sym, d in approved.items():
+                                        for s in strategy_signals:
+                                            if s.get("symbol") == sym:
+                                                s["suggested_size"] = d.suggested_position_size
+                                                s["_approved_confidence"] = d.final_confidence
+                                    # 只保留批准的信号
+                                    strategy_signals = [s for s in strategy_signals
+                                                      if s.get("symbol") in approved]
+                                else:
+                                    log(f"  ⚖️ 三层审批: 无信号通过")
+                                    strategy_signals = []
+                            except Exception as e:
+                                log(f"  ⚠️ 共识/执行官审批异常，跳过L2+L3: {e}")
+                                # 异常时保守处理: 只保留高置信度信号
+                                strategy_signals = [s for s in strategy_signals
+                                                  if s.get("confidence", 0) >= 0.70]
+
+                    # 🆕 冷却期过滤: 最近被止损的币种跳过
+                    stopped_out = set(state.get('stopped_out_cooldown', {}).keys()) if state.get('stopped_out_cooldown') else set()
+                    if stopped_out:
+                        before = len(strategy_signals)
+                        strategy_signals = [s for s in strategy_signals if s.get('symbol') not in stopped_out]
+                        skipped = before - len(strategy_signals)
+                        if skipped:
+                            log(f"  🧊 冷却期过滤: 跳过 {skipped} 条信号 ({', '.join(sorted(stopped_out))})")
+
+                    if strategy_signals:
+                        strat_results = execute_strategy_signals(
+                            strategy_signals, pf, leverage_engine,
+                            live_trader=getattr(trader, 'live_trader', None)
                         )
-                        if swap_results:
-                            results.extend(swap_results)
+                        if strat_results:
+                            results.extend(strat_results)
+                            log(f"🧠 多策略引擎: {len(strat_results)} 笔执行")
+
+                        # ── ⚡ 杠杆决策 (实盘 + 合约标的) ──
+                        if leverage_engine and trading_mode.is_real:
+                            swap_results = _run_leverage_decisions(
+                                strategy_signals, sentiment_engine,
+                                leverage_engine, pf, log,
+                                stopped_out_symbols=stopped_out
+                            )
+                            if swap_results:
+                                results.extend(swap_results)
+                    else:
+                        log("💤 安检后无有效信号")
                 else:
                     log("💤 多策略引擎: 无信号")
         except Exception as e:
             log(f"⚠️ 多策略引擎异常: {e}")
 
         # ── 🏭 股票合约扫描 (半导体/AI软件/太空等, ML策略不覆盖) ──
+        # 🆕 股票合约与加密货币共享仓位上限，不再有独立执行路径
         if leverage_engine and trading_mode.is_real:
             try:
                 from stock_swap_scanner import scan_stock_swaps
+
+                # 🛡️ 重新获取实盘持仓 (含刚开的crypto仓位)
                 existing_swap_positions = set()
                 try:
                     okx_pos = leverage_engine.fetch_open_positions()
-                    # fetch_open_positions 返回 set，直接使用
                     existing_swap_positions = okx_pos if isinstance(okx_pos, set) else set(okx_pos.keys() if hasattr(okx_pos, 'keys') else okx_pos)
                 except Exception:
                     pass
 
-                # 每3个周期全量扫描一次扩展列表
-                force_full = (state.get('cycles', 0) % 3 == 0)
-                stock_signals = scan_stock_swaps(
-                    sentiment_engine=sentiment_engine,
-                    existing_positions=existing_swap_positions,
-                    force_full=force_full,
-                )
-                if stock_signals:
-                    log(f"🏭 股票合约扫描: {len(stock_signals)} 条信号")
-                    for ss in stock_signals:
-                        log(f"  📈 [{ss['strategy_name']}] {ss['name']} | "
-                            f"评分{ss['score']:.0f} | 置信{ss['confidence']:.1%} | "
-                            f"{', '.join(ss['reasons'][:2])}")
-                    stock_results = _run_leverage_decisions(
-                        stock_signals, sentiment_engine,
-                        leverage_engine, pf, log
+                # 🛡️ 统一仓位上限: 股票+crypto共享同一个限制
+                total_equity = leverage_engine.fetch_equity()
+                if total_equity <= 100:
+                    MAX_TOTAL_POSITIONS = 2
+                elif total_equity <= 200:
+                    MAX_TOTAL_POSITIONS = 3
+                elif total_equity <= 500:
+                    MAX_TOTAL_POSITIONS = 4
+                else:
+                    MAX_TOTAL_POSITIONS = 5
+
+                remaining_slots = MAX_TOTAL_POSITIONS - len(existing_swap_positions)
+                if remaining_slots <= 0:
+                    log(f"  🛑 总仓位已达上限 {MAX_TOTAL_POSITIONS}个 (含crypto+股票)。"
+                        f"当前: {', '.join(sorted(existing_swap_positions)[:8])}")
+                else:
+                    # 每3个周期全量扫描一次扩展列表
+                    force_full = (state.get('cycles', 0) % 3 == 0)
+                    stock_signals = scan_stock_swaps(
+                        sentiment_engine=sentiment_engine,
+                        existing_positions=existing_swap_positions,
+                        force_full=force_full,
                     )
-                    if stock_results:
-                        results.extend(stock_results)
-                        log(f"🏭 股票合约: {len(stock_results)} 笔执行")
+                    if stock_signals:
+                        log(f"🏭 股票合约扫描: {len(stock_signals)} 条信号 (剩余{remaining_slots}槽)")
+                        for ss in stock_signals:
+                            log(f"  📈 [{ss['strategy_name']}] {ss['name']} | "
+                                f"评分{ss['score']:.0f} | 置信{ss['confidence']:.1%} | "
+                                f"{', '.join(ss['reasons'][:2])}")
+                        # 🆕 传入剩余槽数 + 冷却名单
+                        stopped_out = set(state.get('stopped_out_cooldown', {}).keys()) if state.get('stopped_out_cooldown') else set()
+                        stock_results = _run_leverage_decisions(
+                            stock_signals, sentiment_engine,
+                            leverage_engine, pf, log,
+                            remaining_slots=remaining_slots,
+                            stopped_out_symbols=stopped_out
+                        )
+                        if stock_results:
+                            results.extend(stock_results)
+                            log(f"🏭 股票合约: {len(stock_results)} 笔执行")
+                    else:
+                        log(f"🏭 股票合约扫描: 0 条信号 (剩余{remaining_slots}槽, force_full={force_full})")
             except Exception as e:
                 log(f"⚠️ 股票合约扫描异常: {e}")
 
@@ -804,6 +1429,26 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
                 log(f"📊 A股/美股/港股/bStocks: {len(trad_results)} 笔信号")
         except Exception as e:
             log(f"⚠️ A股/美股/港股扫描异常: {e}")
+
+        # ── 🚨 硬性最低保证金检查: <$20的直接平仓，不商量 ──
+        if leverage_engine:
+            try:
+                enforced = _enforce_min_margin(leverage_engine, log)
+                if enforced:
+                    results.extend(enforced)
+                    log(f"🚨 最低保证金执法: {len(enforced)} 笔强制平仓")
+            except Exception as e:
+                log(f"⚠️ 最低保证金执法异常: {e}")
+
+        # ── 🧹 低确信仓位清理: 盈利>手续费就收 (不勉强) ──
+        if leverage_engine:
+            try:
+                cleaned = _clean_low_conviction_positions(leverage_engine, log)
+                if cleaned:
+                    results.extend(cleaned)
+                    log(f"🧹 低确信清理: {len(cleaned)} 笔回收")
+            except Exception as e:
+                log(f"⚠️ 低确信清理异常: {e}")
 
         # ── 🛡️ 硬止损强制执行 (所有持仓) ──
         if pf and pf.open_positions:
@@ -885,6 +1530,40 @@ def main():
         state["today_trades"] = 0
         state["last_push_day"] = today_str
 
+    # ── 🆕 启动时同步OKX现有持仓 (防止重启后stale数据重复开仓) ──
+    if trading_mode.is_real:
+        try:
+            from leverage_engine import LeverageEngine
+            le = LeverageEngine()
+            okx_startup_positions = le.fetch_open_positions()
+            pos_list = list(okx_startup_positions) if isinstance(okx_startup_positions, set) else list(okx_startup_positions.keys()) if hasattr(okx_startup_positions, 'keys') else []
+            if pos_list:
+                log(f"🔗 OKX现有持仓({len(pos_list)}): {', '.join(sorted(pos_list))}")
+                state['okx_positions_at_start'] = sorted(pos_list)
+            else:
+                log("🔗 OKX现有持仓: 空仓")
+                state['okx_positions_at_start'] = []
+        except Exception as e:
+            log(f"⚠️ OKX持仓同步失败: {e}")
+            state['okx_positions_at_start'] = []
+
+    # ── 🛡️ 启动时检查所有持仓SL/TP保护 ──
+    if trading_mode.is_real:
+        try:
+            from leverage_engine import LeverageEngine
+            sltp_le = LeverageEngine()
+            sltp_status = sltp_le.check_all_positions_sl_tp()
+            if sltp_status.get("naked_positions"):
+                log(f"🚨 发现裸奔仓位: {', '.join(sltp_status['naked_positions'])}")
+                log("  ⚠️ 这些仓位没有SL/TP保护!")
+            if sltp_status.get("protected_positions"):
+                for sym, prot in sltp_status["protected_positions"].items():
+                    log(f"  🛡️ {sym}: SL={prot.get('sl','?')} TP={prot.get('tp','?')}")
+            if sltp_status.get("all_protected", False) and sltp_status.get("protected_positions"):
+                log(f"✅ 全部{len(sltp_status['protected_positions'])}个持仓均有SL/TP保护")
+        except Exception as e:
+            log(f"⚠️ SL/TP检查异常: {e}")
+
     # 启动通知
     push_wechat(
         f"🐾 Yina自主交易已启动 [{mode_label}]",
@@ -902,11 +1581,50 @@ def main():
         state["cycles"] += 1
         state["today_cycles"] = state.get("today_cycles", 0) + 1
 
+        # 🆕 冷却期管理: 每周期递减计数器，过期移除
+        cooldown = state.get('stopped_out_cooldown', {})
+        if cooldown:
+            expired = []
+            for sym in list(cooldown.keys()):
+                cooldown[sym] -= 1
+                if cooldown[sym] <= 0:
+                    expired.append(sym)
+            for sym in expired:
+                del cooldown[sym]
+                log(f"  🧊 冷却期结束: {sym} 重新纳入候选")
+            state['stopped_out_cooldown'] = cooldown
+
+        # 🛡️ 每轮扫描前: 检查所有持仓SL/TP保护 (每5轮≈50分钟检查一次)
+        if trading_mode.is_real and state["cycles"] % 5 == 1:
+            try:
+                from leverage_engine import LeverageEngine
+                sltp_le = LeverageEngine()
+                sltp_status = sltp_le.check_all_positions_sl_tp()
+                naked = sltp_status.get("naked_positions", [])
+                if naked:
+                    log(f"🚨 裸奔仓位检测: {', '.join(naked)} — 不补设，等待下一轮新开仓自带SL/TP")
+                else:
+                    protected = sltp_status.get("protected_positions", {})
+                    if protected:
+                        log(f"🛡️ SL/TP全部在线({len(protected)}个仓位)")
+            except Exception as e:
+                log(f"⚠️ 周期SL/TP检查异常: {e}")
+
         log(f"\n{'='*50}")
         log(f"🔄 第 {state['cycles']} 次扫描 [{beijing_now().strftime('%H:%M')}]")
         log(f"{'='*50}")
 
         result = run_trade_cycle(state, trading_mode)
+
+        # 🆕 止损冷却追踪: 将本周期被止损/强平的币种加入冷却名单
+        global _stopped_out_this_cycle
+        if _stopped_out_this_cycle:
+            cooldown = state.get('stopped_out_cooldown', {})
+            for sym in _stopped_out_this_cycle:
+                cooldown[sym] = STOPPED_OUT_COOLDOWN_CYCLES
+                log(f"  🧊 加入冷却: {sym} (跳过{STOPPED_OUT_COOLDOWN_CYCLES}个周期)")
+            state['stopped_out_cooldown'] = cooldown
+        _stopped_out_this_cycle = set()  # 清空本周期记录
 
         if result["ok"]:
             pf = result["pf"]

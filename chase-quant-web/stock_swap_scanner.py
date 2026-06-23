@@ -41,6 +41,7 @@ EXTENDED_WATCHLIST = [
     "MSFT/USDT", "GOOGL/USDT", "META/USDT", "AAPL/USDT",
     "TSLA/USDT", "AMZN/USDT", "NFLX/USDT",
     "RKLB/USDT", "ASTS/USDT", "LUNR/USDT",
+    "SPCX/USDT",     # 🚀 太空ETF — 间接持有SpaceX! 全球最大未上市公司的唯一敞口
     "SPY/USDT", "QQQ/USDT",
     "XAU/USDT", "XAG/USDT",
 ]

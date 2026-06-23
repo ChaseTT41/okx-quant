@@ -52,7 +52,7 @@ from panda_trade_strategy import (
 # 配置
 # ═══════════════════════════════════════════════════════════
 
-SCAN_INTERVAL_MINUTES = 30  # 扫描间隔（分钟）
+SCAN_INTERVAL_MINUTES = 5  # 扫描间隔（分钟）✨ 从10改为5，更快捕捉信号
 LOG_FILE = PROJ_DIR / "data" / "daemon_logs" / "panda_daemon.log"
 STATE_FILE = PROJ_DIR / "data" / "panda_state.json"
 OKX_HOST = "www.okx.cab"
@@ -337,7 +337,8 @@ def decide_trade(signal: PandaSignal, positions: dict, state: dict,
 
     # ── 获取当前价格计算合约张数 ──
     try:
-        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}USDT"
+        clean = symbol.split("/")[0]  # "BTC/USDT" → "BTC"
+        url = f"https://api.binance.com/api/v3/ticker/price?symbol={clean}USDT"
         price = float(requests.get(url, timeout=5).json()["price"])
     except:
         print(f"  ⚠️ 无法获取 {symbol} 价格")
