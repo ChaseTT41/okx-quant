@@ -145,27 +145,52 @@ def scan_symbol(symbol: str) -> Optional[TradeSignal]:
     score = 50
     reasons = []
 
+    # 🆕 市场环境检测: 从feature_engine获取F&G+BTC趋势
+    bearish_market = False
+    try:
+        from feature_engine import _SENTIMENT_CTX
+        fg = _SENTIMENT_CTX.get("fg_value", 50)
+        btc_below_ma = _SENTIMENT_CTX.get("btc_below_ma20", False)
+        # F&G < 40 或 BTC在MA20下方 = 偏空市场
+        bearish_market = (fg < 40) or btc_below_ma
+    except Exception:
+        pass
+
     # === 信号评分 ===
     buy_triggers = 0
     sell_triggers = 0
 
+    # 🆕 偏空市场: RSI超卖不再盲目加分
+    rsi_buy_mult = 0.5 if bearish_market else 1.0
+    rsi_sell_bonus = 1.5 if bearish_market else 1.0
+
     # 1h RSI
     if rsi_1h < 38:
-        score += 15; buy_triggers += 1
+        bonus = int(15 * rsi_buy_mult)
+        score += bonus; buy_triggers += 1 if bonus >= 8 else 0
         reasons.append(f"1hRSI超卖({rsi_1h:.0f})")
     elif rsi_1h < 45:
-        score += 8
-        reasons.append(f"1hRSI偏低({rsi_1h:.0f})")
+        bonus = int(8 * rsi_buy_mult)
+        score += bonus
+        if bonus >= 5:
+            reasons.append(f"1hRSI偏低({rsi_1h:.0f})")
     elif rsi_1h > 70:
-        score -= 10; sell_triggers += 1
+        penalty = int(10 * rsi_sell_bonus)
+        score -= penalty; sell_triggers += 1
         reasons.append(f"1hRSI超买({rsi_1h:.0f})")
+    elif rsi_1h > 60 and bearish_market:
+        # 🆕 偏空市场中 RSI>60 = 反弹即空
+        score -= 6; sell_triggers += 1
+        reasons.append(f"1hRSI偏强反弹({rsi_1h:.0f})=做空机会")
 
     # 4h RSI
     if rsi_4h < 42:
-        score += 12; buy_triggers += 1
+        bonus = int(12 * rsi_buy_mult)
+        score += bonus; buy_triggers += 1 if bonus >= 7 else 0
         reasons.append(f"4hRSI超卖({rsi_4h:.0f})")
     elif rsi_4h > 72:
-        score -= 8; sell_triggers += 1
+        penalty = int(8 * rsi_sell_bonus)
+        score -= penalty; sell_triggers += 1
         reasons.append(f"4hRSI超买({rsi_4h:.0f})")
 
     # MACD
@@ -182,29 +207,46 @@ def scan_symbol(symbol: str) -> Optional[TradeSignal]:
     # 布林带位置
     bb_position = (price - bb_lower) / (bb_upper - bb_lower) if bb_upper > bb_lower else 0.5
     if bb_position < 0.15:
-        score += 12
-        buy_triggers += 1
-        reasons.append("触布林下轨")
+        if bearish_market:
+            # 🆕 偏空市场触下轨 = 下跌趋势延续，不是抄底信号
+            score -= 5; sell_triggers += 1
+            reasons.append("偏空触布林下轨=趋势延续")
+        else:
+            score += 12
+            buy_triggers += 1
+            reasons.append("触布林下轨")
     elif bb_position < 0.35:
         score += 5
         reasons.append("低于布林中轨")
     elif bb_position > 0.85:
-        score -= 12
+        penalty = 15 if bearish_market else 12
+        score -= penalty
         sell_triggers += 1
         reasons.append("触布林上轨")
 
-    # 短期超跌反弹
+    # 短期超跌反弹 → 🆕 偏空市场中 = 下跌加速信号
     if ret_4h < -0.03 and ret_12h < -0.05:
-        score += 10
-        buy_triggers += 1
-        reasons.append(f"超跌反弹({ret_4h:.1%})")
+        if bearish_market:
+            score -= 8; sell_triggers += 1
+            reasons.append(f"下跌加速({ret_4h:.1%})")
+        else:
+            score += 10
+            buy_triggers += 1
+            reasons.append(f"超跌反弹({ret_4h:.1%})")
 
     score = max(0, min(100, score))
 
-    # 决策 — 纯评分制
-    if score >= 52:
+    # 决策 — 🆕 偏空市场调整阈值
+    if bearish_market:
+        buy_threshold = 62   # 更难触发买入
+        sell_threshold = 45  # 更容易触发卖出
+    else:
+        buy_threshold = 52
+        sell_threshold = 48
+
+    if score >= buy_threshold:
         action = "BUY"
-    elif score <= 48:
+    elif score <= sell_threshold:
         action = "SELL"
     else:
         action = "HOLD"

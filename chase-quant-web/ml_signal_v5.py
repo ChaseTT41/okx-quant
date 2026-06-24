@@ -113,9 +113,10 @@ class MLSignalEngineV5:
     """
 
     # 信号 → 操作阈值 (动态调整，平衡信号频率与质量)
+    # 🆕 v3: BUY/SELL对称阈值 + 极端恐惧时via auto_trade.py动态调整
     ACTION_THRESHOLDS = {
-        "BUY": 0.12,
-        "SELL": -0.12,
+        "BUY": 0.06,    # 买入阈值 (F&G动态调整)
+        "SELL": -0.06,  # 🆕 做空阈值与做多对称 (原-0.08太保守)
     }
 
     def __init__(self, use_qlib: bool = True, use_lgbm: bool = True,
@@ -456,9 +457,25 @@ class MLSignalEngineV5:
         final_signal = signal_consensus * (1.0 - min(divergence * 2, 0.5))  # 分歧惩罚
 
         # 确定操作 — 用信号加权值 (不受分歧惩罚衰减)
-        if signal_weighted > self.ACTION_THRESHOLDS["BUY"]:
+        # 🆕 极端恐惧/贪婪动态阈值调整
+        buy_threshold = self.ACTION_THRESHOLDS["BUY"]
+        sell_threshold = self.ACTION_THRESHOLDS["SELL"]
+        try:
+            from feature_engine import _SENTIMENT_CTX
+            fg = _SENTIMENT_CTX.get("fg_value", 50)
+            if fg <= 25:  # 极端恐惧 → 降低买入门槛, 收紧做空
+                buy_threshold = max(0.02, buy_threshold * 0.5)
+                sell_threshold = sell_threshold * 1.3  # 更难触发做空
+            elif fg <= 35:  # 恐惧 → 适度放宽
+                buy_threshold = max(0.03, buy_threshold * 0.7)
+            elif fg >= 75:  # 极端贪婪 → 降低做空门槛
+                sell_threshold = sell_threshold * 0.7
+        except Exception:
+            pass  # 如果 sentiment context 不可用，用默认阈值
+
+        if signal_weighted > buy_threshold:
             action = "BUY"
-        elif signal_weighted < self.ACTION_THRESHOLDS["SELL"]:
+        elif signal_weighted < sell_threshold:
             action = "SELL"
         else:
             action = "HOLD"

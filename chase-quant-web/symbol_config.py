@@ -243,25 +243,45 @@ KR_STOCKS_WATCH = [
 
 
 # ═══════════════════════════════════════════════════════════════
-# 动态拉取: OKX API
+# 动态拉取: OKX REST API
 # ═══════════════════════════════════════════════════════════════
 
-def _get_okx():
-    """获取 OKX ccxt 实例 (共用)"""
-    import ccxt
-    okx = ccxt.okx({"enableRateLimit": True, "timeout": 15000})
-    okx.hostname = "www.okx.cab"
-    return okx
+def _okx_rest_instruments(inst_type: str) -> List[dict]:
+    """
+    通过 OKX REST API 获取交易对列表 (绕过 ccxt load_markets bug)。
+
+    Args:
+        inst_type: "SPOT" / "SWAP"
+
+    Returns:
+        [{baseCcy, quoteCcy, instId, state, ...}, ...]
+    """
+    import requests
+    try:
+        url = "https://www.okx.cab/api/v5/public/instruments"
+        params = {"instType": inst_type}
+        resp = requests.get(url, params=params, timeout=15)
+        data = resp.json()
+        if data.get("code") == "0":
+            instruments = data.get("data", [])
+            # 只保留 live 状态
+            return [i for i in instruments if i.get("state") == "live"]
+        else:
+            print(f"⚠️ OKX REST instruments({inst_type}) 异常: {data.get('msg', '?')}")
+            return []
+    except Exception as e:
+        print(f"⚠️ 无法拉取 OKX {inst_type} 交易对: {e}")
+        return []
 
 
 def fetch_okx_spot_symbols() -> List[str]:
-    """从 OKX 实时拉取所有 USDT 现货交易对 (纯加密货币)"""
+    """从 OKX REST API 实时拉取所有 USDT 现货交易对 (纯加密货币)"""
     try:
-        okx = _get_okx()
-        markets = okx.load_markets()
+        instruments = _okx_rest_instruments("SPOT")
         symbols = sorted([
-            k for k, v in markets.items()
-            if v.get("spot") and v.get("active") and k.endswith("/USDT")
+            f"{i['baseCcy']}/{i['quoteCcy']}"
+            for i in instruments
+            if i.get("quoteCcy") == "USDT"
         ])
         return symbols
     except Exception as e:
@@ -271,11 +291,14 @@ def fetch_okx_spot_symbols() -> List[str]:
 
 def fetch_okx_swap_symbols() -> Dict[str, List[str]]:
     """
-    从 OKX 拉取所有 USDT 永续合约, 分类返回
+    从 OKX REST API 拉取所有 USDT 永续合约, 分类返回。
+
+    OKX SWAP instruments API: instId="BTC-USDT-SWAP", settleCcy="USDT", ctType="linear"
+    需要从 instId 解析 base/quote。
 
     Returns:
         {
-            "stocks": [...],       # 股票 (非加密货币的非ETF非商品)
+            "stocks": [...],       # 股票
             "etfs": [...],         # ETF
             "commodities": [...],  # 大宗商品
             "crypto_swaps": [...], # 加密货币合约
@@ -283,38 +306,38 @@ def fetch_okx_swap_symbols() -> Dict[str, List[str]]:
         }
     """
     try:
-        okx = _get_okx()
-        markets = okx.load_markets()
-
-        # 所有 active USDT linear swaps
-        swaps = {
-            k: v for k, v in markets.items()
-            if "/USDT:USDT" in k and v.get("swap") and v.get("active")
-        }
-
-        # 区分crypto vs 其他: 有对应spot市场的就是crypto
-        all_spots = {k for k, v in markets.items() if v.get("spot") and v.get("active")}
-        crypto_bases = set()
-        for sym in swaps:
-            base = sym.split("/")[0].upper()
-            spot_sym = f"{base}/USDT"
-            if spot_sym in all_spots:
-                crypto_bases.add(base)
-        # 手动补充已知crypto (BTC, ETH等可能没spot数据但肯定是crypto)
-        for base in ["BTC", "ETH", "USDC", "DAI", "WBTC", "STETH"]:
-            crypto_bases.add(base)
+        instruments = _okx_rest_instruments("SWAP")
 
         # 已知分类
         etf_bases = {"SPY", "QQQ", "IWM", "XLE", "SOXL", "EWJ", "EWT", "EWY",
                      "ROBO", "URNM", "USO", "SPX", "SPCX", "SPACE"}
         commodity_bases = {"XAU", "XAG", "XCU", "XPD", "XPT"}
+        # 所有加密货币的 base (从 SPOT 获取)
+        spot_instruments = _okx_rest_instruments("SPOT")
+        crypto_bases = {
+            i["baseCcy"] for i in spot_instruments
+            if i.get("quoteCcy") == "USDT"
+        }
+        # 手动补充 (可能没spot但肯定是crypto)
+        for base in ["BTC", "ETH", "USDC", "DAI", "WBTC", "STETH"]:
+            crypto_bases.add(base)
 
-        categorized = {"stocks": [], "etfs": [], "commodities": [], "crypto_swaps": [], "all": []}
+        categorized = {"stocks": [], "etfs": [], "commodities": [],
+                      "crypto_swaps": [], "all": []}
 
-        for sym in sorted(swaps.keys()):
-            # swap形式转成标准格式存储 (用/USDT而非/USDT:USDT)
-            std_sym = sym.replace(":USDT", "")
-            base = sym.split("/")[0].upper()
+        for inst in instruments:
+            # 只取 USDT-margined linear swaps
+            if inst.get("settleCcy") != "USDT" or inst.get("ctType") != "linear":
+                continue
+
+            inst_id = inst["instId"]  # "BTC-USDT-SWAP"
+            # 解析: "BTC-USDT-SWAP" → ("BTC", "USDT")
+            parts = inst_id.split("-")
+            if len(parts) < 2:
+                continue
+            base = parts[0]
+            quote = "USDT"
+            std_sym = f"{base}/{quote}"
 
             if base in crypto_bases:
                 categorized["crypto_swaps"].append(std_sym)
@@ -330,7 +353,8 @@ def fetch_okx_swap_symbols() -> Dict[str, List[str]]:
         return categorized
     except Exception as e:
         print(f"⚠️ 无法拉取 OKX 永续合约: {e}")
-        return {"stocks": [], "etfs": [], "commodities": [], "crypto_swaps": [], "all": []}
+        return {"stocks": [], "etfs": [], "commodities": [],
+                "crypto_swaps": [], "all": []}
 
 
 def build_tiered_symbols() -> dict:

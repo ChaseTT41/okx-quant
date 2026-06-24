@@ -254,18 +254,20 @@ def five_dimension_score(df: pd.DataFrame, side: str = 'long') -> dict:
 
 
 def scan_klines(exchange, symbols: List[str]) -> dict:
-    """多时间框架裸K扫描 + 指标 + 五维评分卡"""
+    """多时间框架裸K扫描 + 指标 + 五维评分卡 (OKX REST 零 ccxt)"""
     from naked_k_scanner import NakedKScanner
+    from okx_rest_data import fetch_okx_ohlcv
 
     results = {}
     for sym in symbols:
         sym_results = {}
         try:
             for tf in ['1h', '4h', '1d']:
-                ohlcv = exchange.fetch_ohlcv(sym, tf, limit=100)
-                if not ohlcv or len(ohlcv) < 30:
+                # OKX REST OHLCV (绕过 ccxt load_markets bug)
+                tf_map = {'1h': '1H', '4h': '4H', '1d': '1D'}
+                df = fetch_okx_ohlcv(sym.replace("-SWAP", ""), tf_map[tf], limit=100)
+                if df is None or len(df) < 30:
                     continue
-                df = pd.DataFrame(ohlcv, columns=['ts','open','high','low','close','volume'])
                 ind = calc_indicators(df)
 
                 try:

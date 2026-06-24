@@ -145,6 +145,14 @@ class CryptoSignals:
             return None
 
     def scan(self) -> List[Signal]:
+        """🆕 v2: 独立做多+做空评分，双轨并行。
+
+        做多评分维度: RSI超卖反弹 / MACD金叉 / 站上MA / 正动量 / 低波动
+        做空评分维度: 趋势下跌强度 / RSI超买 / 反弹失败 / 负动量加速 / 放量下跌
+
+        不再使用单一的 0-100 对称分数。两个方向独立评分，
+        哪个方向先越过 65 分门槛就出哪个方向的信号。
+        """
         signals = []
         for symbol in self.WATCHLIST:
             df = self.fetch_ohlcv(symbol)
@@ -152,74 +160,242 @@ class CryptoSignals:
                 continue
 
             close = df["close"].values
+            high = df["high"].values
+            low = df["low"].values
+            volume = df["volume"].values
             price = close[-1]
             reasons = []
-            score = 50
+            risk = "medium"
 
-            # 生存偏差检查: 对市值<1B的币降分
-            if symbol in self.GRAVEYARD_SYMBOLS:
-                reasons.append("⚠️归零风险库匹配")
-                score -= 30
-
-            # RSI
+            # ═══════════════════════════════════════════════
+            # 基础指标计算 (共用)
+            # ═══════════════════════════════════════════════
             rsi = _calc_rsi(close)
-            if 30 < rsi < 40:
-                score += 15; reasons.append(f"RSI={rsi:.0f} 超卖反弹区")
-            elif 40 <= rsi <= 60:
-                score += 10; reasons.append(f"RSI={rsi:.0f} 中性健康")
-            elif rsi > 70:
-                score -= 20; reasons.append(f"RSI={rsi:.0f} 超买⚠️")
-            elif rsi < 30:
-                score += 20; reasons.append(f"RSI={rsi:.0f} 极度超卖🔔")
-
-            # MACD
             macd, signal_line, hist = _calc_macd(close)
-            if hist > 0:
-                score += 10; reasons.append("MACD金叉")
-            else:
-                score -= 10; reasons.append("MACD死叉")
-
-            # 均线
-            sma20 = pd.Series(close).rolling(20).mean()
-            if price > sma20.iloc[-1]:
-                score += 10; reasons.append("站上20日均线")
-            else:
-                score -= 5
-
-            # 动量
+            sma20 = float(pd.Series(close).rolling(20).mean().iloc[-1])
+            sma50 = float(pd.Series(close).rolling(50).mean().iloc[-1]) if len(close) >= 50 else sma20
             ret_5d = (close[-1] / close[-6] - 1) * 100 if len(close) > 5 else 0
             ret_20d = (close[-1] / close[-21] - 1) * 100 if len(close) > 20 else 0
+            returns = np.diff(close) / close[:-1]
+            vol = float(np.std(returns[-20:]) * np.sqrt(365))
+
+            # ── 做空专属指标 ──
+            # 下跌趋势强度: MA排列 + 价格位置
+            ma_bearish = price < sma20 < sma50  # 完美空头排列
+            ma_weak = price < sma20  # 价格在20日线下
+
+            # 连续下跌天数 + 低点序列
+            down_days = 0
+            for i in range(len(close)-1, max(0, len(close)-8), -1):
+                if close[i] < close[i-1]:
+                    down_days += 1
+                else:
+                    break
+
+            # 反弹失败检测: 近5日是否有上影线 (最高价远高于收盘价，冲高回落)
+            upper_wick_rejections = 0
+            for i in range(len(close)-1, max(0, len(close)-6), -1):
+                candle_range = high[i] - low[i]
+                if candle_range > 0:
+                    upper_wick = (high[i] - max(close[i], df["open"].values[i])) / candle_range
+                    if upper_wick > 0.4:  # 上影线占40%+
+                        upper_wick_rejections += 1
+
+            # 成交量确认: 下跌日放量 vs 上涨日缩量
+            down_vol = 0.0
+            up_vol = 0.0
+            down_count = 0
+            up_count = 0
+            for i in range(len(close)-1, max(0, len(close)-11), -1):
+                if close[i] < close[i-1]:
+                    down_vol += volume[i]
+                    down_count += 1
+                else:
+                    up_vol += volume[i]
+                    up_count += 1
+            avg_down_vol = down_vol / max(1, down_count)
+            avg_up_vol = up_vol / max(1, up_count)
+            vol_bearish = avg_down_vol > avg_up_vol * 1.2  # 下跌量是上涨量的1.2倍+
+
+            # ═══════════════════════════════════════════════
+            # 🟢 做多评分 (Long Score)
+            # ═══════════════════════════════════════════════
+            long_score = 50
+            long_reasons = []
+
+            # RSI: 超卖=做多机会
+            if rsi < 30:
+                long_score += 20; long_reasons.append(f"RSI={rsi:.0f}极度超卖")
+            elif 30 <= rsi < 40:
+                long_score += 15; long_reasons.append(f"RSI={rsi:.0f}超卖反弹区")
+            elif 40 <= rsi <= 60:
+                long_score += 10; long_reasons.append(f"RSI={rsi:.0f}中性健康")
+            elif rsi > 70:
+                long_score -= 20; long_reasons.append(f"RSI={rsi:.0f}超买⚠️")
+
+            # MACD
+            if hist > 0:
+                long_score += 10; long_reasons.append("MACD金叉")
+            else:
+                long_score -= 10; long_reasons.append("MACD死叉")
+
+            # 均线
+            if price > sma20:
+                long_score += 10; long_reasons.append("站上MA20")
+            else:
+                long_score -= 5
+
+            # 动量
             if ret_5d > 3:
-                score += 10; reasons.append(f"5日动量+{ret_5d:.1f}%")
+                long_score += 10; long_reasons.append(f"5日动量+{ret_5d:.1f}%")
             elif ret_5d < -5:
-                score -= 10; reasons.append(f"5日急跌{ret_5d:.1f}%")
+                long_score -= 10; long_reasons.append(f"5日急跌{ret_5d:.1f}%")
             if ret_20d > 10:
-                score += 10; reasons.append(f"20日趋势+{ret_20d:.1f}%")
+                long_score += 10; long_reasons.append(f"20日趋势+{ret_20d:.1f}%")
 
             # 波动率
-            returns = np.diff(close) / close[:-1]
-            vol = np.std(returns[-20:]) * np.sqrt(365)
             if vol > 1.0:
-                score -= 10; reasons.append(f"高波动{vol:.0%}⚠️")
-                risk = "high"
+                long_score -= 10; long_reasons.append(f"高波动{vol:.0%}⚠️")
             elif vol < 0.3:
-                score += 5; risk = "low"
-            else:
-                risk = "medium"
+                long_score += 5
 
-            score = max(0, min(100, score))
-            if score >= 65:
+            # 归零风险
+            if symbol in self.GRAVEYARD_SYMBOLS:
+                long_score -= 30; long_reasons.append("⚠️归零风险库匹配")
+
+            long_score = max(0, min(100, long_score))
+
+            # ═══════════════════════════════════════════════
+            # 🔴 做空评分 (Short Score) — 🆕 独立维度
+            # ═══════════════════════════════════════════════
+            short_score = 50
+            short_reasons = []
+
+            # ① 趋势下跌强度 (max +20)
+            # 用MA偏离度增加区分度: 价在MA20下方越远=做空越强
+            ma20_distance_pct = (price - sma20) / sma20 * 100  # 负值=下方
+            if ma_bearish:
+                short_score += 15; short_reasons.append("完美空头排列(价<MA20<MA50)")
+                # 额外加分: 偏离MA20超过3% = 趋势强劲
+                if ma20_distance_pct < -5:
+                    short_score += 5; short_reasons.append(f"价低于MA20 {abs(ma20_distance_pct):.0f}%")
+            elif ma_weak and price < sma50:
+                short_score += 12; short_reasons.append("价在MA20/MA50下方")
+            elif ma_weak:
+                short_score += 8; short_reasons.append("跌破MA20")
+
+            if down_days >= 5:
+                short_score += 12; short_reasons.append(f"连跌{down_days}天📉")
+            elif down_days >= 3:
+                short_score += 7; short_reasons.append(f"连跌{down_days}天")
+
+            # ② RSI弱势区 (max +12) — 在下跌趋势中RSI 40-55 = 无力反弹
+            if rsi > 70:
+                short_score += 12; short_reasons.append(f"RSI={rsi:.0f}超买做空机会")
+            elif rsi > 60 and ma_weak:
+                short_score += 8; short_reasons.append(f"RSI={rsi:.0f}下跌趋势中偏强=反弹即空")
+            elif 45 <= rsi <= 55 and ma_weak:
+                short_score += 6; short_reasons.append(f"RSI={rsi:.0f}中性但趋势向下")
+            elif rsi < 30:
+                short_score -= 12  # 极度超卖不做空
+
+            # ③ 反弹失败 (max +15)
+            if upper_wick_rejections >= 2:
+                short_score += 15; short_reasons.append(f"连续{upper_wick_rejections}次冲高回落🔑")
+            elif upper_wick_rejections == 1:
+                short_score += 8; short_reasons.append("冲高回落上影线")
+
+            # ④ MACD死叉 + 负柱扩大 (max +18)
+            if hist < 0:
+                short_score += 10; short_reasons.append("MACD死叉")
+                if len(close) >= 3:
+                    _, _, hist_prev = _calc_macd(close[:-1])
+                    if hist < hist_prev:
+                        short_score += 6; short_reasons.append("MACD负柱加速扩大")
+
+            # ⑤ 负动量 (max +15) — 增加粒度区分急跌程度
+            if ret_5d < -10:
+                short_score += 15; short_reasons.append(f"5日暴跌{ret_5d:.1f}%🚨")
+            elif ret_5d < -7:
+                short_score += 12; short_reasons.append(f"5日大跌{ret_5d:.1f}%")
+            elif ret_5d < -5:
+                short_score += 8; short_reasons.append(f"5日急跌{ret_5d:.1f}%")
+            elif ret_5d < -2:
+                short_score += 4
+            if ret_20d < -20:
+                short_score += 10; short_reasons.append(f"20日趋势跌{ret_20d:.1f}%")
+            elif ret_20d < -10:
+                short_score += 6; short_reasons.append(f"20日偏弱{ret_20d:.1f}%")
+
+            # ⑥ 成交量确认 (max +10)
+            if vol_bearish and down_days >= 2:
+                short_score += 10; short_reasons.append("下跌放量>上涨缩量📊")
+            elif vol_bearish:
+                short_score += 5
+
+            # ⑦ 高波动 = 做空加分 (波动大 → 趋势强，适合做空)
+            if vol > 1.0:
+                short_score += 8; short_reasons.append(f"高波动{vol:.0%}→趋势强")
+            elif vol > 0.6:
+                short_score += 3
+
+            # 归零风险 → 做空绝佳
+            if symbol in self.GRAVEYARD_SYMBOLS:
+                short_score += 20; short_reasons.append("⚠️归零风险=做空标的")
+
+            short_score = max(0, min(100, short_score))
+
+            # ═══════════════════════════════════════════════
+            # 判决: 谁强出谁
+            # ═══════════════════════════════════════════════
+            LONG_THRESHOLD = 65
+            SHORT_THRESHOLD = 65
+
+            long_strong = long_score >= LONG_THRESHOLD
+            short_strong = short_score >= SHORT_THRESHOLD
+
+            if long_strong and short_strong:
+                # 两个方向都强 → 取分更高的
+                if short_score > long_score:
+                    action = "SELL"
+                    score = short_score
+                    reasons = short_reasons
+                    risk = "high" if vol > 0.8 else "medium"
+                else:
+                    action = "BUY"
+                    score = long_score
+                    reasons = long_reasons
+                    risk = "high" if vol > 1.0 else ("low" if vol < 0.3 else "medium")
+            elif long_strong:
                 action = "BUY"
-            elif score < 35:
+                score = long_score
+                reasons = long_reasons
+                risk = "high" if vol > 1.0 else ("low" if vol < 0.3 else "medium")
+            elif short_strong:
                 action = "SELL"
+                score = short_score
+                reasons = short_reasons
+                risk = "high" if vol > 0.8 else "medium"
             else:
                 action = "HOLD"
+                # HOLD时记录更强的那个方向的分数作为参考
+                if short_score > long_score:
+                    score = short_score
+                    reasons = short_reasons[:3]  # 截断原因，HOLD不展示全部
+                else:
+                    score = long_score
+                    reasons = long_reasons[:3]
+
+            confidence = min(0.95, max(0.35, 0.35 + (score - 50) * 0.012))
+            # 🆕 做空信号置信度加成: 空头排列+连跌 = 高确信
+            if action == "SELL" and ma_bearish and down_days >= 3:
+                confidence = min(0.95, confidence + 0.08)
 
             signals.append(Signal(
                 market="crypto", symbol=symbol,
                 name=_coin_full_name(symbol.replace("/USDT", "")),
                 price=price, action=action,
-                score=score, confidence=min(0.95, max(0.25, 1 - score / 120)),
+                score=score, confidence=confidence,
                 reasons=reasons, risk_level=risk,
                 suggested_size=max(200, min(2000, score * 20)),
                 stop_loss=price * 0.92, take_profit=price * 1.15,

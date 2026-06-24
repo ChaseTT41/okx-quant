@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 # ── 配置 ──
 SCAN_INTERVAL_MINUTES = 5  # 扫描间隔 (加密永不休市, 5分钟捕捉机会)
 PUSH_INTERVAL_MINUTES = 30  # 🆕 企微推送间隔 (30分钟, 避免刷屏)
-MIN_MARGIN_USDT = 20.0      # 🚨 硬性最低保证金: <$20不玩，撒胡椒面没有意义
+MIN_MARGIN_USDT = 10.0      # 🚨 硬性最低保证金: $10起步 (2026-06-23: $20→$10, 小账户激活交易)
 STOPPED_OUT_COOLDOWN_CYCLES = 3  # 🆕 止损后冷却周期数 (防止反复追同一标的)
 _stopped_out_this_cycle: set = set()  # 🆕 本周期被止损/强平的币种 (用于冷却追踪)
 DATA_DIR = Path(__file__).parent / "data"
@@ -367,7 +367,7 @@ def _manage_kline_positions(kline_positions: list, pf, log_func) -> list:
     return results
 
 
-def execute_strategy_signals(signals: list, pf, leverage_engine=None, live_trader=None) -> list:
+def execute_strategy_signals(signals: list, pf, leverage_engine=None, live_trader=None, action_bias: str = "any") -> list:
     """
     执行策略信号 🆕 v3: 实盘OKX现货 + 集中火力
 
@@ -420,8 +420,13 @@ def execute_strategy_signals(signals: list, pf, leverage_engine=None, live_trade
         return results
 
     # 🔥 集中火力: 按评分排序 + 最低质量门槛
-    MIN_COMPOSITE = 55   # 🆕 score*confidence 综合分最低 55 (约 70分×78% 或 80分×69%)
-    MIN_CONFIDENCE = 0.65  # 🆕 单信号置信度最低 65%
+    # 🆕 动态阈值: short_only 模式下降低做空信号门槛
+    if action_bias == "short_only":
+        MIN_COMPOSITE = 35   # 做空信号通常评分较低，放宽至35 (约 58分×60%)
+        MIN_CONFIDENCE = 0.45  # 做空置信度放宽至45%
+    else:
+        MIN_COMPOSITE = 55   # score*confidence 综合分最低 55 (约 70分×78% 或 80分×69%)
+        MIN_CONFIDENCE = 0.65  # 单信号置信度最低 65%
     valid_signals = []
     for s in signals:
         action = s.get("action", "HOLD")
@@ -886,7 +891,8 @@ def _clean_low_conviction_positions(leverage_engine, log_func) -> list:
 
 
 def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf, log_func,
-                           remaining_slots: int = None, stopped_out_symbols: set = None) -> list:
+                           remaining_slots: int = None, stopped_out_symbols: set = None,
+                           action_bias: str = "any") -> list:
     """对合约标的运行杠杆决策 (实盘模式) — 🆕 v2: 支持做多+做空
 
     Args:
@@ -909,8 +915,10 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
 
     # 🛡️ 动态持仓上限 (按账户规模)
     total_equity = leverage_engine.fetch_equity()
-    if total_equity <= 100:
-        MAX_SWAP_POSITIONS = 2
+    if total_equity <= 40:
+        MAX_SWAP_POSITIONS = 1
+    elif total_equity <= 100:
+        MAX_SWAP_POSITIONS = 3  # 🚀 2026-06-23: 2→3, 给SPCX留位
     elif total_equity <= 200:
         MAX_SWAP_POSITIONS = 3
     elif total_equity <= 500:
@@ -929,9 +937,25 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
         return results
 
     # 🔥 集中火力: 动态信号数 + 最低质量门槛
-    MAX_SWAP_SIGNALS = min(remaining_slots, 1 if total_equity <= 100 else (2 if total_equity <= 200 else 3))
-    MIN_COMPOSITE = 55    # 🆕 score*confidence 综合分最低 55
-    MIN_CONFIDENCE = 0.65  # 🆕 单信号置信度最低 65%
+    if total_equity < 40:
+        max_sig = 1   # <$40: 只做1笔
+    elif total_equity <= 100:
+        max_sig = 2   # $40-100: 2笔 (2026-06-23: 1→2, 激活小账户)
+    elif total_equity <= 200:
+        max_sig = 2
+    else:
+        max_sig = 3
+    MAX_SWAP_SIGNALS = min(remaining_slots, max_sig)
+    # 🆕 动态阈值: short_only 模式下降低做空信号门槛
+    if action_bias == "short_only":
+        MIN_COMPOSITE = 35    # 做空信号放宽
+        MIN_CONFIDENCE = 0.45
+    else:
+        MIN_COMPOSITE = 55    # score*confidence 综合分最低 55
+        MIN_CONFIDENCE = 0.65  # 单信号置信度最低 65%
+    # 🚀 策略资产放宽阈值
+    MIN_COMPOSITE_STRATEGIC = 40
+    MIN_CONFIDENCE_STRATEGIC = 0.50
 
     valid_swaps = []
     for sig in signals:
@@ -950,18 +974,29 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
         conf = sig.get("confidence", 0.5)
         score = sig.get("score", 50)
         composite = score * conf
-        if composite < MIN_COMPOSITE or conf < MIN_CONFIDENCE:
-            continue
+        is_strategic = sig.get("_is_strategic", False)
+        # 🚀 策略资产使用更低的门槛
+        eff_min_comp = MIN_COMPOSITE_STRATEGIC if is_strategic else MIN_COMPOSITE
+        eff_min_conf = MIN_CONFIDENCE_STRATEGIC if is_strategic else MIN_CONFIDENCE
+        if composite < eff_min_comp or conf < eff_min_conf:
+            if is_strategic:
+                log_func(f"  ⚡ {sym}: 策略资产 quality gate (comp={composite:.0f}/{eff_min_comp}, conf={conf:.0%}/{eff_min_conf:.0%}) — 通过(策略特权)")
+                # 🚀 策略资产即使低于质量门槛也强行通过
+            else:
+                continue
         valid_swaps.append((composite, sig))
 
     valid_swaps.sort(key=lambda x: x[0], reverse=True)
-    selected_swaps = valid_swaps[:MAX_SWAP_SIGNALS]
 
-    if len(valid_swaps) > len(selected_swaps):
-        skipped_names = [s[1].get('symbol','?') for s in valid_swaps[len(selected_swaps):]]
-        log_func(f"  🔥 集中火力: 只做top{len(selected_swaps)}信号，跳过: {', '.join(skipped_names[:5])}")
+    # ── 🔥 集中火力 + 回退: 按评分顺序执行, 未成交自动试下一个 ──
+    executed = 0
+    tried_symbols = set()
+    skipped_names = []
 
-    for _, sig in selected_swaps:
+    for _, sig in valid_swaps:
+        if executed >= MAX_SWAP_SIGNALS:
+            skipped_names.append(sig.get('symbol', '?'))
+            continue
         sym = sig.get("symbol", "")
         action = sig.get("action", "HOLD")
 
@@ -1006,8 +1041,13 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
             decision.leverage_label = f"CAPPED-{regime_max_lev}x"
 
         if decision.skip_reason:
-            log_func(f"  ⚡ 跳过 {sym}: {decision.skip_reason}")
-            continue
+            # 🚀 策略资产特权: 即使胜率略低也放行 (Chase哥指定核心标的)
+            is_strategic = sig.get("_is_strategic", False)
+            if is_strategic and decision.blended_win_rate >= 0.35:
+                log_func(f"  🚀 {sym}: 策略资产豁免 — {decision.skip_reason} (blended={decision.blended_win_rate:.0%}≥35%) → 强制放行")
+            else:
+                log_func(f"  ⚡ 跳过 {sym}: {decision.skip_reason}")
+                continue
 
         # 仓位计算 — 使用已缓存的 OKX 余额
         if total_equity <= 0:
@@ -1015,6 +1055,26 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
             continue
         price = sig.get("price", 100.0)
         pos = leverage_engine.calculate_position(total_equity, price, decision, side=side)
+
+        # 🎯 动态止盈: 股票用技术面止盈盖过引擎的固定公式
+        _tech_tp_pct = sig.get("_technical_tp_pct", 0)
+        if _tech_tp_pct > 0 and _tech_tp_pct < decision.take_profit_pct:
+            old_tp = decision.take_profit_pct
+            decision.take_profit_pct = _tech_tp_pct
+            # 重新计算止盈价
+            pos['take_profit_price'] = round(price * (1 + _tech_tp_pct), 1)
+            log_func(f"  🎯 [{sym}] 止盈 {old_tp:+.0%} → {_tech_tp_pct:+.1%} (布林上轨+ATR动态)")
+
+        # 💰 止损对标账户总风险: 单笔最大亏账户5%
+        _max_account_loss = total_equity * 0.05
+        _stop_pct_from_account = _max_account_loss / pos['notional_usdt'] if pos['notional_usdt'] > 0 else 0.05
+        # Clamp: 最少0.5%(太紧是噪音), 最多15%(不能无限宽松)
+        _stop_pct_from_account = max(0.005, min(0.15, _stop_pct_from_account))
+        old_sl = decision.stop_loss_pct
+        decision.stop_loss_pct = -_stop_pct_from_account
+        pos['stop_loss_price'] = round(price * (1 - _stop_pct_from_account), 1)
+        log_func(f"  💰 [{sym}] 止损 {old_sl:+.1%} → {-decision.stop_loss_pct:.1%} "
+                f"(保证金${pos['margin_usdt']:.1f}×{decision.recommended_leverage}x, 最大亏${_max_account_loss:.1f}=账户5%)")
 
         # 🐜 最低保证金过滤: <$20不玩，撒胡椒面没有意义
         if pos['margin_usdt'] < MIN_MARGIN_USDT:
@@ -1051,6 +1111,16 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
                 note=f"{decision.recommended_leverage}x_{pos_side}_{sym.split('/')[0][:8]}",
             )
             if order:
+                actual_cost = order.get("cost", 0) or 0
+                actual_filled = order.get("filled", 0) or 0
+                expected_notional = pos["notional_usdt"]
+
+                # 🔄 回退逻辑: 未成交 → 自动试下一个
+                if actual_filled == 0 and expected_notional > 10:
+                    log_func(f"  ⚠️ 未成交 {sym}: filled=0 → 回退试下一个候选")
+                    tried_symbols.add(sym)
+                    continue  # 不消耗 executed 计数，下一个候选顶上
+
                 results.append({
                     "symbol": sym, "action": action_label,
                     "leverage": decision.recommended_leverage,
@@ -1059,21 +1129,24 @@ def _run_leverage_decisions(signals: list, sentiment_engine, leverage_engine, pf
                     "order_id": order.get("id", ""),
                 })
                 leverage_engine.increment_daily_trades()
+                executed += 1  # 成功成交，消耗一个槽位
+                tried_symbols.add(sym)
 
                 # 🔴 下单后验证: 实际成交 vs 预期保证金 偏差>50%告警
-                actual_cost = order.get("cost", 0) or 0
-                actual_filled = order.get("filled", 0) or 0
-                expected_notional = pos["notional_usdt"]
                 if actual_cost > 0 and expected_notional > 0:
                     deviation = abs(actual_cost - expected_notional) / expected_notional
                     if deviation > 0.50:
                         log_func(f"  🚨 订单偏差! {sym}: 预期保证金=${pos['margin_usdt']} 实际成交=${actual_cost:.2f} (偏差{deviation:.0%}) — 可能ctVal计算错误!")
                     elif deviation > 0.20:
                         log_func(f"  ⚠️ 订单偏差 {sym}: 预期=${pos['margin_usdt']} 实际成交=${actual_cost:.2f} (偏差{deviation:.0%})")
-                elif actual_filled == 0 and expected_notional > 10:
-                    log_func(f"  ⚠️ 订单未完全成交 {sym}: filled={actual_filled}, 预期名义=${expected_notional}")
         except Exception as e:
             log_func(f"  ❌ 合约下单失败 {sym}: {e}")
+            tried_symbols.add(sym)
+
+    if skipped_names:
+        log_func(f"  🔥 已达上限({executed}/{MAX_SWAP_SIGNALS}成交)，跳过: {', '.join(skipped_names[:5])}")
+    if executed > 0:
+        log_func(f"  ✅ 成交 {executed} 笔 (回退试了{len(tried_symbols)-executed}个未成交)")
 
     return results
 
@@ -1337,7 +1410,8 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
                     if strategy_signals:
                         strat_results = execute_strategy_signals(
                             strategy_signals, pf, leverage_engine,
-                            live_trader=getattr(trader, 'live_trader', None)
+                            live_trader=getattr(trader, 'live_trader', None),
+                            action_bias=regime.action_bias
                         )
                         if strat_results:
                             results.extend(strat_results)
@@ -1348,7 +1422,8 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
                             swap_results = _run_leverage_decisions(
                                 strategy_signals, sentiment_engine,
                                 leverage_engine, pf, log,
-                                stopped_out_symbols=stopped_out
+                                stopped_out_symbols=stopped_out,
+                                action_bias=regime.action_bias
                             )
                             if swap_results:
                                 results.extend(swap_results)
@@ -1375,8 +1450,10 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
 
                 # 🛡️ 统一仓位上限: 股票+crypto共享同一个限制
                 total_equity = leverage_engine.fetch_equity()
-                if total_equity <= 100:
-                    MAX_TOTAL_POSITIONS = 2
+                if total_equity <= 40:
+                    MAX_TOTAL_POSITIONS = 1
+                elif total_equity <= 100:
+                    MAX_TOTAL_POSITIONS = 3  # 🚀 2026-06-23: 2→3, 给SPCX留位
                 elif total_equity <= 200:
                     MAX_TOTAL_POSITIONS = 3
                 elif total_equity <= 500:

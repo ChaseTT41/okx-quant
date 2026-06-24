@@ -501,10 +501,28 @@ class RollingAwareAutoTrader:
                         fusion_signal.confidence = min(1.0, fusion_signal.confidence * graph_bonus)
                         fusion_signal.signal_consensus *= graph_bonus
 
-                        # 重新判定 action — 使用引擎阈值
-                        if fusion_signal.signal_consensus > self.engine.ACTION_THRESHOLDS["BUY"]:
+                        # 重新判定 action — 使用引擎阈值 + 极端情绪动态调整
+                        buy_thr = self.engine.ACTION_THRESHOLDS["BUY"]
+                        sell_thr = self.engine.ACTION_THRESHOLDS["SELL"]
+                        try:
+                            from feature_engine import _SENTIMENT_CTX
+                            fg = _SENTIMENT_CTX.get("fg_value", 50)
+                            if fg <= 25:
+                                # 🆕 极端恐惧: 收紧买入阈值 + 放宽做空阈值
+                                buy_thr = buy_thr * 2.0     # 0.05→0.10 更难触发买入
+                                sell_thr = sell_thr * 0.5   # -0.08→-0.04 更容易触发做空
+                            elif fg <= 35:
+                                buy_thr = buy_thr * 1.4     # 恐惧: 买入收紧
+                                sell_thr = sell_thr * 0.7   # 做空适度放宽
+                            elif fg >= 75:
+                                sell_thr = sell_thr * 1.5   # 贪婪: 做空收紧
+                            elif fg >= 65:
+                                sell_thr = sell_thr * 1.2   # 偏贪婪: 做空适度收紧
+                        except Exception:
+                            pass
+                        if fusion_signal.signal_consensus > buy_thr:
                             fusion_signal.action = "BUY"
-                        elif fusion_signal.signal_consensus < self.engine.ACTION_THRESHOLDS["SELL"]:
+                        elif fusion_signal.signal_consensus < sell_thr:
                             fusion_signal.action = "SELL"
                         else:
                             fusion_signal.action = "HOLD"
@@ -1142,7 +1160,7 @@ class RollingAwareAutoTrader:
             "single_max_pct": float(os.environ.get("SHORT_SINGLE_MAX_PCT", "0.15")),
             "stop_loss_pct": float(os.environ.get("SHORT_STOP_LOSS_PCT", "0.08")),
             "take_profit_pct": float(os.environ.get("SHORT_TAKE_PROFIT_PCT", "0.12")),
-            "min_signal_strength": float(os.environ.get("SHORT_MIN_SIGNAL", "0.12")),
+            "min_signal_strength": float(os.environ.get("SHORT_MIN_SIGNAL", "0.04")),
             "min_confidence": float(os.environ.get("SHORT_MIN_CONFIDENCE", "0.55")),
         }
 

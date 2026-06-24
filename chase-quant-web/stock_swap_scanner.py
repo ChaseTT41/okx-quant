@@ -46,6 +46,17 @@ EXTENDED_WATCHLIST = [
     "XAU/USDT", "XAG/USDT",
 ]
 
+# ── 🚀 策略资产特权 (Chase哥指定核心标的, 放宽阈值) ──
+STRATEGIC_ASSETS = {
+    "SPCX/USDT": {
+        "name": "SpaceX太空ETF",
+        "rsi_oversold": 40,        # 超卖RSI阈值 (默认35, SPCX放宽到40)
+        "fear_contrarian_min": 28, # 恐慌反转最低分 (默认35, SPCX降到28)
+        "confidence_boost": 0.05,  # 额外置信度加成
+        "score_boost": 5,          # 额外评分加成
+    },
+}
+
 # ── 风控参数 ──
 MAX_CONCURRENT_STOCK_POSITIONS = 5      # 股票合约最大同时持仓
 MAX_STOCK_POSITION_PCT = 0.03           # 单笔最大仓位 3% (比crypto保守)
@@ -293,11 +304,18 @@ class StockSwapScanner:
         price = ind['price']
         rsi = ind['rsi']
 
+        # ── 🚀 策略资产特权: 放宽阈值 ──
+        strat_cfg = STRATEGIC_ASSETS.get(symbol, {})
+        rsi_oversold_limit = strat_cfg.get('rsi_oversold', 35)
+        fear_contrarian_min = strat_cfg.get('fear_contrarian_min', 35)
+        is_strategic = bool(strat_cfg)
+
         # ── 策略1: 超卖反弹 ──
         oversold_score = 0
-        if rsi < 35:
+        if rsi < rsi_oversold_limit:
             oversold_score += 15
-            reasons.append(f"RSI超卖({rsi:.0f})")
+            tag = "🚀" if is_strategic else ""
+            reasons.append(f"{tag}RSI超卖({rsi:.0f})")
         if ind['bb_position'] < 0.15:
             oversold_score += 10
             reasons.append(f"触及布林下轨({ind['bb_position']:.1%})")
@@ -380,7 +398,7 @@ class StockSwapScanner:
                 reasons.append(f"极度恐慌F&G={fear_greed} + 连跌{ind['consecutive_down_days']}天")
             if sector_flow > -0.2:  # 板块资金不再流出
                 contrarian_score += 10
-            if contrarian_score >= 35:
+            if contrarian_score >= fear_contrarian_min:
                 signal_type = "fear_contrarian"
                 action = "BUY"
                 confidence = min(0.68, 0.50 + contrarian_score / 200)
@@ -389,6 +407,8 @@ class StockSwapScanner:
                 take_profit_pct = 0.10
                 risk_level = "medium"
                 reasons.append("恐慌情绪极值→均值回归")
+                if is_strategic:
+                    reasons.append(f"🚀 策略资产: SpaceX太空ETF")
 
         # ── 负面过滤: 即使触发入场，也要检查风险 ──
         if action == "BUY":
@@ -428,6 +448,23 @@ class StockSwapScanner:
         # 这里主要生成 BUY，SELL 由杠杆引擎的止损止盈处理
 
         if action == "BUY":
+            # ── 🚀 策略资产特权: 额外评分 + 置信度加成 ──
+            if is_strategic:
+                score += strat_cfg.get('score_boost', 0)
+                confidence += strat_cfg.get('confidence_boost', 0)
+                reasons.append(f"🚀 策略资产加成 +{strat_cfg.get('score_boost',0)}分")
+
+            # ── 🎯 动态止盈: 基于布林上轨+ATR, 拒绝死板公式 ──
+            bb_upper = ind.get('bb_upper', price * 1.15)
+            bb_distance = (bb_upper / price) - 1 if price > 0 else 0.10
+            atr_pct = ind.get('atr_pct', 0.02)
+            # 技术止盈 = 布林上轨距离 × 1.2 (略穿出上轨), ATR高波动加10%空间
+            raw_tp = bb_distance * 1.2 if bb_distance > 0.02 else 0.08
+            if atr_pct > 0.04:
+                raw_tp *= 1.1
+            # 股票不像币: 止盈5%-20%合理区间
+            technical_tp_pct = max(0.05, min(0.20, raw_tp))
+
             return StockSignal(
                 symbol=symbol,
                 name=name,
@@ -440,7 +477,7 @@ class StockSwapScanner:
                 risk_level=risk_level,
                 suggested_size=suggested_size,
                 stop_loss=round(price * (1 - stop_loss_pct), 1),
-                take_profit=round(price * (1 + take_profit_pct), 1),
+                take_profit=round(price * (1 + technical_tp_pct), 1),
                 indicators=ind,
             )
 
@@ -519,6 +556,10 @@ class StockSwapScanner:
         ai_sw_flow = sector_flows.get('ai_software', 0.0)
         space_flow = sector_flows.get('space', 0.0)
 
+        # 逐个扫描日志前缀
+        space_markers = {"SPCX/USDT": "🚀", "RKLB/USDT": "🛰️", "ASTS/USDT": "📡", "LUNR/USDT": "🌙"}
+        skipped = 0
+
         for sym in scan_symbols:
             # 判断板块
             sector_flow = self._get_sector_flow(sym, semicon_flow, ai_sw_flow, space_flow)
@@ -526,6 +567,7 @@ class StockSwapScanner:
 
             candles = self.fetch_candles(sym, bar="1H", limit=200)
             if candles is None or len(candles) < 50:
+                skipped += 1
                 continue
 
             ind = self.compute_indicators(candles)
@@ -539,14 +581,23 @@ class StockSwapScanner:
             )
 
             if signal is None:
+                # 逐股可见: 被扫但未出信号 (含RSI/价格/板块)
+                marker = space_markers.get(sym, "📊")
+                rsi = ind.get('rsi', 50) if ind else 50
+                px = prices.get(sym, 0)
+                print(f"  {marker} {sym:15s} {name:20s} | ${px:>8.2f} | RSI={rsi:.0f} | ⚪ 无信号")
                 continue
 
             # 转换为标准 dict 格式 (兼容 _run_leverage_decisions)
+            is_strategic = bool(STRATEGIC_ASSETS.get(sym, {}))
+            px_sig = signal.price if signal.price > 0 else prices.get(sym, 100.0)
+            # 🎯 技术面止盈百分比 (从信号中反推)
+            _tech_tp_pct = (signal.take_profit / px_sig - 1) if px_sig > 0 else 0.10
             signals.append({
                 "symbol": signal.symbol,
                 "name": signal.name,
                 "action": signal.action,
-                "price": signal.price if signal.price > 0 else prices.get(sym, 100.0),
+                "price": px_sig,
                 "score": signal.score,
                 "confidence": signal.confidence,
                 "reasons": signal.reasons,
@@ -556,19 +607,44 @@ class StockSwapScanner:
                 "take_profit": signal.take_profit,
                 "strategy_name": f"stock_{signal.signal_type}",
                 "signal_val": (signal.confidence - 0.5) * 2,  # 转换为 [-1, +1]
+                "_is_strategic": is_strategic,  # 🚀 策略资产特权标记
+                "_strategic_config": STRATEGIC_ASSETS.get(sym, {}),  # 策略资产配置
+                "_technical_tp_pct": round(_tech_tp_pct, 3),  # 🎯 基于布林上轨的动态止盈
             })
+            # 信号日志
+            marker = space_markers.get(sym, "📊")
+            rsi = ind.get('rsi', 50) if ind else 50
+            px = prices.get(sym, 0)
+            icon = "🟢" if signal.action == "BUY" else "🔴" if signal.action == "SELL" else "🟡"
+            print(f"  {marker} {sym:15s} {name:20s} | ${px:>8.2f} | RSI={rsi:.0f} | {icon} {signal.action} | "
+                  f"评分{signal.score:.0f} | 置信{signal.confidence:.1%} | {', '.join(signal.reasons[:2])}")
 
-        # 按 score 降序
-        signals.sort(key=lambda s: s['score'], reverse=True)
+        # 逐股扫描完成摘要
+        print(f"  📋 股票扫描完成: {len(scan_symbols)}只 → {len(signals)}信号 | {skipped}只数据不足 | force_full={force_full}")
+
+        # 🚀 策略资产优先: 先分离策略信号，再按score排序
+        strategic_signals = [s for s in signals if s.get('_is_strategic')]
+        regular_signals = [s for s in signals if not s.get('_is_strategic')]
+        strategic_signals.sort(key=lambda s: s['score'], reverse=True)
+        regular_signals.sort(key=lambda s: s['score'], reverse=True)
 
         # 限制信号数量（避免一次开太多仓）
         current_stock_positions = len(existing_positions)
         max_new = MAX_CONCURRENT_STOCK_POSITIONS - current_stock_positions
         if max_new <= 0:
             return []
-        signals = signals[:max_new]
 
-        return signals
+        # 🚀 策略资产至少保留1个名额，其余按score排序
+        result = []
+        if strategic_signals and max_new >= 1:
+            result.append(strategic_signals[0])  # 至少保留1个策略资产
+            max_new -= 1
+        # 剩余名额: 其余策略资产 + 普通信号合并排序
+        remaining = strategic_signals[1:] + regular_signals
+        remaining.sort(key=lambda s: s['score'], reverse=True)
+        result.extend(remaining[:max_new])
+
+        return result
 
     def _get_sector_flow(self, sym: str, semicon: float, ai_sw: float, space: float) -> float:
         """根据 symbol 判断所属板块，返回对应 flow"""

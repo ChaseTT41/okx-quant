@@ -161,7 +161,8 @@ def fetch_klines(symbol: str, timeframe: str = "1h", limit: int = 100) -> pd.Dat
     interval = tf_map.get(timeframe, "1h")
 
     url = "https://api.binance.com/api/v3/klines"
-    params = {"symbol": f"{symbol}USDT", "interval": interval, "limit": limit}
+    clean = symbol.split("/")[0]  # "BTC/USDT" → "BTC", "BTC" → "BTC"
+    params = {"symbol": f"{clean}USDT", "interval": interval, "limit": limit}
 
     resp = requests.get(url, params=params, timeout=15)
     data = resp.json()

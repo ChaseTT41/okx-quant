@@ -48,48 +48,44 @@ except ImportError:
         "DOT/USDT", "LINK/USDT",
     ]
 
-# ── ccxt 交易所实例 (懒加载) ──
-_exchange = None
+# ── OKX REST 数据源 (零 ccxt 依赖) ──
+_okx_provider = None
 
 
-def _get_exchange():
-    global _exchange
-    if _exchange is None:
-        try:
-            import ccxt
-            _exchange = ccxt.binance({"enableRateLimit": True, "timeout": 15000})
-        except Exception:
-            _exchange = None
-    return _exchange
+def _get_okx_provider():
+    """懒加载 OKX REST 数据提供器"""
+    global _okx_provider
+    if _okx_provider is None:
+        from okx_rest_data import OKXDataProvider
+        _okx_provider = OKXDataProvider()
+    return _okx_provider
 
 
 def fetch_all_ohlcv(symbols: list = None, limit: int = 200) -> Dict[str, pd.DataFrame]:
     """
-    拉取所有币种的日线OHLCV数据
+    拉取所有币种的日线OHLCV数据 (纯 OKX REST API，零 ccxt 依赖)
 
     Returns:
-        {symbol: DataFrame with columns [open, high, low, close, volume]}
+        {symbol: DataFrame with columns [date, open, high, low, close, volume]}
     """
     if symbols is None:
         symbols = ALL_CRYPTO_SYMBOLS
 
-    ex = _get_exchange()
-    if ex is None:
-        print("⚠️ [StrategyRunner] 无法连接交易所")
-        return {}
+    okx = _get_okx_provider()
+
+    # 转换格式: "BTC/USDT" → "BTC-USDT"
+    okx_symbols = [s.replace("/", "-") for s in symbols]
 
     market_data = {}
-    for sym in symbols:
-        try:
-            ohlcv = ex.fetch_ohlcv(sym, "1d", limit=limit)
-            df = pd.DataFrame(ohlcv, columns=["date", "open", "high", "low", "close", "volume"])
-            df["date"] = pd.to_datetime(df["date"], unit="ms")
-            if len(df) >= 50:
-                market_data[sym] = df
-            else:
-                print(f"  ⚠️ [StrategyRunner] {sym} 数据不足 ({len(df)}行)")
-        except Exception as e:
-            print(f"  ⚠️ [StrategyRunner] {sym} 拉取失败: {e}")
+    raw_data = okx.fetch_all_ohlcv(okx_symbols, "1D", limit=limit)
+    for sym, df in raw_data.items():
+        if df is not None and len(df) >= 50:
+            # 转回 ccxt 兼容格式: "BTC-USDT" → "BTC/USDT"
+            orig_sym = sym.replace("-", "/")
+            market_data[orig_sym] = df
+
+    if not market_data:
+        print("⚠️ [StrategyRunner] 无市场数据 (OKX REST)")
 
     return market_data
 
@@ -118,6 +114,17 @@ def _normalize_signal(sig: dict, strategy_name: str) -> dict:
     if not symbol and hasattr(sig, "symbol"):
         symbol = sig.symbol
 
+    # 🔴 归一化 stop_loss: 策略信号可能是价格也可能是百分比
+    raw_sl = sig.get("stop_loss", 0)
+    raw_price = sig.get("price", 0)
+    if raw_sl and raw_sl > 1.0 and raw_price > 0:
+        # 价格格式 → 百分比 (e.g., stop_loss=2.12, price=2.30 → SL=7.8%)
+        stop_loss_pct = abs(raw_sl / raw_price - 1)
+    elif raw_sl and 0 < abs(raw_sl) <= 1.0:
+        stop_loss_pct = abs(raw_sl)
+    else:
+        stop_loss_pct = 0
+
     return {
         "symbol": symbol,
         "name": sig.get("name", _coin_name(symbol)),
@@ -128,7 +135,7 @@ def _normalize_signal(sig: dict, strategy_name: str) -> dict:
         "reasons": sig.get("reasons", []) if isinstance(sig.get("reasons"), list) else [sig.get("reason", "")],
         "risk_level": sig.get("risk_level", "medium"),
         "suggested_size": sig.get("suggested_size", 0.05),
-        "stop_loss": sig.get("stop_loss", 0),
+        "stop_loss": stop_loss_pct,
         "take_profit": sig.get("take_profit", 0),
         "strategy_name": strategy_name,
     }
@@ -308,17 +315,15 @@ def _run_naked_k(market_data: Dict[str, pd.DataFrame]) -> List[dict]:
     独立拉取 1h/4h/1d 数据 (不同于ML的日线),
     多时间框架扫描 (1d → 4h → 1h 逐级确认),
     三步评分过滤 + Low2/High2门禁 + 动量追单拦截。
+
+    使用 OKX REST API 直接获取数据 (零 ccxt 依赖)。
     """
     from strategies import KLineStrategy
     from naked_k_scanner import scan_multi_timeframe, scan_symbol
+    from okx_rest_data import fetch_okx_ohlcv
 
     strategy = KLineStrategy.create()
     if strategy.status != "running":
-        return []
-
-    ex = _get_exchange()
-    if ex is None:
-        print("  ⚠️ [裸K] 无法连接交易所")
         return []
 
     # 裸K深度分析聚焦Tier1币种 (15个, 太多会超API限制)
@@ -337,22 +342,21 @@ def _run_naked_k(market_data: Dict[str, pd.DataFrame]) -> List[dict]:
     min_rr = strategy.get_param("min_risk_reward", 1.2)
     require_low2 = strategy.get_param("require_low2", True)
     block_chase = strategy.get_param("block_momentum_chase", True)
-    timeframes = ['1h', '4h', '1d']
+    timeframes = ['1H', '4H', '1D']  # OKX REST 格式
     limit = 200
 
     signals = []
 
     for sym in scan_symbols:
         try:
-            # 拉取多时间框架OHLCV
+            # 拉取多时间框架OHLCV (OKX REST)
             dfs = {}
+            okx_sym = sym.replace("/", "-")
             for tf in timeframes:
                 try:
-                    ohlcv = ex.fetch_ohlcv(sym, tf, limit=limit)
-                    if ohlcv and len(ohlcv) >= 50:
-                        df = pd.DataFrame(ohlcv, columns=['date', 'open', 'high', 'low', 'close', 'volume'])
-                        df['date'] = pd.to_datetime(df['date'], unit='ms')
-                        dfs[tf] = df
+                    df = fetch_okx_ohlcv(okx_sym, tf, limit=limit)
+                    if df is not None and len(df) >= 50:
+                        dfs[tf.lower()] = df
                 except Exception:
                     pass
 

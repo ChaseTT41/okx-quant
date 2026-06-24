@@ -712,16 +712,14 @@ def build_sentiment_features() -> List[Feature]:
     """情绪: Fear & Greed + 变化率 + 极端值"""
     features = []
 
-    # F&G 变化率 — Fix #3: 从 _SENTIMENT_CTX 读取实时数据
-    fg_now = _SENTIMENT_CTX.get("fg_value", 50)
+    # F&G 变化率 — Fix #4: 运行时读取 _SENTIMENT_CTX (修复闭包捕获问题)
     for w in [1, 3, 5, 7, 14]:
-        fg_prev = _SENTIMENT_CTX.get(f"fg_prev_{w}d", fg_now)
         features.append(Feature(
             id=f"fg_change_{w}d", name=f"F&G {w}日变化",
             category="I",
             description=f"Fear & Greed Index 的{w}日变化量 (>0=情绪改善)",
-            compute_fn=lambda df, w=w, fg_now=fg_now, fg_prev=fg_prev:
-                fg_now - fg_prev,  # Fix #3: 接入实时 F&G 数据
+            compute_fn=lambda df, w=w:
+                _SENTIMENT_CTX.get("fg_value", 50) - _SENTIMENT_CTX.get(f"fg_prev_{w}d", _SENTIMENT_CTX.get("fg_value", 50)),
         ))
 
     # F&G 极端值标志 — Fix #3: 接入实时 F&G 数据

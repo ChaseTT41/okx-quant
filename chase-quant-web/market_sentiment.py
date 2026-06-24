@@ -52,6 +52,23 @@ ROTATION_TTL_HOURS = 1.0
 OKX_RATE_LIMIT_INTERVAL = 0.12  # 稍保守, 留给其他系统余量
 
 
+# ── 辅助函数 ──
+
+def _df_to_ccxt_ohlcv(df) -> list:
+    """Convert okx_rest_data DataFrame → ccxt-compatible OHLCV list format.
+
+    DataFrame columns: [date, open, high, low, close, volume]
+    Returns: [[timestamp_ms, open, high, low, close, volume], ...]
+    """
+    if df is None or df.empty:
+        return []
+    result = []
+    for _, row in df.iterrows():
+        ts = int(row['date'].timestamp() * 1000)
+        result.append([ts, row['open'], row['high'], row['low'], row['close'], row['volume']])
+    return result
+
+
 # ═══════════════════════════════════════════════════════════════
 # Data Structures
 # ═══════════════════════════════════════════════════════════════
@@ -778,21 +795,20 @@ class MarketSentimentEngine:
 
         results = []
         try:
-            import ccxt
-            okx = ccxt.okx({"enableRateLimit": True, "timeout": 15000})
-            okx.hostname = "www.okx.cab"
+            from okx_rest_data import fetch_okx_ohlcv
 
             for stock_sym, crypto_sym in self.AI_NARRATIVE_PAIRS:
                 try:
-                    # 拉30天日线
-                    stock_ohlcv = okx.fetch_ohlcv(
-                        stock_sym.replace("/USDT", "/USDT:USDT"),
-                        "1d", limit=35
+                    # 拉30天日线 (OKX REST, 零 ccxt)
+                    stock_df = fetch_okx_ohlcv(
+                        stock_sym.replace("/USDT", "-USDT"), "1D", limit=35
                     )
-                    crypto_ohlcv = okx.fetch_ohlcv(
-                        crypto_sym.replace("/USDT", "/USDT:USDT"),
-                        "1d", limit=35
+                    crypto_df = fetch_okx_ohlcv(
+                        crypto_sym.replace("/USDT", "-USDT"), "1D", limit=35
                     )
+                    # 转回 ccxt 兼容格式 [[ts, o, h, l, c, vol], ...]
+                    stock_ohlcv = _df_to_ccxt_ohlcv(stock_df) if stock_df is not None else []
+                    crypto_ohlcv = _df_to_ccxt_ohlcv(crypto_df) if crypto_df is not None else []
 
                     if len(stock_ohlcv) < 10 or len(crypto_ohlcv) < 10:
                         results.append(AIStockCorrelation(
