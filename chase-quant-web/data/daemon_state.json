@@ -1,11 +1,25 @@
 {
-  "cycles": 603,
-  "total_trades": 200,
+  "cycles": 1146,
+  "total_trades": 258,
   "started_at": "2026-06-08T22:15:00.000000+08:00",
-  "today_cycles": 17,
-  "today_trades": 14,
+  "today_cycles": 121,
+  "today_trades": 10,
   "trade_history": [],
-  "last_push_day": "20260620",
-  "last_daily_push_day": "20260620",
-  "stopped_at": "2026-06-20T22:46:54.608015+08:00"
+  "last_push_day": "20260625",
+  "last_daily_push_day": "20260624",
+  "stopped_at": "2026-06-25T20:53:04.500152+08:00",
+  "last_push_ts": 1782386158.509716,
+  "okx_positions_at_start": [
+    "SOL/USDT",
+    "SPCX/USDT"
+  ],
+  "stopped_out_cooldown": {},
+  "last_regime": {
+    "regime": "温和看空",
+    "action_bias": "short_only",
+    "max_risk": 0.4,
+    "recommended_lev": 5,
+    "pass": true,
+    "reason": "F&G=18(Extreme Fear)，BTC下跌，低波动，Alpha偏多。判定: 温和看空→ 仅做空"
+  }
 }

@@ -1,0 +1,46 @@
+{
+  "trades_today": 3,
+  "total_trades": 3,
+  "trade_history": [
+    {
+      "time": "2026-06-22T09:37:53.265397+00:00",
+      "symbol": "ETH",
+      "side": "buy",
+      "margin": 10.0,
+      "leverage": 5,
+      "notional": 50.0,
+      "price": 1742.55,
+      "quantity_ct": 0.1,
+      "sl_price": 1707.6989999999998,
+      "confidence": 66.0,
+      "order_id": "3677225946995253248"
+    },
+    {
+      "time": "2026-06-22T19:38:57.501180+00:00",
+      "symbol": "BTC",
+      "side": "buy",
+      "margin": 10.0,
+      "leverage": 5,
+      "notional": 50.0,
+      "price": 64680.0,
+      "quantity_ct": 0.01,
+      "sl_price": 63386.4,
+      "confidence": 69.0,
+      "order_id": "3678436060943114240"
+    },
+    {
+      "time": "2026-06-22T21:39:11.024729+00:00",
+      "symbol": "SOL",
+      "side": "buy",
+      "margin": 10.0,
+      "leverage": 5,
+      "notional": 50.0,
+      "price": 74.75,
+      "quantity_ct": 1.0,
+      "sl_price": 73.255,
+      "confidence": 66.0,
+      "order_id": "3678678108052938752"
+    }
+  ],
+  "last_scan": "06-25 21:00"
+}

@@ -230,7 +230,11 @@ class StrategyConsensusEngine:
         # 公式: (支持策略权重和 / 总活跃权重) × 平均(score × confidence × quality_factor)
         weight_ratio = dir_weight / total_active_weight if total_active_weight > 0 else 0
 
-        quality_factor = {"high": 1.0, "medium": 0.8, "low": 0.5}
+        # 🆕 方向受限时：降低低质量策略的惩罚（极端行情下所有信号都有价值）
+        if regime_bias in ("short_only", "long_only"):
+            quality_factor = {"high": 1.0, "medium": 0.85, "low": 0.70}
+        else:
+            quality_factor = {"high": 1.0, "medium": 0.8, "low": 0.5}
         avg_quality_score = 0
         for strat in supporting:
             v = votes[strat]
@@ -244,9 +248,9 @@ class StrategyConsensusEngine:
         # 共识等级 (分数阈值在0-100范围)
         # 🆕 动态阈值: 方向受限时降低要求 (因为多空过滤后支持策略变少)
         if regime_bias in ("short_only", "long_only"):
-            CONSENSUS_SCORE_STRONG = 25
-            CONSENSUS_SCORE_MEDIUM = 15
-            CONSENSUS_SCORE_WEAK = 8
+            CONSENSUS_SCORE_STRONG = 20
+            CONSENSUS_SCORE_MEDIUM = 10
+            CONSENSUS_SCORE_WEAK = 5
         else:
             CONSENSUS_SCORE_STRONG = 45
             CONSENSUS_SCORE_MEDIUM = 30
@@ -262,7 +266,7 @@ class StrategyConsensusEngine:
 
         # 是否通过 — 🆕 方向受限时降低绝对分门槛
         if regime_bias in ("short_only", "long_only"):
-            min_consensus = 15  # 方向受限时，15分即可通过
+            min_consensus = 10  # 方向受限时，10分即可通过（ML融合动量33分×45%≈15, 激进交易44分×44%×0.7≈13.6）
         else:
             min_consensus = self.MIN_CONSENSUS_SCORE
         passed = level in ("strong", "medium") and consensus_score >= min_consensus
@@ -397,7 +401,7 @@ class ExecutionOfficer:
 
         # ── Check 2: 策略共识 ──
         # 🆕 方向受限时允许单策略信号通过
-        min_supporting = 1 if regime_result.action_bias in ("short_only", "long_only") else 2
+        min_supporting = 1 if regime.get("action_bias", "any") in ("short_only", "long_only") else 2
         if not consensus.pass_:
             checks_failed.append("策略共识")
             reasons.append("未达到多策略共识门槛")
@@ -423,7 +427,10 @@ class ExecutionOfficer:
                 est_stop_loss = 0.10  # 无价格信息时默认10%
         else:
             est_stop_loss = abs(raw_stop_loss)
-        est_stop_loss = max(est_stop_loss, 0.10)  # 🔴 ≥10%, 不给噪音震出
+        # 🆕 短线(scalp)信号允许紧止损(≥0.5%), 长线信号≥10%防止噪音震出
+        is_scalp_signal = consensus.best_signal.get("is_scalp", False)
+        min_stop = 0.005 if is_scalp_signal else 0.10  # 短线0.5% vs 长线10%
+        est_stop_loss = max(est_stop_loss, min_stop)
         actual_risk = position_size_pct * leverage * est_stop_loss
         if actual_risk > max_risk:
             checks_failed.append("单笔风险")
@@ -451,7 +458,8 @@ class ExecutionOfficer:
         if news_risk == "high":
             checks_failed.append("新闻风险")
             reasons.append("存在重大黑天鹅事件，暂停交易")
-        elif fg_value <= 15:
+        elif fg_value <= 15 and action_bias not in ("short_only",):
+            # 🆕 short_only模式: 极端恐慌正是做空的好时机，不禁交易
             checks_failed.append("新闻风险")
             reasons.append(f"F&G={fg_value}，市场极度恐慌，暂停交易")
         else:
@@ -460,7 +468,10 @@ class ExecutionOfficer:
         # ── Check 6: 综合置信度 ──
         final_confidence = self._compute_final_confidence(consensus, regime)
         # 根据共识等级动态调整最低置信度
-        if consensus.consensus_level == "strong":
+        # 🆕 方向受限时降低要求
+        if action_bias in ("short_only", "long_only"):
+            min_conf = 18 if consensus.consensus_level == "strong" else 12
+        elif consensus.consensus_level == "strong":
             min_conf = self.MIN_CONFIDENCE_STRONG
         else:
             min_conf = self.MIN_OVERALL_CONFIDENCE

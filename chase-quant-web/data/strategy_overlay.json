@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-06-19T22:39:54.852306+07:00",
-  "review_date": "2026-06-19",
-  "source_review": "data/reviews/2026-06-19_evening.json",
-  "core_judgment": "资金重心向美股核心资产转移，优先捕捉 SMH 的动能惯性，同时轻仓布局 Crypto 的均值回归。 (置信度: 高)",
-  "core_confidence": 0.5,
+  "generated_at": "2026-06-24T22:08:20.824511+07:00",
+  "review_date": "2026-06-24",
+  "source_review": "data/reviews/2026-06-24_evening.json",
+  "core_judgment": "市场处于“高同步性”的风险资产修复期，但美股动能评分下滑预示上涨斜率放缓，采取**“强标的轻仓试水 + 核心资产对冲”**的策略，博取 Beta 收益的同时严控回撤。(置信度: 75%)",
+  "core_confidence": 0.75,
   "market_biases": {
     "crypto": {
       "direction": "bullish",
-      "confidence": 0.5,
+      "confidence": 0.3,
       "key_drivers": [],
       "key_levels": {}
     },
@@ -18,14 +18,14 @@
       "key_levels": {}
     },
     "us_stock": {
-      "direction": "bearish",
-      "confidence": 0.6000000000000001,
+      "direction": "neutral",
+      "confidence": 0.0,
       "key_drivers": [],
       "key_levels": {}
     },
     "hk_stock": {
-      "direction": "neutral",
-      "confidence": 0.09999999999999998,
+      "direction": "bullish",
+      "confidence": 0.3,
       "key_drivers": [],
       "key_levels": {}
     },
@@ -38,62 +38,60 @@
   },
   "scenarios": [
     {
-      "name": "AI 虹吸效应加剧",
+      "name": "利率锚定修复",
       "probability": 50,
-      "crypto_direction": "neutral",
-      "a_stock_direction": "neutral",
-      "us_stock_direction": "bearish",
-      "hk_stock_direction": "neutral",
-      "b_stock_direction": "neutral",
-      "trigger_condition": "SMH 突破历史新高或出现单日 >3% 的再次跳空上涨，且 TLT 稳在 20 日线之上。",
-      "falsification": "如果 SMH 出现明显的回调（跌幅 > 2%），这个情景就错了"
-    },
-    {
-      "name": "风险偏好均值回归",
-      "probability": 30,
-      "crypto_direction": "bullish",
-      "a_stock_direction": "neutral",
-      "us_stock_direction": "bearish",
-      "hk_stock_direction": "bearish",
-      "b_stock_direction": "neutral",
-      "trigger_condition": "SMH 出现见顶信号（如长上影线）或 TLT 跌破 20 日线导致利率预期反弹。",
-      "falsification": "如果 BTC 价格在美股下跌时同步下跌，这个情景就错了"
-    },
-    {
-      "name": "全球流动性共振爆发",
-      "probability": 20,
       "crypto_direction": "bullish",
       "a_stock_direction": "neutral",
       "us_stock_direction": "bullish",
       "hk_stock_direction": "bullish",
-      "b_stock_direction": "neutral",
-      "trigger_condition": "宏观面出现超预期利好（如美联储鸽派言论或重大 AI 突破），且 BTC 突破关键压力位。",
-      "falsification": "如果任何一个主要市场（US/Crypto/HK）出现独立下跌，这个情景就错了"
+      "b_stock_direction": "bullish",
+      "trigger_condition": "TLT 价格在明日开盘后企稳并回升 $\\ge 1\\%$，且 10 年期美债收益率出现明显下行。",
+      "falsification": "如果 TLT 价格在开盘 2 小时内跌破 20 日线且无法收回，这个情景就错了。"
+    },
+    {
+      "name": "动能衰减陷阱",
+      "probability": 30,
+      "crypto_direction": "neutral",
+      "a_stock_direction": "neutral",
+      "us_stock_direction": "bearish",
+      "hk_stock_direction": "neutral",
+      "b_stock_direction": "bearish",
+      "trigger_condition": "市场无重大宏观利好，且 BTC 在上涨至关键阻力位后出现长上影线，或 IWM 评分进一步下滑至 60 以下。",
+      "falsification": "如果 BTC 突破近期压力位且成交量同步放大，这个情景就错了。"
+    },
+    {
+      "name": "风险偏好剧烈分化",
+      "probability": 20,
+      "crypto_direction": "bearish",
+      "a_stock_direction": "neutral",
+      "us_stock_direction": "bearish",
+      "hk_stock_direction": "bearish",
+      "b_stock_direction": "bearish",
+      "trigger_condition": "出现意外的通胀数据反弹或地缘政治突发事件，导致 VIX 指数快速飙升。",
+      "falsification": "如果 TLT 与 IWM 依然保持正相关（同涨或同跌），这个情景就错了。"
     }
   ],
   "max_crypto_positions": 6,
-  "single_trade_max_pct": 0.22499999999999998,
-  "confidence_multiplier": 1.25,
+  "single_trade_max_pct": 0.195,
+  "confidence_multiplier": 1.15,
   "stop_loss_pct": -8.0,
   "take_profit_pct": 15.0,
   "trailing_stop_pct": 5.0,
   "daily_loss_meltdown_pct": -5.0,
-  "favor_assets": [
-    "SMH",
+  "favor_assets": [],
+  "avoid_assets": [
+    "BUY",
     "BTC"
   ],
-  "avoid_assets": [
-    "BUY"
-  ],
   "dont_do": [
-    "不碰 bStocks: NVDAB 等评分死锁在 60 分，属于机械化评分，缺乏个体差异，绝对不入场。",
-    "不追高港股: 安踏、建行虽为 BUY，但动能远弱于美股，在美股确认见顶前，不浪费仓位在补涨资产上。",
-    "不加仓 Crypto: 除非 BTC 评分回升至 80 分以上，否则在 20% 的初始仓位基础上绝不加仓。"
+    "不碰 TSLAB: 尽管有 BUY 信号，但评分仅 60 且逻辑是“超卖反弹”，属于低质量信号，在趋势未确认前绝不参与。",
+    "不追高 BTC/ETH: 评分 65 属于中等，不适合作为主攻标的，仅作为底仓配置。",
+    "不进行杠杆操作: 虚拟盘模拟真实交易，严禁使用高倍杠杆，严格遵守 -8% 硬止损。"
   ],
   "risk_reminders": [
-    "**单笔亏损上限**: 严格执行单笔最大亏损 200 RMB (2%)。若 SMH 出现剧烈回调，必须立即止损，不可死扛。",
-    "**熔断机制**: 若明日总资产跌幅达到 5% (500 RMB)，立即清仓所有持仓，强制休息一天。",
-    "**关键观察点**: 密切关注 SMH $665 突破情况（确认情景A）和 TLT $86.00 支撑情况（若跌破则触发情景B）。"
+    "**TLT 预警线**: 密切关注 TLT 价格。如果 TLT 跌破 $87.36 且无法在 2 小时内收回，立即执行**全线减仓 50%**，因为这意味着“利率下行”逻辑崩塌，所有 BUY 信号失效。",
+    "**日亏损熔断**: 若明日总资产跌至 9,500 RMB，立即停止所有交易，强制清仓，进入观察期。",
+    "**相关性风险**: 目前所有标的均为 BUY，这意味着组合相关性极高。一旦出现系统性回调，所有仓位将同步亏损，严禁在此时增加单笔仓位至 25% 以上。"
   ],
   "key_levels": {},
   "is_stale": false,

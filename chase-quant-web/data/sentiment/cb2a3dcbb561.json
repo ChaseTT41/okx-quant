@@ -1,32 +1,67 @@
 {
   "symbol": "ETH/USDT",
   "market": "crypto",
-  "analyzed_at": "2026-06-20T10:08:08.541158+08:00",
+  "analyzed_at": "2026-06-25T20:59:51.032870+08:00",
   "current_price_range": "",
   "recent_performance": "",
-  "sentiment_score": 50,
-  "sentiment_label": "数据不足",
-  "sentiment_summary": "分析暂时不可用: Gemini API HTTP 503: {\n  \"error\": {\n    \"code\": 50",
-  "key_drivers": [],
+  "sentiment_score": 36,
+  "sentiment_label": "看跌",
+  "sentiment_summary": "📰关键词兜底: 130条标题 → 看跌35条/看涨17条 (Gemini: Gemini JSON解析失败: Expecting value: line 1 column 1 (char 0))",
+  "key_drivers": [
+    {
+      "factor": "加密市场全线下跌，资金费率显示BTC仍处看跌区间，ETH看多情绪明显强于BTC - 富途牛牛",
+      "impact": "negative",
+      "strength": 3,
+      "source": "headline_keyword"
+    },
+    {
+      "factor": "  → 加密市场全线下跌，资金费率显示BTC仍处看跌区间，ETH看多情绪明显强于BTC&nbsp;&nbsp;富途牛牛",
+      "impact": "negative",
+      "strength": 3,
+      "source": "headline_keyword"
+    },
+    {
+      "factor": "以太坊（ETH）新闻：基金会的动荡使部分加密领域重量级人物看涨 - CoinDesk",
+      "impact": "positive",
+      "strength": 3,
+      "source": "headline_keyword"
+    },
+    {
+      "factor": "  → 以太坊（ETH）新闻：基金会的动荡使部分加密领域重量级人物看涨&nbsp;&nbsp;CoinDesk",
+      "impact": "positive",
+      "strength": 3,
+      "source": "headline_keyword"
+    },
+    {
+      "factor": "比特币维持区间震荡，以太坊在波动剧烈的一周中表现略显疲软 - Moomoo",
+      "impact": "negative",
+      "strength": 3,
+      "source": "headline_keyword"
+    }
+  ],
   "platform_sentiment": {},
-  "risks": [],
+  "risks": [
+    "Gemini API不可用，使用关键词分析"
+  ],
   "opportunities": [],
   "macro_cycle": {},
   "cycle_position": "",
-  "cycle_confidence": 50,
+  "cycle_confidence": 40,
   "sentiment_trend": "",
   "divergence_note": "",
-  "conclusion": "当前无足够数据生成情绪分析。可能原因：网络问题、RSS源暂时不可用、或标的名称不匹配。",
-  "trading_suggestion": "数据不足，无法给出建议 (仅供参考，非投资建议)",
+  "conclusion": "",
+  "trading_suggestion": "",
   "data_sources": [
     "google_news",
     "Google News Business",
     "Yahoo Finance",
     "CoinTelegraph",
     "CryptoSlate",
-    "Decrypt"
+    "Decrypt",
+    "律动BlockBeats",
+    "CoinMarketCap"
   ],
-  "data_count": 0,
-  "model_used": "gemini-2.5-flash-lite",
+  "data_count": 130,
+  "model_used": "keyword_fallback",
   "cache_hit": false
 }

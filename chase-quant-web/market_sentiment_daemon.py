@@ -306,7 +306,7 @@ class MarketRegimeClassifier:
         for sym, ns in news_sentiment.items():
             if isinstance(ns, dict):
                 score = ns.get("score", 0)  # -100 ~ +100
-                conf = ns.get("confidence", 50) / 100
+                conf = min(1.0, ns.get("confidence", 50) / 100)
                 news_scores.append(score * conf)
 
         news_avg = sum(news_scores) / len(news_scores) if news_scores else 0

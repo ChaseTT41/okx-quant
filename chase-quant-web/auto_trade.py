@@ -520,9 +520,12 @@ class RollingAwareAutoTrader:
                                 sell_thr = sell_thr * 1.2   # 偏贪婪: 做空适度收紧
                         except Exception:
                             pass
-                        if fusion_signal.signal_consensus > buy_thr:
+                        # 🆕 用 signal_weighted 判定方向（不被 consensus_ratio 稀释）
+                        # signal_consensus = signal_weighted * consensus_ratio，已衰减
+                        # 引擎内部也是用 signal_weighted 判定，保持一致
+                        if fusion_signal.signal_weighted > buy_thr:
                             fusion_signal.action = "BUY"
-                        elif fusion_signal.signal_consensus < sell_thr:
+                        elif fusion_signal.signal_weighted < sell_thr:
                             fusion_signal.action = "SELL"
                         else:
                             fusion_signal.action = "HOLD"

@@ -421,9 +421,12 @@ class NakedKScanner:
         # 大周期方向
         self._higher_tf_bias: Optional[MarketBias] = None
         if higher_tf_df is not None and len(higher_tf_df) >= 20:
-            htf_scanner = NakedKScanner(higher_tf_df, symbol, "higher_tf")
-            htf_struct = htf_scanner._analyze_structure()
-            self._higher_tf_bias = htf_struct.bias
+            try:
+                htf_scanner = NakedKScanner(higher_tf_df, symbol, "higher_tf")
+                htf_struct = htf_scanner._analyze_structure()
+                self._higher_tf_bias = htf_struct.bias
+            except Exception:
+                self._higher_tf_bias = None  # 高TF分析失败, 降级为无高TF上下文
 
     # ═══════════════════════════════════════
     # 公开API
@@ -922,7 +925,10 @@ class NakedKScanner:
         trend_k_ratio = trend_k_count / total_k
 
         # 能量评分 (0-10): 趋势K占比 + 重叠度
-        avg_overlap = np.mean([ki.overlap_ratio for ki in self._kline_infos[-20:]])
+        overlaps = [ki.overlap_ratio for ki in self._kline_infos[-20:]]
+        avg_overlap = np.nanmean(overlaps) if overlaps else 0.5
+        if np.isnan(avg_overlap):
+            avg_overlap = 0.5
         energy = int(trend_k_ratio * 6 + (1 - avg_overlap) * 4)
         energy = max(0, min(10, energy))
 

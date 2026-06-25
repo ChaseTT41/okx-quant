@@ -924,6 +924,13 @@ def _apply_sentiment_boost(signals: list, log_func) -> list:
             else:
                 new_lev = orig_lev
             sig["max_leverage"] = new_lev
+            # 🔧 Fix: 同步更新 _max_leverage (安全检查硬上限)
+            # 否则 _run_leverage_decisions 只认 _max_leverage, 情绪加成被忽略
+            if alignment == "aligned":
+                old_cap = sig.get("_max_leverage", orig_lev)
+                sig["_max_leverage"] = max(new_lev, old_cap)  # 取更宽松的上限
+            elif alignment == "opposed":
+                sig["_max_leverage"] = min(sig.get("_max_leverage", orig_lev), new_lev)
 
             sig["sentiment_boost"] = alignment
             sig["sentiment_regime"] = regime.get("regime", "?")

@@ -1,180 +1,66 @@
 {
   "symbol": "SOL/USDT",
   "market": "crypto",
-  "analyzed_at": "2026-06-20T10:08:22.808486+08:00",
-  "current_price_range": "价格波动，触及阻力位后受压制，但有支撑。",
-  "recent_performance": "SOL/USDT近期表现震荡，受宏观经济数据和市场情绪影响较大。",
-  "sentiment_score": 45,
-  "sentiment_label": "中性偏跌",
-  "sentiment_summary": "市场情绪谨慎，短期受宏观与监管影响，长期看好AI与技术发展。",
+  "analyzed_at": "2026-06-25T21:00:17.666959+08:00",
+  "current_price_range": "",
+  "recent_performance": "",
+  "sentiment_score": 50,
+  "sentiment_label": "中性",
+  "sentiment_summary": "📰关键词兜底: 114条标题 → 看跌23条/看涨24条 (Gemini: Gemini API HTTP 503: {\n  \"error\": {\n    \"code\": 503,\n    \"me)",
   "key_drivers": [
     {
-      "factor": "美国通胀报告",
-      "impact": "negative",
-      "strength": 7,
-      "cycle": "short",
-      "detail": "美国通胀报告公布前，比特币涨势受阻，XRP和SOL价格触及阻力位，短期内可能导致市场避险情绪升温。",
-      "source": "CoinDesk"
-    },
-    {
-      "factor": "ETF申请与清仓",
-      "impact": "mixed",
-      "strength": 6,
-      "cycle": "mid",
-      "detail": "摩根士丹利申请比特币、Solana和以太坊ETF，显示机构对加密货币的兴趣，但高盛清仓XRP与SOL ETF则带来短期不确定性。",
-      "source": "Moomoo, TradingKey"
-    },
-    {
-      "factor": "地缘政治风险",
-      "impact": "negative",
-      "strength": 6,
-      "cycle": "short",
-      "detail": "中东局势升级导致比特币放弃涨幅，显示地缘政治紧张是短期市场避险因素。",
-      "source": "CoinDesk"
-    },
-    {
-      "factor": "AI技术发展",
+      "factor": "数据：SOL 生态代币 three 市值突破 500 万美元，24 小时涨幅超 1500% - CryptoRank",
       "impact": "positive",
-      "strength": 8,
-      "cycle": "long",
-      "detail": "Solana AI定价层解析、AI产业发展（如GPT-5.6传闻、Anthropic吸引人才）是长期利好，预示着Solana在AI领域的潜力。",
-      "source": "WEEX, Decrypt, Google News Business"
+      "strength": 3,
+      "source": "headline_keyword"
     },
     {
-      "factor": "监管与合规",
-      "impact": "negative",
-      "strength": 7,
-      "cycle": "mid",
-      "detail": "欧洲MiCA监管即将生效，可能影响Binance和Tether的流动性，以及CME起诉CFTC阻止Kalshi推出加密期货，显示监管收紧趋势。",
-      "source": "CryptoSlate, Yahoo Finance"
-    },
-    {
-      "factor": "机构指数期货推出",
+      "factor": "  → 数据：SOL 生态代币 three 市值突破 500 万美元，24 小时涨幅超 1500%&nbsp;&nbsp",
       "impact": "positive",
-      "strength": 7,
-      "cycle": "mid",
-      "detail": "芝商所推出纳斯达克加密货币指数期货，俄罗斯最大证券交易所计划推出SOL等加密指数，表明机构对加密资产的进一步认可和产品创新。",
-      "source": "WEEX, CoinDesk"
+      "strength": 3,
+      "source": "headline_keyword"
     },
     {
-      "factor": "宏观经济政策",
-      "impact": "neutral",
-      "strength": 5,
-      "cycle": "mid",
-      "detail": "美国政府停摆的可能性、学生贷款利率变化等宏观经济政策对整体市场情绪有潜在影响，但当前数据未直接指向SOL。",
-      "source": "Binance, Google News Business"
-    },
-    {
-      "factor": "Solana生态发展",
+      "factor": "摩根士丹利申请比特币、Solana和以太坊ETF - Moomoo",
       "impact": "positive",
-      "strength": 7,
-      "cycle": "mid",
-      "detail": "Pump Fun营收放缓但Collector Crypt的成功展示了Solana生态的活力，以及有公开交易公司将Solana纳入资产负债表，显示其生态的持续建设和机构采纳。",
-      "source": "CryptoSlate, Decrypt"
+      "strength": 3,
+      "source": "headline_keyword"
+    },
+    {
+      "factor": "  → 摩根士丹利申请比特币、Solana和以太坊ETF&nbsp;&nbsp;Moomoo",
+      "impact": "positive",
+      "strength": 3,
+      "source": "headline_keyword"
+    },
+    {
+      "factor": "比特币价格新闻：随着中东局势升级，BTC放弃涨幅 - CoinDesk",
+      "impact": "positive",
+      "strength": 3,
+      "source": "headline_keyword"
     }
   ],
-  "platform_sentiment": {
-    "国际/英文媒体": {
-      "score": 55,
-      "summary": "关注机构动态与宏观风险，AI是长期亮点。"
-    },
-    "国际/社交媒体": {
-      "score": 40,
-      "summary": "情绪波动大，短期受消息面影响显著。"
-    },
-    "国内/中文媒体": {
-      "score": 50,
-      "summary": "报道中性，关注技术与市场波动。"
-    },
-    "国内/投资社区": {
-      "score": 45,
-      "summary": "观望情绪浓厚，关注宏观与监管。"
-    }
-  },
+  "platform_sentiment": {},
   "risks": [
-    "美国通胀数据不及预期，引发市场避险情绪。",
-    "地缘政治冲突升级，导致全球市场动荡。",
-    "监管政策收紧，对加密货币市场造成压力。",
-    "Solana生态内部分项目出现问题（如Sonic Labs高管辞职），影响市场信心。",
-    "高盛清仓ETF可能引发部分投资者的担忧。"
+    "Gemini API不可用，使用关键词分析"
   ],
-  "opportunities": [
-    "Solana在AI领域的持续发展和技术创新。",
-    "机构对加密货币ETF的兴趣增加，可能带来新的资金流入。",
-    "芝商所等机构推出加密指数期货，提升了加密资产的合规性和吸引力。",
-    "Solana生态的持续建设和用户增长。",
-    "潜在的宏观经济政策利好（如降息预期）。"
-  ],
-  "macro_cycle": {
-    "short_term": {
-      "score": 40,
-      "summary": "短期受通胀数据和地缘政治影响，情绪偏谨慎。",
-      "drivers": [
-        {
-          "factor": "美国通胀报告",
-          "impact": "negative",
-          "detail": "短期内可能引发市场避险情绪。"
-        },
-        {
-          "factor": "地缘政治风险",
-          "impact": "negative",
-          "detail": "可能导致市场短期波动加剧。"
-        }
-      ]
-    },
-    "mid_term": {
-      "score": 55,
-      "summary": "中期关注机构采纳与监管进展，存在结构性机会。",
-      "drivers": [
-        {
-          "factor": "ETF申请与推出",
-          "impact": "positive",
-          "detail": "机构对加密资产的认可度提升。"
-        },
-        {
-          "factor": "监管与合规",
-          "impact": "negative",
-          "detail": "MiCA等监管落地带来合规压力。"
-        },
-        {
-          "factor": "机构指数期货",
-          "impact": "positive",
-          "detail": "为加密资产提供更多合规交易渠道。"
-        }
-      ]
-    },
-    "long_term": {
-      "score": 75,
-      "summary": "长期看好AI技术驱动Solana发展，潜力巨大。",
-      "drivers": [
-        {
-          "factor": "AI技术发展",
-          "impact": "positive",
-          "detail": "Solana在AI领域的应用前景广阔。"
-        },
-        {
-          "factor": "Solana生态发展",
-          "impact": "positive",
-          "detail": "持续的技术创新和生态建设是长期支撑。"
-        }
-      ]
-    }
-  },
-  "cycle_position": "下跌初期",
-  "cycle_confidence": 50,
-  "sentiment_trend": "稳定",
-  "divergence_note": "无明显背离",
-  "conclusion": "当前SOL/USDT市场情绪整体偏向中性偏跌，短期内受美国通胀报告和地缘政治风险影响，市场情绪谨慎。中期来看，ETF申请和机构指数期货的推出为市场带来积极信号，但监管收紧是潜在的挑战。长期而言，Solana在AI领域的潜力以及生态的持续发展是其核心驱动力，预示着长期的增长空间。整体市场处于下跌初期，但技术和生态的积极因素提供了反弹的可能。",
-  "trading_suggestion": "短期内谨慎观望，关注宏观数据和地缘政治动态。中期可逢低布局，关注Solana生态的AI相关项目和技术发展。仅供参考，非投资建议。",
+  "opportunities": [],
+  "macro_cycle": {},
+  "cycle_position": "",
+  "cycle_confidence": 40,
+  "sentiment_trend": "",
+  "divergence_note": "",
+  "conclusion": "",
+  "trading_suggestion": "",
   "data_sources": [
     "google_news",
     "Google News Business",
     "Yahoo Finance",
     "CoinTelegraph",
-    "CryptoSlate",
-    "Decrypt"
+    "Decrypt",
+    "律动BlockBeats",
+    "CoinMarketCap"
   ],
-  "data_count": 102,
-  "model_used": "gemini-2.5-flash-lite",
+  "data_count": 114,
+  "model_used": "keyword_fallback",
   "cache_hit": false
 }

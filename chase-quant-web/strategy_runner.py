@@ -342,7 +342,7 @@ def _run_naked_k(market_data: Dict[str, pd.DataFrame]) -> List[dict]:
     min_rr = strategy.get_param("min_risk_reward", 1.2)
     require_low2 = strategy.get_param("require_low2", True)
     block_chase = strategy.get_param("block_momentum_chase", True)
-    timeframes = ['1H', '4H', '1D']  # OKX REST 格式
+    timeframes = ['5m', '15m', '1H', '4H', '1D']  # 🆕 5m/15m for short-term scalping
     limit = 200
 
     signals = []
@@ -360,46 +360,63 @@ def _run_naked_k(market_data: Dict[str, pd.DataFrame]) -> List[dict]:
                 except Exception:
                     pass
 
-            # 至少需要1h数据
-            if '1h' not in dfs or '4h' not in dfs:
+            # 至少需要有一个TF的数据（5m/15m可独立扫描）
+            available_tfs = list(dfs.keys())
+            if not available_tfs:
                 continue
 
-            # 尝试多时间框架扫描 (1d → 4h → 1h)
+            # 尝试多时间框架扫描 (从大到小: 1d → 4h → 1h → 15m → 5m)
             results = None
             try:
-                if '1d' in dfs:
+                if len(dfs) >= 2:
                     results = scan_multi_timeframe(dfs, symbol=sym)
             except Exception:
                 pass
 
-            # Fallback: 单时间框架扫描
+            # Fallback: 单时间框架扫描 (每个可用TF独立扫描)
             if results is None:
-                try:
-                    result_4h = scan_symbol(dfs.get('4h'), sym, '4h',
-                                            dfs.get('1d'))
-                    result_1h = scan_symbol(dfs.get('1h'), sym, '1h',
-                                            dfs.get('4h'))
-                    results = {'4h': result_4h, '1h': result_1h}
-                except Exception:
-                    continue
+                results = {}
+                tf_hierarchy = [('1d', None), ('4h', '1d'), ('1h', '4h'),
+                               ('15m', '1h'), ('5m', '15m')]
+                for tf, higher_tf in tf_hierarchy:
+                    if tf in dfs:
+                        try:
+                            higher_df = dfs.get(higher_tf) if higher_tf else None
+                            result = scan_symbol(dfs[tf], sym, tf, higher_df)
+                            if result:
+                                results[tf] = result
+                        except Exception:
+                            pass
 
-            # 处理每个时间框架
-            for tf in ['4h', '1h']:
+            # 处理每个时间框架 — 从小到大：5m/15m优先（短线机会多）
+            for tf in ['5m', '15m', '1h', '4h']:
                 if tf not in results or results[tf] is None:
                     continue
 
                 result = results[tf]
 
+                # 🆕 短周期参数: 5m/15m门槛更低(噪音多但机会多), 不强制Low2/High2
+                if tf in ('5m', '15m'):
+                    tf_pass_score = 5     # 5m短线门槛5分 (标准7分)
+                    tf_min_rr = 1.2       # 盈亏比1.2即可 (短线波动小)
+                    require_lh = False    # 短周期跳过Low2/High2 (形成太慢)
+                    use_chase_block = False  # 短周期允许追单 (动量 = 方向)
+                else:
+                    tf_pass_score = pass_score
+                    tf_min_rr = min_rr
+                    require_lh = require_low2
+                    use_chase_block = block_chase
+
                 for scalp_sig in result.signals:
                     # ── 三步评分过滤 ──
-                    if scalp_sig.score_3step < pass_score:
+                    if scalp_sig.score_3step < tf_pass_score:
                         continue
-                    if scalp_sig.risk_reward < min_rr:
+                    if scalp_sig.risk_reward < tf_min_rr:
                         continue
 
-                    # ── Low2/High2 门禁 ──
+                    # ── Low2/High2 门禁 (短周期跳过) ──
                     matching_lh = None
-                    if require_low2 and result.low_high_counts:
+                    if require_lh and result.low_high_counts:
                         for lh_dict in result.low_high_counts:
                             if (lh_dict.get('confirmed') and
                                 lh_dict.get('quality', 0) >= 0.6):
@@ -415,8 +432,8 @@ def _run_naked_k(market_data: Dict[str, pd.DataFrame]) -> List[dict]:
                         if matching_lh is None:
                             continue  # 跳过无Low2/High2确认的信号
 
-                    # ── 动量追单拦截 ──
-                    if block_chase and result.momentum_warnings:
+                    # ── 动量追单拦截 (短周期允许) ──
+                    if use_chase_block and result.momentum_warnings:
                         sig_bar = getattr(scalp_sig, 'signal_bar_idx', -1)
                         has_warning = any(
                             w.get('bar_idx', -1) >= sig_bar - 3
@@ -452,6 +469,12 @@ def _run_naked_k(market_data: Dict[str, pd.DataFrame]) -> List[dict]:
                         sig_pair=matching_pair,
                         higher_tf_bias=higher_bias,
                     )
+                    # 🆕 标记时间框架 (5m/15m信号=短线快进快出)
+                    sig['timeframe'] = tf
+                    sig['strategy_name'] = f"裸K·{tf}"  # e.g. "裸K·5m"
+                    sig['is_scalp'] = tf in ('5m', '15m')  # 短线标记
+                    if tf in ('5m', '15m'):
+                        sig['risk_level'] = 'high'  # 短线默认高风险(但止损紧实亏少)
                     signals.append(sig)
 
             # 币种间延迟 (避免API限速)

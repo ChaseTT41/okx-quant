@@ -1533,10 +1533,10 @@ class KLineStrategy(BaseStrategy):
             "strategy_name": "裸K价格行为",
             # ── 裸K专属标记 (用于优先级合并) ──
             "kline_priority": True,  # ← 标记为优先信号
-            "kline_score_3step": scalp_sig.score_3step,
-            "kline_score_trend": scalp_sig.score_trend,
-            "kline_score_keylevel": scalp_sig.score_keylevel,
-            "kline_score_signalk": scalp_sig.score_signalk,
+            "kline_score_3step": getattr(scalp_sig, 'score_3step', 0),
+            "kline_score_trend": getattr(scalp_sig, 'score_trend', 0),
+            "kline_score_keylevel": getattr(scalp_sig, 'score_keylevel', 0),
+            "kline_score_signalk": getattr(scalp_sig, 'score_signalk', getattr(scalp_sig, 'score_2plus3', 0)),
             "kline_type": scalp_sig.kline_type.value if hasattr(scalp_sig.kline_type, 'value') else str(scalp_sig.kline_type),
             "kline_risk_reward": scalp_sig.risk_reward,
             "kline_low_high": low_high,

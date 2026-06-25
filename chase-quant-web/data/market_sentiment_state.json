@@ -1,0 +1,81 @@
+{
+  "updated_at": "2026-06-25T21:00:17.669287+08:00",
+  "fear_greed": {
+    "updated_at": "2026-06-25T20:59:12.143204+08:00",
+    "cmc": {
+      "value": 18,
+      "classification": "Extreme fear",
+      "updated_at": "2026-06-25T12:38:10.029Z",
+      "source": "CoinMarketCap"
+    },
+    "alternative_me": {
+      "value": 12,
+      "classification": "Extreme Fear",
+      "value_1d_ago": 17,
+      "value_7d_ago": 15,
+      "change_1d": -5,
+      "change_7d": -3,
+      "time_until_update_sec": 39648,
+      "source": "alternative.me"
+    },
+    "combined": {
+      "value": 16,
+      "classification": "Extreme Fear",
+      "weight": "0.6*CMC + 0.4*alt.me",
+      "sources_available": 2,
+      "divergence": "moderate"
+    }
+  },
+  "news_sentiment": {
+    "BTC/USDT": {
+      "score": -14,
+      "raw_score": 43,
+      "label": "中性",
+      "confidence": 1300,
+      "drivers": [
+        "比特币亏损持仓量达到历史新高 1,083万 BTC - Moomoo",
+        "比特币亏损持仓量达到历史新高 1,083万 BTC - Moomoo",
+        "  → 比特币亏损持仓量达到历史新高 1,083万 BTC&nbsp;&nbsp;Moomoo"
+      ],
+      "data_count": 130,
+      "model": "keyword_fallback"
+    },
+    "ETH/USDT": {
+      "score": -28,
+      "raw_score": 36,
+      "label": "看跌",
+      "confidence": 1300,
+      "drivers": [
+        "加密市场全线下跌，资金费率显示BTC仍处看跌区间，ETH看多情绪明显强于BTC - 富途牛牛",
+        "  → 加密市场全线下跌，资金费率显示BTC仍处看跌区间，ETH看多情绪明显强于BTC&nbsp;&nbsp;富途牛牛",
+        "以太坊（ETH）新闻：基金会的动荡使部分加密领域重量级人物看涨 - CoinDesk"
+      ],
+      "data_count": 130,
+      "model": "keyword_fallback"
+    },
+    "SOL/USDT": {
+      "score": 0,
+      "raw_score": 50,
+      "label": "中性",
+      "confidence": 1140,
+      "drivers": [
+        "数据：SOL 生态代币 three 市值突破 500 万美元，24 小时涨幅超 1500% - CryptoRank",
+        "  → 数据：SOL 生态代币 three 市值突破 500 万美元，24 小时涨幅超 1500%&nbsp;&nbsp",
+        "摩根士丹利申请比特币、Solana和以太坊ETF - Moomoo"
+      ],
+      "data_count": 114,
+      "model": "keyword_fallback"
+    }
+  },
+  "market_regime": {
+    "regime": "extreme_fear",
+    "bias": "short_only",
+    "conviction": 85,
+    "resonance": "neutral",
+    "leverage_multiplier": 1.0,
+    "news_sentiment_avg": -14.0,
+    "fg_value": 16,
+    "fg_classification": "Extreme Fear",
+    "divergence": "moderate"
+  }
+}
