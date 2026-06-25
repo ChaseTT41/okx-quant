@@ -421,12 +421,15 @@ def execute_strategy_signals(signals: list, pf, leverage_engine=None, live_trade
 
     # 🔥 集中火力: 按评分排序 + 最低质量门槛
     # 🆕 动态阈值: short_only 模式下降低做空信号门槛
+    # 🆕 短线(scalp)信号门槛更低 — 止损紧实亏少, 机会多
     if action_bias == "short_only":
-        MIN_COMPOSITE = 35   # 做空信号通常评分较低，放宽至35 (约 58分×60%)
-        MIN_CONFIDENCE = 0.45  # 做空置信度放宽至45%
+        MIN_COMPOSITE = 10
+        MIN_CONFIDENCE = 0.35
     else:
-        MIN_COMPOSITE = 55   # score*confidence 综合分最低 55 (约 70分×78% 或 80分×69%)
-        MIN_CONFIDENCE = 0.65  # 单信号置信度最低 65%
+        MIN_COMPOSITE = 55
+        MIN_CONFIDENCE = 0.65
+    SCALP_MIN_COMPOSITE = 8     # 5m/15m短线: 评分50×信度35%≈17
+    SCALP_MIN_CONFIDENCE = 0.30  # 短线信度≥30%即可
     valid_signals = []
     for s in signals:
         action = s.get("action", "HOLD")
@@ -437,7 +440,11 @@ def execute_strategy_signals(signals: list, pf, leverage_engine=None, live_trade
         conf = s.get("confidence", 0.5)
         score = s.get("score", 50)
         composite = score * conf
-        if composite < MIN_COMPOSITE or conf < MIN_CONFIDENCE:
+        # 🆕 短线信号使用更低的门槛
+        is_scalp = s.get("is_scalp", False)
+        min_comp = SCALP_MIN_COMPOSITE if is_scalp else MIN_COMPOSITE
+        min_conf = SCALP_MIN_CONFIDENCE if is_scalp else MIN_CONFIDENCE
+        if composite < min_comp or conf < min_conf:
             continue
         valid_signals.append((composite, s))
 
@@ -480,7 +487,7 @@ def execute_strategy_signals(signals: list, pf, leverage_engine=None, live_trade
                 continue
 
             score = sig.get("score", 50)
-            check = rc.pre_trade_check("crypto", max_size, score, total_value)
+            check = rc.pre_trade_check("crypto", max_size, score, total_equity)
             if not check.passed:
                 log(f"  ⚠️ [{sig.get('strategy_name', '?')}] {sig['symbol']} 风控拦截: {check.reason}")
                 continue
@@ -731,6 +738,91 @@ def _enforce_min_margin(leverage_engine, log_func) -> list:
         log_func(f"⚠️ 最低保证金检查异常: {e}")
 
     return results
+
+
+def _apply_news_sentiment_overlay(signals: list, news_sentiment: dict, log_func) -> list:
+    """
+    📰 新闻情绪叠加 — 根据 Gemini 新闻分析调整信号置信度 (v3.7)
+
+    原理:
+      - 新闻情绪与信号方向一致 → 置信度加成
+      - 新闻情绪与信号方向冲突 → 置信度扣减
+      - 新闻情绪极端恐慌/贪婪 → 叠加额外权重
+
+    Args:
+      signals: 待执行的信号列表
+      news_sentiment: {symbol: {score, phase, confidence, drivers, ...}}
+      log_func: 日志函数
+
+    Returns: 调整后的信号列表
+    """
+    if not news_sentiment:
+        return signals
+
+    for sig in signals:
+        sym = sig.get("symbol", "")
+        ns = news_sentiment.get(sym, {})
+        if not ns or ns.get("score") is None:
+            continue
+
+        news_score = ns["score"]          # -100~+100
+        news_phase = ns.get("phase", "")
+        news_conf = ns.get("confidence", 0)
+
+        # 信号方向
+        action = sig.get("action", sig.get("direction", ""))
+        is_short = action in ("SELL", "SHORT", "sell", "short")
+        is_long = action in ("BUY", "LONG", "buy", "long")
+
+        adjustment = 0.0
+        reason = ""
+
+        # ── 方向一致性加成/扣减 ──
+        if is_short and news_score < -20:
+            # 新闻看空 + 做空信号 = 共振 → 加成
+            boost = min(abs(news_score) / 200, 0.15)  # 最多+15%
+            adjustment += boost
+            reason = f"📰新闻共振(+{boost:.0%})"
+        elif is_long and news_score > 20:
+            boost = min(news_score / 200, 0.15)
+            adjustment += boost
+            reason = f"📰新闻共振(+{boost:.0%})"
+        elif is_short and news_score > 20:
+            # 新闻看多 + 做空信号 = 冲突 → 扣减
+            penalty = min(news_score / 200, 0.10)  # 最多-10%
+            adjustment -= penalty
+            reason = f"📰新闻冲突(-{penalty:.0%})"
+        elif is_long and news_score < -20:
+            penalty = min(abs(news_score) / 200, 0.10)
+            adjustment -= penalty
+            reason = f"📰新闻冲突(-{penalty:.0%})"
+
+        # ── 极端情绪额外叠加 ──
+        # sentiment_label 中文: 极度看跌/看跌/中性偏跌/中性/中性偏涨/看涨/极度看涨
+        if news_phase in ("极度看跌",) and is_short:
+            adjustment += 0.05  # 极度看跌做空额外+5%
+            reason += " | 极度看跌加成"
+        elif news_phase in ("极度看涨",) and is_long:
+            adjustment += 0.05
+            reason += " | 极度看涨加成"
+
+        # ── 新闻置信度加权 ──
+        if news_conf < 40:
+            adjustment *= 0.5  # 新闻信度低时降权
+
+        # 应用调整
+        if adjustment != 0.0:
+            orig_conf = sig.get("confidence", 0.5)
+            sig["confidence"] = max(0.15, min(0.95, orig_conf + adjustment))
+            sig["news_sentiment_score"] = news_score
+            sig["news_sentiment_phase"] = news_phase
+            if reason:
+                existing_reasons = sig.get("reasons", [])
+                if isinstance(existing_reasons, list):
+                    existing_reasons.append(reason)
+                sig["reasons"] = existing_reasons
+
+    return signals
 
 
 def _clean_low_conviction_positions(leverage_engine, log_func) -> list:
@@ -1233,6 +1325,36 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
             from leverage_engine import LeverageEngine
             leverage_engine = LeverageEngine(sentiment_engine=sentiment_engine)
             log(f"⚡ 杠杆引擎就绪: 全局胜率={leverage_engine.get_global_win_rate():.0%}")
+
+        # 🆕 📰 Gemini 新闻情绪分析引擎 (v3.7)
+        news_sentiment = {}
+        try:
+            from sentiment_analyzer import MarketSentimentAnalyzer
+            news_analyzer = MarketSentimentAnalyzer()
+            # 分析前3大币种（利用1小时缓存，避免频繁调Gemini API）
+            for sym in ["BTC/USDT", "ETH/USDT", "SOL/USDT"]:
+                try:
+                    report = news_analyzer.analyze(sym, market="crypto")
+                    # SentimentReport: score=0~100 (0=极度看跌,100=极度看涨)
+                    raw_score = report.sentiment_score  # 0~100
+                    norm_score = (raw_score - 50) * 2   # 转换到 -100~+100
+                    drivers = [d.get("factor", "") for d in (report.key_drivers or [])[:3]]
+                    news_sentiment[sym] = {
+                        "score": norm_score,                 # -100~+100
+                        "phase": report.sentiment_label,     # 极度看跌/看跌/中性/看涨/极度看涨
+                        "confidence": report.data_count * 10 if report.data_count else 50,  # 估算信度
+                        "drivers": drivers,
+                        "headline_count": report.data_count,
+                    }
+                    emoji = "🔴" if raw_score < 30 else "🟡" if raw_score < 70 else "🟢"
+                    log(f"  📰 {emoji} {sym}: 情绪={norm_score:.0f} | "
+                        f"标签={report.sentiment_label} | {report.data_count}条/{len(report.data_sources)}源")
+                    if drivers:
+                        log(f"     📌 关键驱动: {', '.join(drivers)}")
+                except Exception as e:
+                    log(f"  ⚠️ {sym} 新闻分析跳过: {e}")
+        except Exception as e:
+            log(f"⚠️ 新闻情绪引擎不可用: {e}")
     except Exception as e:
         log(f"⚠️ 情绪引擎不可用: {e}")
 
@@ -1406,6 +1528,35 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
                         skipped = before - len(strategy_signals)
                         if skipped:
                             log(f"  🧊 冷却期过滤: 跳过 {skipped} 条信号 ({', '.join(sorted(stopped_out))})")
+
+                    # 🆕 📰 新闻情绪叠加 (v3.7)
+                    try:
+                        from sentiment_analyzer import MarketSentimentAnalyzer
+                        _news_analyzer = MarketSentimentAnalyzer()
+                        _news_sentiment = {}
+                        for _sym in ["BTC/USDT", "ETH/USDT", "SOL/USDT"]:
+                            try:
+                                _report = _news_analyzer.analyze(_sym, market="crypto")
+                                _raw = _report.sentiment_score  # 0~100
+                                _drivers = [d.get("factor", "") for d in (_report.key_drivers or [])[:3]]
+                                _news_sentiment[_sym] = {
+                                    "score": (_raw - 50) * 2,           # → -100~+100
+                                    "phase": _report.sentiment_label,    # 极度看跌/看涨
+                                    "confidence": _report.data_count * 10 if _report.data_count else 50,
+                                    "drivers": _drivers,
+                                }
+                            except Exception:
+                                pass
+                        if _news_sentiment:
+                            before = sum(s.get("confidence", 0) for s in strategy_signals)
+                            strategy_signals = _apply_news_sentiment_overlay(
+                                strategy_signals, _news_sentiment, log
+                            )
+                            after = sum(s.get("confidence", 0) for s in strategy_signals)
+                            if abs(after - before) > 0.01:
+                                log(f"📰 新闻情绪叠加: {len(_news_sentiment)}币种 → 置信 {before:.1f}→{after:.1f}")
+                    except Exception as e:
+                        log(f"⚠️ 新闻情绪叠加跳过: {e}")
 
                     if strategy_signals:
                         strat_results = execute_strategy_signals(

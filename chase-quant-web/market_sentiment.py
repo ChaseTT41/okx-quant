@@ -43,7 +43,7 @@ FUNDING_RATE_TTL_HOURS = 1.0
 OI_TTL_HOURS = 0.5
 LONG_SHORT_TTL_HOURS = 2.0
 TAKER_VOLUME_TTL_HOURS = 1.0
-FEAR_GREED_TTL_HOURS = 4.0
+FEAR_GREED_TTL_HOURS = 1.0  # 🔧 v3.7: 每小时刷新，紧跟市场情绪变化
 CORRELATION_TTL_HOURS = 6.0
 SECTOR_FLOW_TTL_HOURS = 0.5
 ROTATION_TTL_HOURS = 1.0
@@ -120,6 +120,7 @@ class FearGreedState:
     is_extreme_fear: bool = False   # <= 25
     is_extreme_greed: bool = False  # >= 75
     timestamp: str = ""
+    time_until_update_sec: int = 0  # 🔧 v3.7: 距离下次更新剩余秒数
 
 @dataclass
 class SectorFlow:
@@ -574,11 +575,98 @@ class MarketSentimentEngine:
 
     # ── 5. Fear & Greed ──
 
+    def _fetch_cmc_fear_greed(self) -> Optional[FearGreedState]:
+        """
+        🔧 v3.7: 从 CoinMarketCap 抓取恐惧贪婪指数 (主数据源, 更新更频繁)
+
+        CMC F&G 通过 SSR 页面 __NEXT_DATA__ 暴露, 无需 API Key.
+        比 alternative.me 更新更频繁 (每小时 vs 每天).
+        """
+        import re
+        try:
+            resp = self.session.get(
+                "https://coinmarketcap.com/charts/",
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml",
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
+                timeout=15,
+            )
+            resp.raise_for_status()
+            html = resp.text
+
+            # 提取 __NEXT_DATA__ JSON
+            m = re.search(
+                r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>',
+                html, re.DOTALL
+            )
+            if not m:
+                return None
+
+            data = json.loads(m.group(1))
+            props = data.get("props", {}).get("pageProps", {})
+
+            # 深度搜索 fearGreedIndexData
+            def deep_search(obj, key, depth=0):
+                if depth > 20 or obj is None:
+                    return None
+                if isinstance(obj, dict):
+                    if key in obj:
+                        return obj[key]
+                    for k, v in obj.items():
+                        result = deep_search(v, key, depth + 1)
+                        if result is not None:
+                            return result
+                elif isinstance(obj, list):
+                    for item in obj[:100]:
+                        result = deep_search(item, key, depth + 1)
+                        if result is not None:
+                            return result
+                return None
+
+            fg_data = deep_search(props, "fearGreedIndexData")
+            if not fg_data:
+                return None
+
+            current = fg_data.get("currentIndex", {})
+            score = int(current.get("score", 50))
+            name = current.get("name", "Neutral")
+            update_time = current.get("updateTime", "")
+
+            # CMC 分类名: "Extreme fear" / "Fear" / "Neutral" / "Greed" / "Extreme greed"
+            # 统一到我们的分类系统
+            classification_map = {
+                "extreme fear": "Extreme Fear",
+                "fear": "Fear",
+                "neutral": "Neutral",
+                "greed": "Greed",
+                "extreme greed": "Extreme Greed",
+            }
+            classification = classification_map.get(name.lower(), name.title())
+
+            return FearGreedState(
+                current_value=score,
+                classification=classification,
+                value_1d_ago=0,       # CMC SSR 不包含历史
+                value_7d_ago=0,
+                change_1d=0,
+                change_7d=0,
+                is_extreme_fear=(score <= 20),
+                is_extreme_greed=(score >= 80),
+                timestamp=update_time or datetime.now(timezone.utc).isoformat(),
+                time_until_update_sec=0,  # CMC 无此字段
+            )
+        except Exception as e:
+            log.debug(f"CMC F&G 抓取失败: {e}")
+            return None
+
     def fetch_fear_greed(self, use_cache: bool = True) -> FearGreedState:
         """
-        从 alternative.me 拉取恐惧贪婪指数。
+        获取恐惧贪婪指数。
 
-        API: GET https://api.alternative.me/fng/?limit=30
+        🔧 v3.7: 优先 CoinMarketCap (更新更频繁), 降级 alternative.me
         """
         cache_name = "fear_greed"
         if use_cache and self._cache_valid(cache_name, FEAR_GREED_TTL_HOURS):
@@ -586,47 +674,66 @@ class MarketSentimentEngine:
             if cached:
                 return FearGreedState(**cached)
 
-        try:
-            resp = self.session.get(
-                "https://api.alternative.me/fng/?limit=30", timeout=15
-            )
-            data = resp.json().get("data", [])
-            if not data:
-                raise ValueError("Empty response")
-        except Exception as e:
-            log.warning(f"Fear & Greed API 失败: {e}")
-            return FearGreedState(
-                current_value=50, classification="Neutral", timestamp=""
-            )
+        result = None
+        source = "unknown"
 
-        current = int(data[0]["value"])
-        v1d = int(data[1]["value"]) if len(data) > 1 else current
-        v7d = int(data[7]["value"]) if len(data) > 7 else current
+        # 1️⃣ 优先 CMC (更新频繁)
+        result = self._fetch_cmc_fear_greed()
+        if result:
+            source = "CoinMarketCap"
+            log.info(f"😱 F&G (CMC): {result.current_value} ({result.classification})")
 
-        # 分类
-        if current <= 25:
-            classification = "Extreme Fear"
-        elif current <= 45:
-            classification = "Fear"
-        elif current <= 55:
-            classification = "Neutral"
-        elif current <= 75:
-            classification = "Greed"
-        else:
-            classification = "Extreme Greed"
+        # 2️⃣ 降级 alternative.me
+        if not result:
+            try:
+                resp = self.session.get(
+                    "https://api.alternative.me/fng/?limit=30", timeout=15
+                )
+                data = resp.json().get("data", [])
+                if not data:
+                    raise ValueError("Empty response")
 
-        result = FearGreedState(
-            current_value=current,
-            classification=classification,
-            value_1d_ago=v1d,
-            value_7d_ago=v7d,
-            change_1d=current - v1d,
-            change_7d=current - v7d,
-            is_extreme_fear=(current <= 25),
-            is_extreme_greed=(current >= 75),
-            timestamp=datetime.now(timezone.utc).isoformat(),
-        )
-        self._write_cache(cache_name, result.__dict__)
+                current = int(data[0]["value"])
+                v1d = int(data[1]["value"]) if len(data) > 1 else current
+                v7d = int(data[7]["value"]) if len(data) > 7 else current
+                time_until = int(data[0].get("time_until_update", 0))
+
+                if current <= 25:
+                    classification = "Extreme Fear"
+                elif current <= 45:
+                    classification = "Fear"
+                elif current <= 55:
+                    classification = "Neutral"
+                elif current <= 75:
+                    classification = "Greed"
+                else:
+                    classification = "Extreme Greed"
+
+                result = FearGreedState(
+                    current_value=current,
+                    classification=classification,
+                    value_1d_ago=v1d,
+                    value_7d_ago=v7d,
+                    change_1d=current - v1d,
+                    change_7d=current - v7d,
+                    is_extreme_fear=(current <= 25),
+                    is_extreme_greed=(current >= 75),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    time_until_update_sec=time_until,
+                )
+                source = "alternative.me"
+                log.info(f"😱 F&G (alt): {current} ({classification}), "
+                         f"下次更新≈{time_until // 3600}h")
+            except Exception as e:
+                log.warning(f"F&G 双源均失败: {e}")
+                result = FearGreedState(
+                    current_value=50, classification="Neutral", timestamp=""
+                )
+                source = "fallback"
+
+        # 保存缓存
+        if result and source != "fallback":
+            self._write_cache(cache_name, result.__dict__)
         return result
 
     # ── 6. 价格变动 (用于板块聚合) ──

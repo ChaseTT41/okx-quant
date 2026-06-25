@@ -49,7 +49,9 @@ BEIJING_TZ = timezone(timedelta(hours=8))
 
 # Gemini API
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-GEMINI_MODEL = "gemini-2.5-flash-lite"  # 免费层, 15 RPM
+GEMINI_MODEL = "gemini-2.5-flash"          # 主力模型
+GEMINI_MODEL_FALLBACK = "gemini-2.5-flash-lite"  # 降级模型（免费层）
+GEMINI_MAX_RETRIES = 3                     # 429/503 重试次数
 
 # 加载 API Key
 _GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -174,6 +176,105 @@ class NewsCollector:
                 merged.append(item)
         return merged[:max_items]
 
+    # ── 🔧 v3.7: BlockBeats 律动 + CoinMarketCap 新闻源 ──
+
+    @staticmethod
+    def fetch_blockbeats_newsflash(max_items: int = 20) -> List[dict]:
+        """爬取 律动BlockBeats 快讯 — 华语区最快加密货币新闻源"""
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            }
+            resp = requests.get(
+                "https://www.theblockbeats.info/newsflash",
+                headers=headers, timeout=REQUEST_TIMEOUT
+            )
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            # 移除 script/style/nav/footer/header
+            for tag in soup(["script", "style", "nav", "footer", "header"]):
+                tag.decompose()
+
+            text = soup.get_text(separator="\n", strip=True)
+            lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+            # 解析新闻: 标题行 → "BlockBeats 消息" 内容块
+            # 模式: 标题(不含"BlockBeats消息"和"*均为北京时间") → 内容块(以"BlockBeats消息"开头)
+            items = []
+            i = 0
+            while i < len(lines) and len(items) < max_items:
+                line = lines[i]
+                # 跳过日历条目、标签行、非新闻行
+                skip_patterns = [
+                    "BlockBeats -", "*均为北京", "美光公布", "美国至",
+                    "美国众议院", "Ronin", "解锁约", "均为北京",
+                ]
+                should_skip = any(line.startswith(p) for p in skip_patterns)
+                if not should_skip and len(line) >= 8 and "BlockBeats" not in line[:20]:
+                    # 这是一个候选标题
+                    title = line[:200]
+                    summary_parts = []
+                    j = i + 1
+                    while j < len(lines) and j < i + 20:
+                        next_line = lines[j]
+                        # 遇到下一个标题 (不含"BlockBeats"开头，且长度合适)
+                        if (next_line.startswith("BlockBeats 消息")
+                            or ("BlockBeats" not in next_line[:20]
+                                and len(next_line) >= 8
+                                and not next_line.startswith(("BlockBeats -", "*")))):
+                            if next_line.startswith("BlockBeats 消息"):
+                                summary_parts.append(next_line)
+                                j += 1
+                                continue
+                            else:
+                                break
+                        j += 1
+
+                    if summary_parts:
+                        items.append({
+                            "title": title,
+                            "summary": " ".join(summary_parts)[:500],
+                            "link": f"https://www.theblockbeats.info/newsflash",
+                            "published": datetime.now(BEIJING_TZ).isoformat(),
+                        })
+                    i = j
+                    continue
+                i += 1
+
+            return items
+        except Exception:
+            return []
+
+    @staticmethod
+    def fetch_cmc_news(max_items: int = 20) -> List[dict]:
+        """从 CoinMarketCap 获取最新加密货币新闻"""
+        try:
+            resp = requests.get(
+                "https://api.coinmarketcap.com/content/v3/news",
+                params={"limit": max_items},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=REQUEST_TIMEOUT,
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+
+            items = []
+            for article in data:
+                meta = article.get("meta", {})
+                items.append({
+                    "title": meta.get("title", ""),
+                    "summary": meta.get("subtitle", ""),
+                    "link": f"https://coinmarketcap.com/headlines/news/{article.get('slug', '')}",
+                    "published": article.get("createdAt", ""),
+                })
+            return items
+        except Exception:
+            return []
+
     @classmethod
     def collect_all(cls, symbol: str, market: str = "crypto") -> Dict[str, List[dict]]:
         """
@@ -208,6 +309,18 @@ class NewsCollector:
                 items = cls.fetch_rss(url, max_items=8)
                 if items:
                     result[source_name] = items
+
+        # 🔧 v3.7: 加密货币市场额外接入 BlockBeats 律动 + CoinMarketCap
+        if market == "crypto":
+            # 律动 BlockBeats — 华语区最快加密货币新闻
+            bb_items = cls.fetch_blockbeats_newsflash(max_items=15)
+            if bb_items:
+                result["律动BlockBeats"] = bb_items
+
+            # CoinMarketCap News
+            cmc_items = cls.fetch_cmc_news(max_items=15)
+            if cmc_items:
+                result["CoinMarketCap"] = cmc_items
 
         return result
 
@@ -453,37 +566,122 @@ class GeminiSentimentEngine:
             report = self._parse_response(raw_response, symbol, market, sources, total_items)
             return report
         except Exception as e:
-            # 降级: 返回基础报告
-            report = self._empty_report(symbol, market, sources)
-            report.sentiment_summary = f"分析暂时不可用: {str(e)[:50]}"
+            # 🔧 降级: 关键词兜底分析（Gemini不可用时仍能产出有效信号）
+            report = self._keyword_sentiment(
+                symbol=symbol, market=market,
+                headlines=[item.split("] ", 1)[-1] if "] " in item else item
+                           for item in all_items],
+                sources=sources, total_items=total_items,
+                gemini_error=str(e)[:60]
+            )
             return report
 
-    def _call_gemini(self, prompt: str) -> str:
-        """调用 Gemini REST API"""
+    # ── 关键词情绪词典 (Gemini 降级方案) ──
+    BEARISH_KEYWORDS = [
+        "crash", "暴跌", "崩盘", "plunge", "drop", "fall", "下跌", "跌",
+        "fear", "恐慌", "panic", "sell", "抛售", "dump", "decline", "下滑",
+        "loss", "亏损", "risk", "风险", "warn", "警告", "nervous", "紧张",
+        "bear", "bearish", "看跌", "weak", "疲软", "bleed", "血流",
+        "liquidat", "清算", "correction", "回调", "recession", "衰退",
+        "tariff", "关税", "sanction", "制裁", "regulation", "监管",
+    ]
+    BULLISH_KEYWORDS = [
+        "surge", "飙升", "暴涨", "rally", "反弹", "rise", "上涨", "涨",
+        "bull", "bullish", "看涨", "breakout", "突破", "pump", "拉升",
+        "gain", "增长", "boost", "推动", "positive", "积极", "乐观",
+        "optimistic", "strong", "强劲", "record high", "新高", "ATH",
+        "accumulat", "吸筹", "adopt", "采用", "approve", "批准", "ETF",
+        "halving", "减半", "innovation", "创新", "partnership", "合作",
+    ]
+
+    def _keyword_sentiment(self, symbol: str, market: str,
+                           headlines: list, sources: list,
+                           total_items: int, gemini_error: str = "") -> SentimentReport:
+        """关键词兜底情绪分析 — Gemini不可用时的降级方案"""
+        bearish_count = 0
+        bullish_count = 0
+        matched_drivers = []
+
+        for headline in headlines:
+            h_lower = headline.lower()
+            for kw in self.BEARISH_KEYWORDS:
+                if kw.lower() in h_lower:
+                    bearish_count += 1
+                    if len(matched_drivers) < 5:
+                        matched_drivers.append({"factor": headline[:60], "impact": "negative", "strength": 3, "source": "headline_keyword"})
+                    break
+            for kw in self.BULLISH_KEYWORDS:
+                if kw.lower() in h_lower:
+                    bullish_count += 1
+                    if len(matched_drivers) < 5:
+                        matched_drivers.append({"factor": headline[:60], "impact": "positive", "strength": 3, "source": "headline_keyword"})
+                    break
+
+        total = bearish_count + bullish_count
+        if total > 0:
+            # 0=极度看跌, 100=极度看涨
+            score = int(50 + (bullish_count - bearish_count) / total * 40)
+            score = max(5, min(95, score))
+            if score <= 20:
+                label = "极度看跌"
+            elif score <= 40:
+                label = "看跌"
+            elif score <= 60:
+                label = "中性"
+            elif score <= 80:
+                label = "看涨"
+            else:
+                label = "极度看涨"
+        else:
+            score = 50
+            label = "数据不足"
+
+        bear_ratio = bearish_count / total_items if total_items else 0
+        bull_ratio = bullish_count / total_items if total_items else 0
+
+        return SentimentReport(
+            symbol=symbol,
+            market=market,
+            analyzed_at=datetime.now(BEIJING_TZ).isoformat(),
+            sentiment_score=score,
+            sentiment_label=label,
+            sentiment_summary=f"📰关键词兜底: {total_items}条标题 → 看跌{bearish_count}条/看涨{bullish_count}条 (Gemini: {gemini_error})",
+            key_drivers=matched_drivers,
+            risks=["Gemini API不可用，使用关键词分析"] if gemini_error else [],
+            cycle_position="",
+            cycle_confidence=min(40, total_items * 2),  # 关键词分析信度较低
+            data_sources=sources,
+            data_count=total_items,
+            model_used="keyword_fallback",
+        )
+
+    def _call_gemini(self, prompt: str, retry_count: int = 0) -> str:
+        """调用 Gemini REST API（带重试+模型降级）"""
         if not self.api_key:
             raise ValueError("未配置 GEMINI_API_KEY")
 
-        url = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent?key={self.api_key}"
+        # 第一次用主力模型，重试时用降级模型
+        model = GEMINI_MODEL if retry_count == 0 else GEMINI_MODEL_FALLBACK
+        url = f"{GEMINI_BASE_URL}/{model}:generateContent?key={self.api_key}"
 
         payload = {
             "contents": [{
                 "parts": [{"text": prompt}]
             }],
             "generationConfig": {
-                "temperature": 0.3,  # 低温度 → 更确定性的输出
+                "temperature": 0.3,
                 "topP": 0.9,
                 "maxOutputTokens": 2048,
             }
         }
 
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-
         try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
             with urllib.request.urlopen(req, timeout=60) as resp:
                 data = json.loads(resp.read().decode())
                 text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
@@ -492,25 +690,35 @@ class GeminiSentimentEngine:
                 return text
         except urllib.error.HTTPError as e:
             error_body = e.read().decode() if e.fp else str(e)
-            raise RuntimeError(f"Gemini API HTTP {e.code}: {error_body[:200]}")
+            err_msg = f"Gemini API HTTP {e.code}: {error_body[:200]}"
+            # 429/503 → 重试，最多 GEMINI_MAX_RETRIES 次
+            if e.code in (429, 503) and retry_count < GEMINI_MAX_RETRIES:
+                wait = 2 ** retry_count  # 1s, 2s, 4s 退避
+                time.sleep(wait)
+                return self._call_gemini(prompt, retry_count + 1)
+            raise RuntimeError(err_msg)
         except Exception as e:
             raise RuntimeError(f"Gemini API 调用失败: {e}")
 
     def _parse_response(self, raw: str, symbol: str, market: str,
                         sources: List[str], total_items: int) -> SentimentReport:
         """解析 Gemini 返回的 JSON"""
+        json_str = None
         try:
-            # 提取 JSON 块
-            json_match = re.search(r'```json\s*(.*?)\s*```', raw, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                # 尝试直接找 JSON 对象
-                json_match = re.search(r'\{.*\}', raw, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(0)
-                else:
-                    json_str = raw
+            # 提取 JSON 块 (支持多种格式)
+            for pattern in [
+                r'```json\s*\n?(.*?)\n?```',      # ```json ... ```
+                r'```\s*\n?(\{.*?\})\s*\n?```',   # ``` {...} ```
+                r'(\{[\s\S]*"sentiment_score"[\s\S]*\})',  # 包含 sentiment_score 的 JSON
+            ]:
+                m = re.search(pattern, raw, re.DOTALL)
+                if m:
+                    json_str = m.group(1).strip()
+                    break
+
+            if not json_str:
+                # 最后的兜底: 尝试直接解析整个响应
+                json_str = raw.strip()
 
             data = json.loads(json_str)
 
@@ -543,20 +751,8 @@ class GeminiSentimentEngine:
             return report
 
         except (json.JSONDecodeError, KeyError, ValueError) as e:
-            # 解析失败: 用原始文本构建基础报告
-            report = SentimentReport(
-                symbol=symbol,
-                market=market,
-                analyzed_at=datetime.now(BEIJING_TZ).isoformat(),
-                sentiment_score=50,
-                sentiment_label="中性",
-                sentiment_summary=raw[:100].replace("\n", " "),
-                conclusion=raw[:200],
-                trading_suggestion="数据解析异常，建议人工复核 (仅供参考)",
-                data_sources=sources,
-                data_count=total_items,
-            )
-            return report
+            # 解析失败 → 抛出异常，让外层 analyzer 用关键词兜底
+            raise ValueError(f"Gemini JSON解析失败: {e}") from e
 
     def _empty_report(self, symbol: str, market: str, sources: List[str]) -> SentimentReport:
         """空报告 (无数据时)"""

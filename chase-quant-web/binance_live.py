@@ -33,6 +33,10 @@ import sys
 import json
 import time
 import uuid
+import base64
+import hmac
+import hashlib
+import requests
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field, asdict
@@ -493,7 +497,22 @@ class BinanceLiveTrader:
         """解析 ccxt 订单响应"""
         # ccxt create_market_order 返回的格式
         order_id = order.get("id", str(uuid.uuid4().hex[:12]))
-        status = order.get("status", "unknown")
+
+        # 🔧 OKX ccxt 返回 status=None, 需从 info.sCode 判断
+        status = order.get("status")
+        if not status or status == "unknown":
+            info = order.get("info", {})
+            okx_code = info.get("sCode", "")
+            if okx_code == "0":
+                # OKX 市价单 sCode=0 → 已提交，市价单立即成交
+                status = "filled"
+                # 如果 order_id 为空, 从 info 获取
+                if not order_id or order_id == "None":
+                    order_id = info.get("ordId", str(uuid.uuid4().hex[:12]))
+            elif okx_code:
+                status = f"rejected:{okx_code}"
+            else:
+                status = "unknown"
 
         # 成交均价
         avg_price = order.get("average", order.get("price", 0)) or 0
@@ -507,9 +526,27 @@ class BinanceLiveTrader:
                     for f in fills
                 )
                 avg_price = total_cost / total_qty if total_qty > 0 else 0
+        # 🔧 OKX ccxt 返回 average=None, 尝试从 info 获取
+        if avg_price <= 0:
+            info = order.get("info", {})
+            info_px = info.get("px", "0")
+            if info_px and info_px != "0":
+                try:
+                    avg_price = float(info_px)
+                except (ValueError, TypeError):
+                    pass
 
-        # 成交数量
+        # 成交数量 - OKX ccxt 常返回 filled=None, 用 amount 替代
         quantity = order.get("filled", order.get("amount", 0)) or 0
+        # 🔧 OKX 返回 filled=0 但 info 中有实际成交量
+        if quantity <= 0:
+            info = order.get("info", {})
+            info_sz = info.get("sz", "0")
+            if info_sz and info_sz != "0":
+                try:
+                    quantity = float(info_sz)
+                except (ValueError, TypeError):
+                    pass
 
         # 手续费
         fee_info = order.get("fee", {}) or {}
@@ -547,7 +584,111 @@ class BinanceLiveTrader:
         spot_sym = symbol.replace(":USDT", "") if ":USDT" in symbol else symbol
         return self.get_min_notional(spot_sym)
 
-    # ── ⚡ Swap/合约交易 ──
+    def _set_sl_tp_via_rest(self, inst_id: str, pos_side: str,
+                            quantity: float, entry_price: float,
+                            stop_loss_price: float = None,
+                            take_profit_price: float = None) -> bool:
+        """
+        通过 OKX REST API 直接设置止损/止盈算法单。
+
+        🔧 替代 ccxt stop_market（ccxt 对 OKX SL/TP 翻译不正确）
+
+        Args:
+          inst_id: 'SOL-USDT-SWAP'
+          pos_side: 'long' or 'short'
+          quantity: 合约张数
+          entry_price: 入场价
+          stop_loss_price: 止损触发价（做空在上方, 做多在下方）
+          take_profit_price: 止盈触发价
+        """
+        if not (stop_loss_price or take_profit_price):
+            return True
+
+        try:
+            # 平仓方向
+            close_side = "sell" if pos_side == "long" else "buy"
+
+            for ord_kind, trigger_px in [("SL", stop_loss_price), ("TP", take_profit_price)]:
+                if not trigger_px or trigger_px <= 0:
+                    continue
+
+                algo_body = {
+                    "instId": inst_id,
+                    "tdMode": "isolated",
+                    "side": close_side,
+                    "posSide": pos_side,
+                    "ordType": "conditional",
+                    "sz": str(quantity),
+                }
+                px_str = f"{trigger_px:.10f}" if trigger_px < 0.01 else str(trigger_px)
+                if ord_kind == "SL":
+                    algo_body["slTriggerPx"] = px_str
+                    algo_body["slOrdPx"] = "-1"  # 市价触发
+                else:
+                    algo_body["tpTriggerPx"] = px_str
+                    algo_body["tpOrdPx"] = "-1"
+
+                body = json.dumps(algo_body)
+                ts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+                path = "/api/v5/trade/order-algo"
+                sign_str = ts + "POST" + path + body
+                sign = base64.b64encode(hmac.new(
+                    self._exchange.secret.encode(), sign_str.encode(), hashlib.sha256
+                ).digest()).decode()
+
+                r = requests.post(
+                    f"https://{self._exchange.hostname}{path}",
+                    headers={
+                        "OK-ACCESS-KEY": self._exchange.apiKey,
+                        "OK-ACCESS-SIGN": sign,
+                        "OK-ACCESS-TIMESTAMP": ts,
+                        "OK-ACCESS-PASSPHRASE": self._exchange.password,
+                        "Content-Type": "application/json",
+                    },
+                    data=body, timeout=10
+                )
+                resp = r.json()
+                if resp.get("code") != "0":
+                    print(f"  🚨 {ord_kind} 设置失败 [{inst_id}]: {resp}")
+                    return False
+            return True
+        except Exception as e:
+            print(f"  ⚠️ SL/TP 设置异常: {e}")
+            return False
+
+    def _set_leverage_via_rest(self, swap_sym: str, leverage: int, pos_side: str = "short") -> bool:
+        """通过 OKX REST API 直接设置杠杆（ccxt set_leverage 可能静默失败）"""
+        try:
+            inst_id = swap_sym.replace("/USDT:USDT", "-USDT-SWAP")
+            body = json.dumps({
+                "instId": inst_id,
+                "lever": str(leverage),
+                "mgnMode": "isolated",
+                "posSide": pos_side,
+            })
+            ts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+            path = "/api/v5/account/set-leverage"
+            sign_str = ts + "POST" + path + body
+            sign = base64.b64encode(hmac.new(
+                self._exchange.secret.encode(), sign_str.encode(), hashlib.sha256
+            ).digest()).decode()
+
+            r = requests.post(
+                f"https://{self._exchange.hostname}{path}",
+                headers={
+                    "OK-ACCESS-KEY": self._exchange.apiKey,
+                    "OK-ACCESS-SIGN": sign,
+                    "OK-ACCESS-TIMESTAMP": ts,
+                    "OK-ACCESS-PASSPHRASE": self._exchange.password,
+                    "Content-Type": "application/json",
+                },
+                data=body, timeout=10
+            )
+            resp = r.json()
+            return resp.get("code") == "0"
+        except Exception as e:
+            print(f"  ⚠️ 杠杆设置异常: {e}")
+            return False
 
     def market_buy_swap(self, symbol: str, amount_usdt: float,
                          leverage: int, stop_loss_price: float = None,
@@ -701,11 +842,18 @@ class BinanceLiveTrader:
             raise LiveTradingBlockedError(
                 f"USDT 余额不足 (需要 ${amount_usdt:.2f}, 可用 ${usdt_balance:.2f})")
 
-        # 设杠杆 + 逐仓
+        # 设杠杆 + 逐仓 (ccxt 可能静默失败, REST API 兜底)
+        lev_set = False
         try:
             self._exchange.set_leverage(leverage, swap_sym)
+            lev_set = True
         except Exception:
             pass
+        if not lev_set:
+            try:
+                self._set_leverage_via_rest(swap_sym, leverage, "short")
+            except Exception:
+                pass
         try:
             self._exchange.set_margin_mode("isolated", swap_sym)
         except Exception:
@@ -733,7 +881,7 @@ class BinanceLiveTrader:
                 order = self._exchange.create_order(
                     swap_sym, "market", "sell", float(quantity),
                     None,
-                    {"note": note, "posSide": "short", "leverage": str(leverage)}
+                    {"note": note, "posSide": "short"}
                 )
 
                 self._record_api_success()
@@ -742,16 +890,14 @@ class BinanceLiveTrader:
                 result.notional_usdt = round(notional, 2)
                 self._log_order(result)
 
-                # 设止损 (做空方向: 止损在入场价上方, 用 buy stop-market)
+                # 设止损/止盈 (OKX REST API algo orders, ccxt stop_market 翻译不正确)
                 if stop_loss_price and stop_loss_price > 0:
-                    try:
-                        self._exchange.create_order(
-                            swap_sym, "stop_market", "buy", float(quantity),
-                            None,
-                            {"stopLossPrice": stop_loss_price, "posSide": "short"}
-                        )
-                    except Exception as sl_err:
-                        print(f"  ⚠️ 做空止损单设置失败: {sl_err}")
+                    inst_id = symbol.replace("/USDT", "-USDT-SWAP")
+                    self._set_sl_tp_via_rest(
+                        inst_id=inst_id, pos_side="short",
+                        quantity=float(quantity), entry_price=avg_price or price,
+                        stop_loss_price=stop_loss_price,
+                    )
 
                 return result
 
