@@ -1,12 +1,12 @@
 {
   "symbol": "BTC/USDT",
   "market": "crypto",
-  "analyzed_at": "2026-06-25T21:00:47.294476+08:00",
+  "analyzed_at": "2026-06-25T21:31:04.721446+08:00",
   "current_price_range": "",
   "recent_performance": "",
   "sentiment_score": 42,
   "sentiment_label": "中性",
-  "sentiment_summary": "📰关键词兜底: 130条标题 → 看跌40条/看涨27条 (Gemini: Gemini JSON解析失败: Expecting ',' delimiter: line 197 column 6 )",
+  "sentiment_summary": "📰关键词兜底: 130条标题 → 看跌36条/看涨24条 (Gemini: Gemini JSON解析失败: Expecting value: line 1 column 1 (char 0))",
   "key_drivers": [
     {
       "factor": "比特币亏损持仓量达到历史新高 1,083万 BTC - Moomoo",

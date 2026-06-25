@@ -1,6 +1,6 @@
 # 🏛️ Yina 量化总部 · 多视角交易决策系统 v3.2 🧬
 
-> 版本: v3.7 | 更新: 2026-06-25 | 新增: 市场情绪守护进程 + 双源F&G + 共振加成 + 律动BlockBeats + CMC新闻
+> 版本: v3.7.1 | 更新: 2026-06-25 | 新增: 市场情绪守护进程 + 双源F&G + 共振加成 + 律动BlockBeats + CMC新闻 | 修复: 杠杆死代码 + 信度溢出
 > 架构: 四视角扫描 → 三层防火墙审批 → 执行 → **自我进化 🧬**
 > 进化引擎: Darwin.skill v2.0 (4.2k⭐) | 基线评分: 81.5/100
 > 数据源: 全部实时 API 验证通过 ✅
@@ -740,15 +740,17 @@ confidence -= 0.10                        # 惩罚
 max_leverage = max(3, orig_leverage × 0.7)
 ```
 
-### 13.5 实际案例 (2026-06-25)
+### 13.5 实际案例 (2026-06-25 v3.7.1修复后)
 
 ```
 😱 双源F&G: 16 (Extreme Fear) [CMC=18 alt=12 分歧=moderate]
-🏛️ 市场环境: extreme_fear | short_only | 信度=100% | ⚡杠杆×2.0
-📰 BTC: -14 | ETH: -10 | SOL: -4 (全线中性偏跌)
+🏛️ 市场环境: extreme_fear | short_only | 信度=85% | 杠杆×1.0
+📰 BTC: -14 | ETH: -28 | SOL: 0 (新闻均分=-14, neutral)
 
-→ DAO SELL信号 (confidence=65%) + 市场共振
-→ 最终: confidence=85%, 杠杆10x→20x ⚡
+→ 新闻均分未达-20阈值 → 共振=neutral → 杠杆不变
+→ 当三币新闻均分< -20时(如BTC=-30, ETH=-40, SOL=-25) → ×2.0 ⚡
+→ DAO SELL信号(confidence=65%) + 市场偏向short_only一致
+→ 最终: confidence=80% (偏向加分), 杠杆跟随安检门上限
 ```
 
 ### 13.6 使用方式
@@ -760,6 +762,22 @@ python3 market_sentiment_daemon.py --daemon
 # 或随一键启动全部
 ./start_all.sh    # 自动启动情绪守护 + 交易守护
 ```
+
+### 13.7 v3.7.1 Bug修复记录 (2026-06-25)
+
+#### 🔴 杠杆死代码修复
+- **问题**: `_apply_sentiment_boost` 设置 `max_leverage` 但 `_run_leverage_decisions` 只读取 `_max_leverage`（安全检查硬上限），导致情绪共振的杠杆翻倍完全无效
+- **修复**: aligned时同步提升 `_max_leverage`，opposed时同步降低
+- **文件**: `auto_trade_daemon.py` 行920-930
+
+#### 🟡 新闻信度溢出修复
+- **问题**: `MarketRegimeClassifier` 中 `conf = data_count*10/100` 未clamp到1.0，130篇文章→conf=13.0 → `news_sentiment_avg=-282` 永远触发aligned
+- **修复**: `conf = min(1.0, confidence/100)` → 修正后正常范围 -100~+100
+- **文件**: `market_sentiment_daemon.py` 行309
+
+#### ⚠️ 流程注意
+- L2+L3审批在情绪共振**之前**执行，被拒信号无法享受加成
+- 当有可用仓位槽位时，新信号自动享受情绪共振加成
 
 ---
 

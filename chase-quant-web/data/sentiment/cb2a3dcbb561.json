@@ -1,56 +1,196 @@
 {
   "symbol": "ETH/USDT",
   "market": "crypto",
-  "analyzed_at": "2026-06-25T20:59:51.032870+08:00",
-  "current_price_range": "",
-  "recent_performance": "",
-  "sentiment_score": 36,
-  "sentiment_label": "看跌",
-  "sentiment_summary": "📰关键词兜底: 130条标题 → 看跌35条/看涨17条 (Gemini: Gemini JSON解析失败: Expecting value: line 1 column 1 (char 0))",
+  "analyzed_at": "2026-06-25T21:31:32.463318+08:00",
+  "current_price_range": "近期价格波动较大，ETH/USDT在关键支撑位附近震荡。",
+  "recent_performance": "整体呈下跌趋势，但部分指标显示ETH情绪强于BTC。",
+  "sentiment_score": 45,
+  "sentiment_label": "中性偏跌",
+  "sentiment_summary": "ETH市场情绪复杂，短期承压，中长期有潜在支撑。",
   "key_drivers": [
     {
-      "factor": "加密市场全线下跌，资金费率显示BTC仍处看跌区间，ETH看多情绪明显强于BTC - 富途牛牛",
+      "factor": "以太坊基金会动荡与持仓变化",
       "impact": "negative",
-      "strength": 3,
-      "source": "headline_keyword"
+      "strength": 7,
+      "cycle": "short",
+      "detail": "基金会持仓降至低点引发担忧，短期内可能压制情绪。",
+      "source": "Moomoo, WEEX, PANews"
     },
     {
-      "factor": "  → 加密市场全线下跌，资金费率显示BTC仍处看跌区间，ETH看多情绪明显强于BTC&nbsp;&nbsp;富途牛牛",
-      "impact": "negative",
-      "strength": 3,
-      "source": "headline_keyword"
-    },
-    {
-      "factor": "以太坊（ETH）新闻：基金会的动荡使部分加密领域重量级人物看涨 - CoinDesk",
+      "factor": "机构加仓与看好情绪",
       "impact": "positive",
-      "strength": 3,
-      "source": "headline_keyword"
+      "strength": 6,
+      "cycle": "mid",
+      "detail": "贝莱德等机构的加仓行为在中期可能提供支撑。",
+      "source": "WEEX, CoinDesk, PANews"
     },
     {
-      "factor": "  → 以太坊（ETH）新闻：基金会的动荡使部分加密领域重量级人物看涨&nbsp;&nbsp;CoinDesk",
-      "impact": "positive",
-      "strength": 3,
-      "source": "headline_keyword"
-    },
-    {
-      "factor": "比特币维持区间震荡，以太坊在波动剧烈的一周中表现略显疲软 - Moomoo",
+      "factor": "宏观经济数据（通胀、GDP、利率预期）",
       "impact": "negative",
-      "strength": 3,
-      "source": "headline_keyword"
+      "strength": 8,
+      "cycle": "short",
+      "detail": "通胀数据高于预期，强化加息预期，短期内对风险资产构成压力。",
+      "source": "CNBC, CryptoSlate, 律动BlockBeats"
+    },
+    {
+      "factor": "加密市场整体下跌与爆仓",
+      "impact": "negative",
+      "strength": 7,
+      "cycle": "short",
+      "detail": "市场普跌和大规模爆仓事件短期内加剧了悲观情绪。",
+      "source": "富途牛牛, CryptoRank, Decrypt"
+    },
+    {
+      "factor": "技术升级与生态发展（如FX Layer）",
+      "impact": "positive",
+      "strength": 5,
+      "cycle": "mid",
+      "detail": "Spark与Uniswap合作推出FX Layer等技术进展，在中期有望提振生态信心。",
+      "source": "CoinTelegraph, 律动BlockBeats"
+    },
+    {
+      "factor": "监管动态（如MiCA规则）",
+      "impact": "neutral",
+      "strength": 4,
+      "cycle": "short",
+      "detail": "MiCA规则生效对Binance等平台产生影响，短期内增加市场不确定性。",
+      "source": "CoinTelegraph"
+    },
+    {
+      "factor": "巨鲸与大户交易行为",
+      "impact": "negative",
+      "strength": 6,
+      "cycle": "short",
+      "detail": "巨鲸增加空头头寸，短期内对ETH价格构成压力。",
+      "source": "Moomoo"
+    },
+    {
+      "factor": "MEV攻击与漏洞事件",
+      "impact": "negative",
+      "strength": 5,
+      "cycle": "short",
+      "detail": "安全事件短期内可能引发市场恐慌。",
+      "source": "CoinDesk, Moomoo"
+    },
+    {
+      "factor": "对质押奖励征税的争议",
+      "impact": "negative",
+      "strength": 4,
+      "cycle": "short",
+      "detail": "税收争议短期内可能影响质押者情绪。",
+      "source": "WEEX"
+    },
+    {
+      "factor": "半导体行业强劲表现",
+      "impact": "neutral",
+      "strength": 5,
+      "cycle": "short",
+      "detail": "Micron等半导体公司财报强劲，提振科技股，对加密市场有间接影响。",
+      "source": "Barron's, CNBC, Yahoo Finance"
     }
   ],
-  "platform_sentiment": {},
+  "platform_sentiment": {
+    "国际/英文媒体": {
+      "score": 55,
+      "summary": "机构看好，但宏观承压。"
+    },
+    "国际/社交媒体": {
+      "score": 40,
+      "summary": "巨鲸做空，安全事件频发。"
+    },
+    "国内/中文媒体": {
+      "score": 50,
+      "summary": "基金会动荡，机构加仓并存。"
+    },
+    "国内/投资社区": {
+      "score": 45,
+      "summary": "短期震荡，关注宏观与基金会。"
+    }
+  },
   "risks": [
-    "Gemini API不可用，使用关键词分析"
+    "宏观经济数据持续不利，加剧加息预期，压制风险资产。",
+    "以太坊基金会动荡可能引发更广泛的信任危机。",
+    "MEV攻击和漏洞事件频发，影响生态安全感。",
+    "巨鲸的空头头寸可能导致价格进一步下跌。",
+    "监管不确定性增加，尤其是在全球范围内。"
   ],
-  "opportunities": [],
-  "macro_cycle": {},
-  "cycle_position": "",
-  "cycle_confidence": 40,
-  "sentiment_trend": "",
-  "divergence_note": "",
-  "conclusion": "",
-  "trading_suggestion": "",
+  "opportunities": [
+    "机构持续加仓，显示出对ETH的长期信心。",
+    "以太坊技术升级和生态发展（如FX Layer）有望在中期带来积极影响。",
+    "如果宏观经济数据转好，可能迎来反弹机会。",
+    "部分分析师对ETH长期价格持乐观态度（如Standard Chartered）。"
+  ],
+  "macro_cycle": {
+    "short_term": {
+      "score": 40,
+      "summary": "宏观压力与基金会动荡，短期情绪偏弱。",
+      "drivers": [
+        {
+          "factor": "通胀数据超预期",
+          "impact": "negative",
+          "detail": "强化加息预期，短期利空风险资产。"
+        },
+        {
+          "factor": "以太坊基金会持仓下降",
+          "impact": "negative",
+          "detail": "短期内引发市场担忧。"
+        },
+        {
+          "factor": "加密市场整体下跌",
+          "impact": "negative",
+          "detail": "短期内情绪传染效应明显。"
+        }
+      ]
+    },
+    "mid_term": {
+      "score": 60,
+      "summary": "机构布局与技术进展，中期有企稳反弹可能。",
+      "drivers": [
+        {
+          "factor": "机构持续加仓",
+          "impact": "positive",
+          "detail": "为中期价格提供潜在支撑。"
+        },
+        {
+          "factor": "以太坊生态技术发展",
+          "impact": "positive",
+          "detail": "如FX Layer等有望提振信心。"
+        },
+        {
+          "factor": "货币政策转向预期（若出现）",
+          "impact": "positive",
+          "detail": "将是中期重要利好。"
+        }
+      ]
+    },
+    "long_term": {
+      "score": 65,
+      "summary": "技术革命与机构 adoption，长期前景仍被看好。",
+      "drivers": [
+        {
+          "factor": "以太坊技术迭代与应用落地",
+          "impact": "positive",
+          "detail": "是长期价值支撑。"
+        },
+        {
+          "factor": "DeFi和Web3的持续发展",
+          "impact": "positive",
+          "detail": "是长期增长动力。"
+        },
+        {
+          "factor": "全球数字经济转型",
+          "impact": "positive",
+          "detail": "为加密资产提供宏观背景。"
+        }
+      ]
+    }
+  },
+  "cycle_position": "下跌初期",
+  "cycle_confidence": 55,
+  "sentiment_trend": "恶化",
+  "divergence_note": "无明显背离",
+  "conclusion": "当前ETH/USDT市场情绪偏向谨慎，短期受宏观经济压力和以太坊基金会动荡影响，呈下跌趋势。中期来看，机构的持续加仓和以太坊生态的技术进展提供了企稳反弹的潜在动力。长期而言，以太坊的技术迭代和应用落地仍是其价值的核心支撑，但需警惕宏观经济的长期不确定性。",
+  "trading_suggestion": "短期内建议观望或逢低谨慎布局，关注宏观数据和基金会动态；中长期可考虑布局看好以太坊生态发展和机构 adoption 的机会。",
   "data_sources": [
     "google_news",
     "Google News Business",
@@ -62,6 +202,6 @@
     "CoinMarketCap"
   ],
   "data_count": 130,
-  "model_used": "keyword_fallback",
+  "model_used": "gemini-2.5-flash",
   "cache_hit": false
 }

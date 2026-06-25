@@ -1,12 +1,12 @@
 {
   "symbol": "SOL/USDT",
   "market": "crypto",
-  "analyzed_at": "2026-06-25T21:00:17.666959+08:00",
+  "analyzed_at": "2026-06-25T21:31:50.472127+08:00",
   "current_price_range": "",
   "recent_performance": "",
-  "sentiment_score": 50,
+  "sentiment_score": 46,
   "sentiment_label": "中性",
-  "sentiment_summary": "📰关键词兜底: 114条标题 → 看跌23条/看涨24条 (Gemini: Gemini API HTTP 503: {\n  \"error\": {\n    \"code\": 503,\n    \"me)",
+  "sentiment_summary": "📰关键词兜底: 130条标题 → 看跌25条/看涨21条 (Gemini: Gemini API HTTP 429: {\n  \"error\": {\n    \"code\": 429,\n    \"me)",
   "key_drivers": [
     {
       "factor": "数据：SOL 生态代币 three 市值突破 500 万美元，24 小时涨幅超 1500% - CryptoRank",
@@ -56,11 +56,12 @@
     "Google News Business",
     "Yahoo Finance",
     "CoinTelegraph",
+    "CryptoSlate",
     "Decrypt",
     "律动BlockBeats",
     "CoinMarketCap"
   ],
-  "data_count": 114,
+  "data_count": 130,
   "model_used": "keyword_fallback",
   "cache_hit": false
 }
