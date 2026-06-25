@@ -825,6 +825,130 @@ def _apply_news_sentiment_overlay(signals: list, news_sentiment: dict, log_func)
     return signals
 
 
+# ═══════════════════════════════════════════
+# 🏛️ v3.7: 市场情绪共振加成
+# ═══════════════════════════════════════════
+
+def _read_sentiment_state() -> dict:
+    """读取市场情绪守护进程的共享状态"""
+    try:
+        state_file = Path(__file__).parent / "data" / "market_sentiment_state.json"
+        if not state_file.exists():
+            return {}
+        with open(state_file) as f:
+            state = json.load(f)
+        # 检查是否过期 (超过15分钟视为过期)
+        updated = state.get("updated_at", "")
+        if updated:
+            try:
+                t = datetime.fromisoformat(updated)
+                age = (datetime.now(BEIJING_TZ) - t).total_seconds()
+                if age > 900:  # 15分钟
+                    return {}  # 过期, 不使用
+            except Exception:
+                pass
+        return state
+    except Exception:
+        return {}
+
+
+def _apply_sentiment_boost(signals: list, log_func) -> list:
+    """
+    🏛️ 市场情绪共振加成 (v3.7)
+
+    Chase哥 的想法:
+      "当你有个标的分数很高，而且连市场分析也都有非常好的表现
+       那你可以更加放心大胆的去建仓，而且可以多加杠杆"
+
+    实现:
+      - 读取 market_sentiment_daemon.py 产出的共享状态
+      - 信号方向与市场偏向一致 → 大幅加成
+      - 市场信度越高, 加成越大
+      - 杠杆乘数动态: 共振×2.0 / 中性×1.0 / 背离×0.7
+
+    修改信号:
+      - confidence: 加成 (共振最高+25%)
+      - max_leverage: 动态调整 (共振时翻倍, 上限20x)
+      - sentiment_boost: True/False 标记
+    """
+    state = _read_sentiment_state()
+    if not state:
+        return signals  # 情绪守护进程未运行或过期, 不影响信号
+
+    regime = state.get("market_regime", {})
+    bias = regime.get("bias", "neutral")          # short_only / short_preferred / neutral / long_preferred / long_only
+    conviction = regime.get("conviction", 50)      # 0-100
+    leverage_mult = regime.get("leverage_multiplier", 1.0)
+    resonance = regime.get("resonance", "neutral")
+
+    fg = state.get("fear_greed", {}).get("combined", {})
+    fg_val = fg.get("value", 50)
+    fg_cls = fg.get("classification", "?")
+
+    for sig in signals:
+        action = sig.get("action", "")
+        sym = sig.get("symbol", "").split("/")[0]
+
+        # 判断方向一致性
+        if "short" in bias and action == "SELL":
+            alignment = "aligned"
+            boost = 0.15 + (conviction / 200)  # 15~20% 加成
+            max_boost = 0.25
+        elif "long" in bias and action == "BUY":
+            alignment = "aligned"
+            boost = 0.15 + (conviction / 200)
+            max_boost = 0.25
+        elif ("short" in bias and action == "BUY") or ("long" in bias and action == "SELL"):
+            alignment = "opposed"
+            boost = -0.10  # 惩罚
+            max_boost = 0
+        else:
+            alignment = "neutral"
+            boost = 0.05 if conviction >= 70 else 0.0
+            max_boost = 0.10
+
+        boost = min(max_boost, boost)
+
+        # ── 应用加成 ──
+        if boost != 0:
+            orig_conf = sig.get("confidence", 0.5)
+            new_conf = max(0.10, min(0.95, orig_conf + boost))
+            sig["confidence"] = round(new_conf, 4)
+
+            # 杠杆乘数
+            orig_lev = sig.get("max_leverage", 10)
+            if alignment == "aligned":
+                new_lev = min(20, int(orig_lev * leverage_mult))
+            elif alignment == "opposed":
+                new_lev = max(3, int(orig_lev * 0.7))
+            else:
+                new_lev = orig_lev
+            sig["max_leverage"] = new_lev
+
+            sig["sentiment_boost"] = alignment
+            sig["sentiment_regime"] = regime.get("regime", "?")
+            sig["sentiment_conviction"] = conviction
+
+            # 理由
+            reasons = sig.get("reasons", [])
+            if not isinstance(reasons, list):
+                reasons = []
+            emoji = "⚡" if alignment == "aligned" else "🔒" if alignment == "opposed" else "➡️"
+            lev_note = f" {orig_lev}x→{new_lev}x" if orig_lev != new_lev else ""
+            reasons.append(
+                f"🏛️{emoji}市场共振: {alignment} (F&G={fg_val} {fg_cls}, "
+                f"偏向={bias}, 信度={conviction}%, 杠杆×{leverage_mult}{lev_note})"
+            )
+            sig["reasons"] = reasons
+
+    if signals:
+        aligned_count = sum(1 for s in signals if s.get("sentiment_boost") == "aligned")
+        log_func(f"🏛️ 市场情绪共振: {aligned_count}/{len(signals)}个信号共振 "
+                 f"(偏向={bias}, F&G={fg_val}, 信度={conviction}%)")
+
+    return signals
+
+
 def _clean_low_conviction_positions(leverage_engine, log_func) -> list:
     """
     🧹 清理低确信/低质量仓位：盈利超手续费就回收。
@@ -1557,6 +1681,12 @@ def run_trade_cycle(state: dict, trading_mode=None) -> dict:
                                 log(f"📰 新闻情绪叠加: {len(_news_sentiment)}币种 → 置信 {before:.1f}→{after:.1f}")
                     except Exception as e:
                         log(f"⚠️ 新闻情绪叠加跳过: {e}")
+
+                    # 🆕 🏛️ 市场情绪共振加成 (v3.7)
+                    try:
+                        strategy_signals = _apply_sentiment_boost(strategy_signals, log)
+                    except Exception as e:
+                        log(f"⚠️ 情绪共振跳过: {e}")
 
                     if strategy_signals:
                         strat_results = execute_strategy_signals(
